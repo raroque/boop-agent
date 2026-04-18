@@ -12,7 +12,7 @@ import { startAutomationLoop } from "./automations.js";
 import { startHeartbeatLoop } from "./heartbeat.js";
 import { startConsolidationLoop } from "./consolidation.js";
 import { cancelAgent, retryAgent } from "./execution-agent.js";
-import { createOAuthRouter } from "./oauth.js";
+import { createComposioRouter } from "./composio-routes.js";
 
 async function main() {
   await loadIntegrations();
@@ -30,7 +30,7 @@ async function main() {
   });
 
   app.use("/sendblue", createSendblueRouter());
-  app.use("/oauth", createOAuthRouter());
+  app.use("/composio", createComposioRouter());
 
   app.post("/agents/:id/cancel", (req, res) => {
     const ok = cancelAgent(req.params.id);

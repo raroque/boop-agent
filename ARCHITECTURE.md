@@ -123,24 +123,38 @@ Runs daily (or on-demand). A two-agent pipeline over the active memory set:
 
 Keeps memory sharper over time instead of noisier. The full run is logged in `consolidationRuns`.
 
-### 8. OAuth — `server/oauth.ts`
+### 8. Integrations — Composio (`server/composio.ts`)
 
-Routes:
-- `GET /oauth/providers` — list configured providers and redirect URIs
-- `GET /oauth/:provider/start` — redirect to provider's auth URL with PKCE state
-- `GET /oauth/:provider/callback` — exchange code for token, store in `connections` table
+Boop delegates all third-party integrations to [Composio](https://composio.dev). One SDK, 1000+ toolkits, hosted auth.
 
-Built-in providers: Google (Calendar + Gmail scopes), Slack. Adding a provider = one entry in the `PROVIDERS` map. The debug dashboard's Connections tab shows each provider's status and a Connect button.
+Flow:
+1. User clicks **Connect** on a toolkit card in the debug dashboard's Connections tab.
+2. Frontend → `POST /composio/toolkits/:slug/authorize` → backend calls `session.authorize(slug)` and returns Composio's hosted `redirectUrl`.
+3. Popup opens the redirect URL. User authenticates. Composio stores the tokens on its side.
+4. Popup closes → frontend calls `POST /composio/refresh` → backend re-runs `registerComposioToolkits()` which iterates `connectedAccounts.list({ userIds: [boopUserId()] })` and registers each active toolkit as an `IntegrationModule` keyed by its slug.
+5. `availableIntegrations()` now includes the new slug, so the dispatcher can spawn a sub-agent with it.
 
-### 9. Integrations — `/integrations/<name>/`
+On each spawn, `buildComposioIntegrationModule(slug).createServer()` opens a **fresh toolkit-scoped Composio session**:
 
-Each folder exports a `register()` that pushes a module into the central registry (`server/integrations/registry.ts`). A module has:
+```ts
+await composio.create(boopUserId(), {
+  toolkits: [slug],            // scope — sub-agent only sees this toolkit's tools
+  manageConnections: false,    // don't inject auth-management meta-tools
+});
+```
 
-- `name` — how `spawn_agent` refers to it.
-- `description` — the one-liner the interaction agent sees.
-- `createServer(ctx)` — returns an MCP server with tools.
+and returns an `McpSdkServerConfigWithInstance` via `createSdkMcpServer`. The sub-agent never sees the full Composio catalog — only the tools for the toolkits the dispatcher asked for.
 
-The context gives you `ctx.getConnection(service)` for OAuth-stored tokens. Env-based tokens are fine for personal use.
+HTTP routes (`server/composio-routes.ts`, mounted at `/composio`):
+- `GET  /status` — `{ enabled }`.
+- `GET  /toolkits` — curated list merged with current connection state.
+- `POST /toolkits/:slug/authorize` — returns `{ redirectUrl, connectionId }`.
+- `POST /toolkits/:slug/disconnect` — revokes + refreshes registry.
+- `POST /refresh` — re-runs the registry loader.
+
+Env:
+- `COMPOSIO_API_KEY` — required for integrations. Without it, plain chat + memory + automations still work.
+- `COMPOSIO_USER_ID` — optional; defaults to `boop-default` for single-tenant use.
 
 ---
 
@@ -158,7 +172,6 @@ Seven tables. Read `convex/schema.ts` for the exact shape.
 | `automations` | Scheduled recurring tasks | automationId, schedule, task, integrations, enabled, nextRunAt |
 | `automationRuns` | One row per automation run | runId, automationId, status, result, agentId |
 | `drafts` | Staged external actions | draftId, kind, summary, payload, status |
-| `connections` | OAuth / API tokens | connectionId, service, accessToken, refreshToken |
 | `consolidationRuns` | History of consolidation passes | runId, proposalsCount, mergedCount, prunedCount |
 | `sendblueDedup` | Webhook dedup by `message_handle` | handle, claimedAt |
 | `memoryEvents` | Append-only event log for the debug UI | eventType, conversationId, memoryId, data |
@@ -197,7 +210,7 @@ Steps 6–7 run in parallel where safe. Step 8 is fire-and-forget — the user n
 
 **Memory lives next to execution, not in the model.** Claude has no memory across turns. We re-hydrate the relevant slice every turn via `recall()`. Writing is explicit (`write_memory`) or inferred (`extract.ts`). Nothing is implicit.
 
-**Integrations as MCP servers.** Tool-calling is already what the SDK does best. Wrapping each integration as an MCP server means we get parameter validation, typed results, and a uniform extension point for free.
+**Integrations via Composio.** Tool-calling is what the SDK does best. Composio handles the OAuth, token-refresh, and 1000+ service adapters we'd otherwise hand-roll. Each connected toolkit becomes an MCP server on demand, scoped to just that toolkit so the sub-agent's context stays small.
 
 **Convex for state.** Reactive queries power the debug UI without polling. Durable enough for real use, free tier generous enough for a personal agent.
 

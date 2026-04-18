@@ -1,202 +1,60 @@
-# Adding integrations
+# Integrations
 
-An integration is a folder in `/integrations/` that exposes tools to the execution agent. Under the hood, each integration is an MCP server built with `createSdkMcpServer` from `@anthropic-ai/claude-agent-sdk`.
+Boop's integrations are provided by [Composio](https://composio.dev), a tool-aggregator that exposes 1000+ third-party services (Gmail, GitHub, Slack, Notion, Linear, Google Drive, HubSpot, Salesforce, …) behind one API.
 
-The four examples — `google-calendar/`, `gmail/`, `notion/`, `slack/` — are intentionally small (~150 lines each). Read them first.
+You don't write integration code. You:
+
+1. Put `COMPOSIO_API_KEY` in `.env.local`.
+2. Open the debug dashboard → **Connections** tab.
+3. Click **Connect** on a toolkit.
+4. Authenticate on Composio's hosted page. Composio stores the tokens and keeps them fresh.
+5. The toolkit becomes available to `spawn_agent(integrations: [...])` by its slug.
+
+That's it.
 
 ---
 
-## Five-minute version
+## How it hooks into Boop
 
-```bash
-cp -r integrations/_template integrations/weather
-```
-
-Edit `integrations/weather/index.ts`:
+Each connected Composio toolkit is registered in Boop's integration registry (`server/integrations/registry.ts`) keyed by its slug. When the dispatcher calls:
 
 ```ts
-import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
-import { z } from "zod";
-import type { IntegrationContext, IntegrationModule } from "../../server/integrations/registry.js";
-
-const INTEGRATION_NAME = "weather";
-
-function build(_ctx: IntegrationContext) {
-  return createSdkMcpServer({
-    name: INTEGRATION_NAME,
-    version: "0.1.0",
-    tools: [
-      tool(
-        "get_forecast",
-        "Get a 3-day forecast for a city. Returns high/low + conditions per day.",
-        { city: z.string() },
-        async (args) => {
-          const res = await fetch(`https://wttr.in/${encodeURIComponent(args.city)}?format=j1`);
-          const json = await res.json();
-          const text = json.weather
-            .slice(0, 3)
-            .map((d: any) => `${d.date}: ${d.mintempF}→${d.maxtempF}°F, ${d.hourly[4].weatherDesc[0].value}`)
-            .join("\n");
-          return { content: [{ type: "text" as const, text }] };
-        },
-      ),
-    ],
-  });
-}
-
-const mod: IntegrationModule = {
-  name: INTEGRATION_NAME,
-  description: "3-day forecast for any city.",
-  requiredEnv: [],
-  createServer: async (ctx) => build(ctx),
-};
-
-export function register(opts: {
-  registerIntegration: (m: IntegrationModule) => void;
-}): void {
-  opts.registerIntegration(mod);
-}
+spawn_agent({ task: "…", integrations: ["gmail"] })
 ```
 
-Open `server/integrations/registry.ts` and add your import to `loaders`:
+`buildMcpServersForIntegrations(["gmail"])` looks up the registered `gmail` module, opens a Composio session **scoped to only the Gmail toolkit**:
 
 ```ts
-const loaders = [
-  import("../../integrations/google-calendar/index.js"),
-  import("../../integrations/notion/index.js"),
-  import("../../integrations/weather/index.js"),   // ← add this
-];
+const session = await composio.create(boopUserId(), {
+  toolkits: ["gmail"],
+  manageConnections: false,
+});
+const tools = await session.tools();
 ```
 
-Restart the server. The next time the agent decides to spawn, it'll see `weather` in the integration list.
+and wraps those tools as an MCP server for the sub-agent. The sub-agent sees only Gmail's tools (`mcp__gmail__GMAIL_SEND_EMAIL`, etc.) — no Slack, no GitHub, no 1000-tool context bloat.
+
+Every tool call is logged to Convex as usual, so the Agents tab in the debug dashboard shows them with the right toolkit logo and a humanized name.
 
 ---
 
-## The integration contract
+## Curated toolkit list
 
-Every integration module exports two things:
+The Connections tab shows a hand-picked set in `server/composio.ts:CURATED_TOOLKITS`. Edit that array to add or remove cards — the slugs must match Composio's toolkit slugs (see `docs.composio.dev/toolkits` for the full catalog).
 
-```ts
-// 1. A module object describing the integration.
-const mod: IntegrationModule = {
-  name: "weather",                     // how spawn_agent references you
-  description: "3-day forecast…",      // shown to the dispatcher
-  requiredEnv: ["WEATHER_API_KEY"],    // documentation only
-  createServer: async (ctx) => build(ctx),
-};
-
-// 2. A register() fn called at server startup.
-export function register(opts: {
-  registerIntegration: (m: IntegrationModule) => void;
-}): void {
-  opts.registerIntegration(mod);
-}
-```
-
-`ctx: IntegrationContext` gives you:
-
-- `ctx.conversationId` — the current conversation, if any.
-- `ctx.getConnection(service)` — fetches an OAuth record from Convex `connections` table (returns `{ accessToken, refreshToken?, metadata? }` or `null`).
+Current defaults: Gmail, Google Calendar, Google Drive, Google Sheets, Google Docs, Slack, GitHub, Linear, Notion, HubSpot, Salesforce, Discord, Twitter, LinkedIn, Trello, Asana, Jira, Airtable, Figma, Dropbox.
 
 ---
 
-## Writing good tool descriptions
+## Disconnecting
 
-The model reads every tool description to decide what to call. Treat them like specs.
-
-**Bad:**
-```
-"Get events."
-```
-
-**Good:**
-```
-"List upcoming events on the user's primary calendar. Use this before answering anything about the user's schedule. Returns ISO start times, titles, locations, and event IDs. Defaults to the next 7 days."
-```
-
-Rules of thumb:
-
-- Say **when** to call it ("before answering about X"), not just what it does.
-- Say what it returns. The model plans around return shapes.
-- Call out gotchas ("remember to draft first before create_event").
-- Keep it under ~200 words per tool. Long descriptions bloat the interaction agent's token cost.
+Click **Disconnect** on a connected card. That revokes the Composio connection and re-loads the integration registry — the toolkit drops out of `availableIntegrations()` immediately. Next time the dispatcher tries to spawn with that slug, it'll log `[integrations] unknown integration: …`.
 
 ---
 
-## Auth patterns
+## Notes
 
-### Static token (simplest)
-
-Best for personal use.
-
-```ts
-const token = process.env.MY_API_TOKEN;
-if (!token) return { content: [{ type: "text" as const, text: "MY_API_TOKEN not set." }] };
-```
-
-Pros: one env var, no flows. Cons: not shareable across users.
-
-### OAuth via Convex `connections` table
-
-Best if you're deploying this for other people.
-
-```ts
-const conn = await ctx.getConnection("my-service");
-if (!conn) return authError();
-const token = conn.accessToken;
-```
-
-You'll need to build the OAuth flow yourself (not included in the template). Store the result with `convex.mutation(api.connections.upsert, {...})`.
-
-### Hybrid (recommended starter)
-
-Fall back: env → connection. Both examples use this pattern. See `integrations/notion/index.ts:getToken`.
-
----
-
-## External actions: use the draft flow
-
-The template ships a full draft system. Execution agents have a `save_draft(kind, summary, payload)` tool (via the built-in `boop-drafts` MCP). The interaction agent has `list_drafts`, `send_draft(draftId, integrations)`, and `reject_draft`.
-
-When you write a send/create tool in your integration:
-
-1. Include a warning in its description: *"DO NOT call directly — use save_draft from boop-drafts. Only reachable when send_draft approves."*
-2. Keep the tool itself functional — `send_draft` will spawn a fresh execution agent with the payload as its task, and that agent needs the real send tool to actually commit.
-
-See `integrations/gmail/index.ts:send_email` and `integrations/slack/index.ts:send_message` for the pattern.
-
----
-
-## Returning results
-
-Always return:
-
-```ts
-{ content: [{ type: "text" as const, text: "..." }] }
-```
-
-Keep it compact. The model reads every byte — a 10KB tool result eats your context window fast. Summarize on the server side when you can.
-
-On error:
-```ts
-{ content: [{ type: "text" as const, text: `Error: ${String(err)}` }] }
-```
-
-Don't throw. The model should see the error and decide what to do.
-
----
-
-## Testing an integration
-
-The fastest loop is the debug dashboard's Chat tab (`http://localhost:5173`). It talks to `/chat` directly — no Sendblue required.
-
-Ask the agent: *"use the weather integration to check tomorrow's forecast for New York"*. You'll see the spawn, the tool call, and the result in the Agents tab.
-
----
-
-## Pro moves
-
-- **Many small tools > one big tool.** `list_events` + `get_event` + `create_event` is easier for the model to reason about than `calendar(action, payload)`.
-- **Log what you care about.** Anything you want visible in the dashboard can go through `convex.mutation(api.agents.addLog, ...)` — see how `execution-agent.ts` does it automatically for text/tool_use/tool_result.
-- **Cache aggressively.** If your integration hits a slow API, memoize per-conversation in a module-level Map keyed on `ctx.conversationId`.
-- **Chain integrations.** A sub-agent can use multiple integrations in one spawn — just pass them all in `integrations: []`.
+- **Single-tenant by default.** All connections are keyed under `COMPOSIO_USER_ID` (defaults to `boop-default`). Override if you manage Composio sessions elsewhere and want Boop to share that user.
+- **External actions still use the draft flow.** Execution agents are prompted to call `save_draft` first for anything that writes to the outside world. The dispatcher's `send_draft` is the only path that actually commits.
+- **No tokens live in Boop.** Composio stores OAuth credentials on their side. Boop never sees them.
+- **Tool names are Composio's canonical slugs** (e.g., `GMAIL_LIST_MESSAGES`). The debug dashboard humanizes them for display.

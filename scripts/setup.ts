@@ -96,6 +96,20 @@ function hasBinary(name: string): Promise<boolean> {
   });
 }
 
+function openInBrowser(url: string): void {
+  const cmd =
+    process.platform === "darwin"
+      ? "open"
+      : process.platform === "win32"
+        ? "start"
+        : "xdg-open";
+  try {
+    spawn(cmd, [url], { stdio: "ignore", detached: true }).unref();
+  } catch {
+    /* ignore — fall back to the printed URL */
+  }
+}
+
 function runInherit(cmd: string, args: string[]): Promise<void> {
   return new Promise((ok, fail) => {
     const child = spawn(cmd, args, { stdio: "inherit", cwd: ROOT });
@@ -151,7 +165,7 @@ function parseSendblueKeys(output: string): SendblueKeys {
   }
 
   const idMatch = clean.match(
-    /(?:API[- ]?Key[- ]?ID|sb[- ]?api[- ]?key[- ]?id|api_key_id|Key Id)[:\s]+\"?([A-Za-z0-9_-]{16,})/i,
+    /(?:API[- ]?Key[- ]?ID|sb[- ]?api[- ]?key[- ]?id|api_key_id|Key Id|API[- ]?Key)[:\s]+\"?([A-Za-z0-9_-]{16,})/i,
   );
   const secretMatch = clean.match(
     /(?:Secret[- ]?Key|API[- ]?Secret|sb[- ]?api[- ]?secret[- ]?key|api_secret|Secret)[:\s]+\"?([A-Za-z0-9_-]{16,})/i,
@@ -164,6 +178,44 @@ function parseSendblueKeys(output: string): SendblueKeys {
   if (secretMatch) keys.apiSecret = secretMatch[1];
   if (numMatch) keys.fromNumber = numMatch[1];
   return keys;
+}
+
+function parseSendbluePhones(output: string): string[] {
+  const clean = output.replace(/\x1b\[[0-9;]*m/g, "");
+  const seen = new Set<string>();
+  const numbers: string[] = [];
+
+  try {
+    const json = JSON.parse(clean);
+    const lines = Array.isArray(json) ? json : (json.lines ?? json.numbers ?? []);
+    for (const entry of lines) {
+      const n = entry?.phone_number ?? entry?.phoneNumber ?? entry?.number ?? entry;
+      if (typeof n === "string" && /^\+?\d{10,15}$/.test(n.replace(/[^\d+]/g, ""))) {
+        const norm = n.startsWith("+") ? n : `+${n}`;
+        if (!seen.has(norm)) {
+          seen.add(norm);
+          numbers.push(norm);
+        }
+      }
+    }
+    if (numbers.length) return numbers;
+  } catch {
+    /* not JSON, fall through to text parsing */
+  }
+
+  // `sendblue lines` formats like "+1 (305) 336-9541".
+  for (const rawLine of clean.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line.startsWith("+")) continue;
+    const match = line.match(/^\+[\d ()\-.]{9,25}/);
+    if (!match) continue;
+    const e164 = "+" + match[0].replace(/\D/g, "");
+    if (/^\+\d{10,15}$/.test(e164) && !seen.has(e164)) {
+      seen.add(e164);
+      numbers.push(e164);
+    }
+  }
+  return numbers;
 }
 
 async function importSendblueFromCli(): Promise<SendblueKeys | null> {
@@ -216,6 +268,34 @@ async function importSendblueFromCli(): Promise<SendblueKeys | null> {
       return null;
     }
     console.log(`\n✓ Pulled your Sendblue keys from the CLI.`);
+
+    // `show-keys` doesn't include the phone number — it lives in `sendblue lines`.
+    if (!parsed.fromNumber) {
+      try {
+        console.log("\nFetching your provisioned number…\n");
+        const linesOutput = await runCapture(cmd, [...leading, "lines"]);
+        const phones = parseSendbluePhones(linesOutput);
+        if (phones.length === 1) {
+          parsed.fromNumber = phones[0];
+          console.log(`\n✓ Using ${phones[0]} as SENDBLUE_FROM_NUMBER.`);
+        } else if (phones.length > 1) {
+          const { pickedNumber } = await prompts({
+            type: "select",
+            name: "pickedNumber",
+            message: "You have multiple Sendblue numbers — which one should Boop reply from?",
+            choices: phones.map((p) => ({ title: p, value: p })),
+            initial: 0,
+          });
+          if (pickedNumber) parsed.fromNumber = pickedNumber;
+        } else {
+          console.log(
+            `\n⚠ No provisioned numbers found in \`sendblue lines\`. I'll ask for one below.`,
+          );
+        }
+      } catch (err) {
+        console.log(`\n⚠ \`sendblue lines\` failed: ${err}. I'll ask for the number below.`);
+      }
+    }
     return parsed;
   } catch (err) {
     console.log(`\n⚠ Sendblue CLI failed: ${err}`);
@@ -317,6 +397,65 @@ Before you start:
     SENDBLUE_API_SECRET: answers.SENDBLUE_API_SECRET ?? sendblueDefaults.SENDBLUE_API_SECRET,
     SENDBLUE_FROM_NUMBER: answers.SENDBLUE_FROM_NUMBER ?? sendblueDefaults.SENDBLUE_FROM_NUMBER,
   });
+
+  // ---- Composio API key ---------------------------------------------------
+  banner("Composio — integrations (Gmail, Slack, GitHub, Linear, 1000+ more)");
+  const composioSettingsUrl = "https://platform.composio.dev/settings";
+  const existingComposio = existing.COMPOSIO_API_KEY ?? "";
+  const { composioMode } = await prompts(
+    {
+      type: "select",
+      name: "composioMode",
+      message: existingComposio
+        ? "Composio API key detected. Keep it or replace?"
+        : "Configure Composio now? (needed to connect any integration)",
+      choices: existingComposio
+        ? [
+            { title: "Keep existing key", value: "keep" },
+            { title: "Replace (opens the Composio dashboard)", value: "replace" },
+            { title: "Skip", value: "skip" },
+          ]
+        : [
+            { title: "Yes — open the Composio dashboard and paste my key", value: "replace" },
+            { title: "Skip for now", value: "skip" },
+          ],
+      initial: 0,
+    },
+    {
+      onCancel: () => {
+        console.log("Setup cancelled.");
+        process.exit(1);
+      },
+    },
+  );
+
+  if (composioMode === "replace") {
+    console.log(`\nOpening ${composioSettingsUrl} — grab your API key there.`);
+    console.log(`(If the browser doesn't open, copy the URL above.)\n`);
+    openInBrowser(composioSettingsUrl);
+    const { COMPOSIO_API_KEY } = await prompts(
+      {
+        type: "password",
+        name: "COMPOSIO_API_KEY",
+        message: "Paste your Composio API key (leave blank to skip):",
+        initial: "",
+      },
+      {
+        onCancel: () => {
+          console.log("Setup cancelled.");
+          process.exit(1);
+        },
+      },
+    );
+    (answers as any).COMPOSIO_API_KEY = COMPOSIO_API_KEY || existingComposio;
+  } else if (composioMode === "keep") {
+    (answers as any).COMPOSIO_API_KEY = existingComposio;
+  } else {
+    (answers as any).COMPOSIO_API_KEY = existingComposio;
+    console.log(
+      `\nSkipped. Add COMPOSIO_API_KEY to .env.local later to enable integrations.`,
+    );
+  }
 
   // ---- Tunnel configuration ------------------------------------------------
   banner("Tunnel — public URL for Sendblue to reach your server");
@@ -461,14 +600,11 @@ Gotcha to double-check:
   rejects sends with "Cannot send messages to self" or "missing required
   parameter: from_number" otherwise.
 
-About PUBLIC_URL in .env.local:
-  It defaults to http://localhost:${port} and is only read by the OAuth flow
-  (for Google/Slack redirect URIs). If you enable those integrations later,
-  paste your ngrok URL into .env.local as PUBLIC_URL and restart.
-
-Integrations:
-  All four examples (Gmail, Calendar, Notion, Slack) ship OFF.
-  Uncomment them one at a time in server/integrations/registry.ts.
+Integrations (via Composio):
+  1. Set COMPOSIO_API_KEY in .env.local (get one at app.composio.dev).
+  2. Open the debug dashboard → Connections tab.
+  3. Click Connect on any toolkit (Gmail, Slack, GitHub, Linear, Notion, …).
+  4. Composio handles OAuth; the toolkit becomes available to the agent.
 `);
 }
 

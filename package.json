@@ -22,6 +22,8 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "@composio/claude-agent-sdk": "^0.6.10",
+    "@composio/core": "^0.6.10",
     "@hugeicons/core-free-icons": "^1.0.0",
     "@hugeicons/react": "^1.0.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
@@ -35,6 +37,7 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
@@ -42,7 +45,6 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.5.12",
-    "@tailwindcss/vite": "^4.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "npm-run-all": "^4.1.5",
     "prompts": "^2.4.2",

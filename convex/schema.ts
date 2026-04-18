@@ -92,21 +92,6 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_agent", ["agentId"]),
 
-  connections: defineTable({
-    connectionId: v.string(),
-    service: v.string(),
-    accountLabel: v.optional(v.string()),
-    accessToken: v.string(),
-    refreshToken: v.optional(v.string()),
-    tokenExpiresAt: v.optional(v.number()),
-    scopes: v.optional(v.array(v.string())),
-    status: v.union(v.literal("active"), v.literal("revoked"), v.literal("error")),
-    metadata: v.optional(v.string()),
-    createdAt: v.number(),
-  })
-    .index("by_connection_id", ["connectionId"])
-    .index("by_service", ["service"]),
-
   memoryEvents: defineTable({
     eventType: v.string(),
     conversationId: v.optional(v.string()),
