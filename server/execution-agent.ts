@@ -104,6 +104,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   let buffer = "";
   let inputTokens = 0;
   let outputTokens = 0;
+  let costUsd = 0;
   let status: "completed" | "failed" | "cancelled" = "completed";
   let errorMsg: string | undefined;
 
@@ -158,6 +159,16 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
             });
           }
         }
+      } else if (msg.type === "result") {
+        // The SDK emits a single result message at the end of each query with
+        // authoritative cost + usage totals (accounts for cache hits/writes and
+        // per-turn accumulation). Prefer these over the per-assistant counts.
+        costUsd = msg.total_cost_usd ?? costUsd;
+        const u = msg.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+        if (u) {
+          inputTokens = u.input_tokens ?? inputTokens;
+          outputTokens = u.output_tokens ?? outputTokens;
+        }
       }
     }
   } catch (err) {
@@ -174,7 +185,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
 
   const elapsed = ((Date.now() - agentStart) / 1000).toFixed(1);
   logAgent(
-    `done (${status}, ${elapsed}s, in/out tokens ${inputTokens}/${outputTokens})`,
+    `done (${status}, ${elapsed}s, in/out tokens ${inputTokens}/${outputTokens}, $${costUsd.toFixed(4)})`,
   );
 
   await convex.mutation(api.agents.update, {
@@ -184,6 +195,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
     error: errorMsg,
     inputTokens,
     outputTokens,
+    costUsd,
   });
   broadcast("agent_done", { agentId, status, result: buffer.slice(0, 200) });
 

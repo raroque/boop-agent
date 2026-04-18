@@ -1,10 +1,16 @@
 import express from "express";
 import {
   authorizeToolkit,
+  ComposioNeedsAuthConfigError,
   CURATED_TOOLKITS,
   disconnectToolkit,
+  displayNameFor,
   getComposio,
   listConnectedToolkits,
+  listToolkitMeta,
+  listToolkitSlugsWithAuthConfig,
+  listToolsForToolkit,
+  renameConnection,
 } from "./composio.js";
 import { refreshIntegrations } from "./integrations/registry.js";
 
@@ -17,30 +23,65 @@ export function createComposioRouter(): express.Router {
 
   router.get("/toolkits", async (_req, res) => {
     try {
-      const connected = await listConnectedToolkits();
-      const byslug = new Map(connected.map((c) => [c.slug, c]));
+      const [connected, configured, meta] = await Promise.all([
+        listConnectedToolkits(),
+        listToolkitSlugsWithAuthConfig(),
+        listToolkitMeta(),
+      ]);
+
+      const connectionsBySlug = new Map<string, typeof connected>();
+      for (const c of connected) {
+        const arr = connectionsBySlug.get(c.slug) ?? [];
+        arr.push(c);
+        connectionsBySlug.set(c.slug, arr);
+      }
+      // Stable ordering: oldest connection first.
+      for (const arr of connectionsBySlug.values()) {
+        arr.sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+      }
+
+      const toConnectionView = (c: (typeof connected)[number]) => ({
+        id: c.connectionId,
+        status: c.status,
+        alias: c.alias ?? null,
+        accountLabel: c.accountLabel ?? null,
+        accountEmail: c.accountEmail ?? null,
+        accountName: c.accountName ?? null,
+        accountAvatarUrl: c.accountAvatarUrl ?? null,
+        createdAt: c.createdAt ?? null,
+      });
+
       const curated = CURATED_TOOLKITS.map((t) => {
-        const c = byslug.get(t.slug);
+        const m = meta.get(t.slug);
+        const conns = connectionsBySlug.get(t.slug) ?? [];
         return {
           slug: t.slug,
           displayName: t.displayName,
-          connected: c?.status === "ACTIVE",
-          status: c?.status ?? null,
-          accountLabel: c?.accountLabel ?? null,
-          connectionId: c?.connectionId ?? null,
+          authMode: t.authMode,
+          hasAuthConfig: configured.has(t.slug),
+          logoUrl: m?.logo ?? null,
+          description: m?.description ?? null,
+          toolCount: m?.toolsCount ?? null,
+          connections: conns.map(toConnectionView),
         };
       });
-      // Non-curated toolkits the user may have connected out-of-band.
-      const extras = connected
-        .filter((c) => !CURATED_TOOLKITS.some((t) => t.slug === c.slug))
-        .map((c) => ({
-          slug: c.slug,
-          displayName: humanize(c.slug),
-          connected: c.status === "ACTIVE",
-          status: c.status,
-          accountLabel: c.accountLabel ?? null,
-          connectionId: c.connectionId,
-        }));
+
+      const extras = [...connectionsBySlug.entries()]
+        .filter(([slug]) => !CURATED_TOOLKITS.some((t) => t.slug === slug))
+        .map(([slug, conns]) => {
+          const m = meta.get(slug);
+          return {
+            slug,
+            displayName: m?.name ?? displayNameFor(slug),
+            authMode: "managed" as const,
+            hasAuthConfig: configured.has(slug),
+            logoUrl: m?.logo ?? null,
+            description: m?.description ?? null,
+            toolCount: m?.toolsCount ?? null,
+            connections: conns.map(toConnectionView),
+          };
+        });
+
       res.json({ enabled: Boolean(getComposio()), toolkits: [...curated, ...extras] });
     } catch (err) {
       console.error("[composio-routes] list failed", err);
@@ -48,12 +89,33 @@ export function createComposioRouter(): express.Router {
     }
   });
 
+  router.get("/toolkits/:slug/tools", async (req, res) => {
+    try {
+      const tools = await listToolsForToolkit(req.params.slug);
+      res.json({ tools });
+    } catch (err) {
+      console.error(`[composio-routes] list tools for ${req.params.slug} failed`, err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
   router.post("/toolkits/:slug/authorize", async (req, res) => {
     const slug = req.params.slug;
+    const alias = typeof req.body?.alias === "string" ? req.body.alias : undefined;
     try {
-      const result = await authorizeToolkit(slug);
+      const result = await authorizeToolkit(slug, alias ? { alias } : undefined);
       res.json(result);
     } catch (err) {
+      if (err instanceof ComposioNeedsAuthConfigError) {
+        console.warn(`[composio-routes] ${slug} needs an auth config`);
+        res.status(409).json({
+          error: err.message,
+          needsAuthConfig: true,
+          toolkit: slug,
+          setupUrl: `https://platform.composio.dev/auth-configs`,
+        });
+        return;
+      }
       console.error(`[composio-routes] authorize ${slug} failed`, err);
       res.status(500).json({ error: String(err) });
     }
@@ -76,6 +138,22 @@ export function createComposioRouter(): express.Router {
     }
   });
 
+  router.post("/connections/:id/rename", async (req, res) => {
+    const id = req.params.id;
+    const alias = typeof req.body?.alias === "string" ? req.body.alias.trim() : "";
+    if (!alias) {
+      res.status(400).json({ error: "alias required in body" });
+      return;
+    }
+    try {
+      await renameConnection(id, alias);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error(`[composio-routes] rename ${id} failed`, err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
   router.post("/refresh", async (_req, res) => {
     try {
       await refreshIntegrations();
@@ -87,12 +165,4 @@ export function createComposioRouter(): express.Router {
   });
 
   return router;
-}
-
-function humanize(slug: string): string {
-  return slug
-    .split(/[-_]/g)
-    .filter(Boolean)
-    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-    .join(" ");
 }

@@ -52,6 +52,18 @@ Click **Disconnect** on a connected card. That revokes the Composio connection a
 
 ---
 
+## Toolkits that need a one-time auth config
+
+Composio hosts managed OAuth apps for most popular toolkits (Gmail, Slack, GitHub, Linear, Notion, Google Calendar/Drive/Sheets/Docs, etc.) — click Connect and it just works. A handful of toolkits don't have a managed app on Composio's side (Twitter/X is the common one; Salesforce sometimes) because their developer policies make hosting a shared OAuth app impractical.
+
+When you click Connect on one of those, Boop surfaces an amber banner explaining that you need to:
+
+1. Create an OAuth app on the toolkit's developer portal (e.g., `developer.twitter.com` for Twitter).
+2. Open [platform.composio.dev/auth-configs](https://platform.composio.dev/auth-configs), pick the toolkit, and register your app's client ID + secret.
+3. Come back to the Connections tab and click Connect again.
+
+This is a one-time setup per toolkit (not per user) — all users of your Boop instance reuse the same auth config after that.
+
 ## Notes
 
 - **Single-tenant by default.** All connections are keyed under `COMPOSIO_USER_ID` (defaults to `boop-default`). Override if you manage Composio sessions elsewhere and want Boop to share that user.
