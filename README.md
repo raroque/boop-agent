@@ -20,6 +20,7 @@ An iMessage-based personal agent built on top of the [Claude Agent SDK](https://
 
 Built on:
 - [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript) — the loop, tool use, sub-agents, MCP
+- [Composio](https://composio.dev) — integrations layer. One API key = Gmail, Slack, GitHub, Linear, Notion, Stripe, Supabase, + ~1000 more with hosted OAuth
 - [Sendblue](https://sendblue.co) — iMessage in/out (free on their agent plan)
 - [Convex](https://convex.dev) — real-time database for memory, agents, drafts
 - Your [Claude Code](https://claude.com/code) subscription — no separate Anthropic API key required
@@ -63,9 +64,12 @@ You need accounts for these. Keep the tabs open — setup will ask for credentia
 | [Claude Code](https://claude.com/code) | Powers the agent. Install it, sign in once, the SDK uses your session. | Subscription required |
 | [Sendblue](https://sendblue.co) | iMessage bridge. Get a number, grab API keys. | Free on their agent plan |
 | [Convex](https://convex.dev) | Database + realtime. | Free tier is plenty |
+| [Composio](https://composio.dev) | Integrations — one API key unlocks ~1000 toolkits. Optional if you just want chat + memory + automations without third-party access. | Free tier covers personal use |
 | [ngrok](https://ngrok.com) or similar | Expose your local port so Sendblue can reach it. | Free tier works |
 
-Integrations are **off by default**. First-run gives you a plain chat agent with memory + automations. Enable what you want when you want — see the table further down.
+Integrations are **opt-in**. First-run without a Composio key gives you a plain chat agent with memory + automations. Drop in `COMPOSIO_API_KEY` and connect toolkits from the Debug UI whenever you want more.
+
+**Custom integrations welcome.** Composio covers the common catalog, but you're free to add your own MCP servers under `server/integrations/` and register them in `server/integrations/registry.ts` — the dispatcher treats them the same as Composio-backed ones (just named toolkits the execution agent can spawn against). Useful for in-house APIs, local tools, or anything Composio doesn't ship.
 
 ---
 
@@ -349,6 +353,59 @@ Every execution agent's `total_cost_usd` comes straight from the Claude Agent SD
 Deeper dive — auth modes, toolkit scoping internals, multi-account flow, per-connection identity: [INTEGRATIONS.md](./INTEGRATIONS.md).
 
 Upgrade path when upstream ships changes: run `/upgrade-boop` inside `claude` (the skill under `.claude/skills/upgrade-boop/`) — previews diffs, backs up, merges, surfaces `[BREAKING]` CHANGELOG entries. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the "skills, not features" model.
+
+---
+
+## Skills
+
+Boop uses [Claude Code skills](https://docs.claude.com/en/docs/claude-code/skills) as the **evolution mechanism for your fork**. Skills are markdown files under `.claude/skills/<name>/SKILL.md` — invoked with `/<name>` inside the `claude` CLI when you `cd` into this repo. Each skill is a recipe Claude Code follows to modify your fork.
+
+### What ships
+
+- **`/upgrade-boop`** — Pull upstream changes into your customized fork. Previews diffs bucketed by area (core / integrations / UI / schema), creates a timestamped rollback tag, merges with conflict-aware resolution, runs typecheck, and surfaces `[BREAKING]` entries from `CHANGELOG.md` with the migration skills they reference.
+- **`/add-toolkit`** — Add a new Composio toolkit to `CURATED_TOOLKITS` (and the UI branding map). Takes a slug, looks up the Composio catalog entry for it, figures out whether it's `managed` or `byo` auth, edits both files.
+
+Run them from inside `claude`:
+
+```bash
+claude                 # launch Claude Code in the repo
+/upgrade-boop          # pull upstream changes
+/add-toolkit airtable  # add Airtable to the curated list
+```
+
+### How skills fit vs. integrations
+
+Two different "skill"-like concepts live side-by-side in this repo — easy to conflate, so:
+
+| | Claude Code skills (`.claude/skills/`) | Sub-agent task knowledge |
+|---|---|---|
+| Who invokes | **You**, manually, via `claude` CLI | The execution agent, at runtime |
+| Purpose | Evolve your fork (upgrade, add toolkit, customize config) | Complete a spawned task (drafting, research, data analysis) |
+| Where it lives | Markdown file under `.claude/skills/<name>/` | String in `EXECUTION_SYSTEM` in `server/execution-agent.ts`, plus per-spawn `task` text |
+| Scope | The repo itself | A single spawned agent turn |
+
+If you want sub-agents to load skills at runtime too, flip `settingSources: ["project"]` on the `query()` call in `server/execution-agent.ts`. This makes the execution agent auto-discover everything under `.claude/skills/` and use it as reference material. Off by default so sub-agents stay cheap and tightly scoped.
+
+### Adding your own skill
+
+```bash
+mkdir -p .claude/skills/my-thing
+cat > .claude/skills/my-thing/SKILL.md <<'EOF'
+---
+name: my-thing
+description: One-line trigger description — what this skill does.
+---
+
+# About
+Explain the goal.
+
+# Steps
+1. Step-by-step instructions Claude Code follows.
+2. Use shell commands, file edits, AskUserQuestion, etc.
+EOF
+```
+
+Run `/my-thing` inside `claude` and it executes. Each skill is a self-contained "do X" recipe — this is how the NanoClaw template scales features without bloating the base (`CONTRIBUTING.md` has the full policy).
 
 ---
 

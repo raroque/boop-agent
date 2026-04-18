@@ -150,7 +150,9 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
         for (const block of msg.message.content) {
           if (block.type === "tool_result") {
             const text = Array.isArray(block.content)
-              ? block.content.map((c: any) => (c.type === "text" ? c.text : "")).join("")
+              ? block.content
+                  .map((c: { type: string; text?: string }) => (c.type === "text" ? (c.text ?? "") : ""))
+                  .join("")
               : String(block.content ?? "");
             await convex.mutation(api.agents.addLog, {
               agentId,

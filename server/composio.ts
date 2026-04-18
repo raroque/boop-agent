@@ -211,6 +211,47 @@ interface WhoAmITool {
   parse: (data: Record<string, unknown>) => Partial<AccountIdentity>;
 }
 
+// Common profile-shape parser. Handles the usual field names REST APIs return
+// for `/me`-style endpoints (email / login / name / avatar), plus one level
+// of nesting (`user.email`, `viewer.name`, etc.). Tolerates misses silently —
+// fallback chain in getIdentityFor picks up the slack.
+function genericProfileParse(d: Record<string, unknown>): Partial<AccountIdentity> {
+  const first = (...candidates: unknown[]): string | undefined => {
+    for (const c of candidates) {
+      if (typeof c === "string" && c.trim()) return c.trim();
+    }
+    return undefined;
+  };
+  const nested = (key: string): Record<string, unknown> =>
+    (d[key] && typeof d[key] === "object" ? (d[key] as Record<string, unknown>) : {});
+  const viewer = nested("viewer");
+  const user = nested("user");
+  const team = nested("team");
+  const profile = nested("profile");
+
+  const email = first(d.email, user.email, viewer.email, profile.email);
+  const name = first(
+    d.name,
+    d.login,
+    d.display_name,
+    d.displayName,
+    user.name,
+    viewer.name,
+    profile.name,
+    team.name,
+    d.companyName,
+  );
+  const avatar = first(
+    d.avatar_url,
+    d.avatarUrl,
+    d.picture,
+    user.avatar_url,
+    viewer.avatarUrl,
+    profile.image,
+  );
+  return { email, name, avatarUrl: avatar, label: email ?? name };
+}
+
 const WHOAMI_BY_TOOLKIT: Record<string, WhoAmITool> = {
   gmail: {
     tool: "GMAIL_GET_PROFILE",
@@ -220,6 +261,16 @@ const WHOAMI_BY_TOOLKIT: Record<string, WhoAmITool> = {
       return { email, label: email };
     },
   },
+  github: {
+    tool: "GITHUB_GET_THE_AUTHENTICATED_USER",
+    arguments: {},
+    parse: genericProfileParse,
+  },
+  linear: { tool: "LINEAR_GET_CURRENT_USER", arguments: {}, parse: genericProfileParse },
+  notion: { tool: "NOTION_GET_ABOUT_ME", arguments: {}, parse: genericProfileParse },
+  hubspot: { tool: "HUBSPOT_GET_ACCOUNT_INFO", arguments: {}, parse: genericProfileParse },
+  stripe: { tool: "STRIPE_GET_ACCOUNT", arguments: {}, parse: genericProfileParse },
+  slack: { tool: "SLACK_FETCH_TEAM_INFO", arguments: {}, parse: genericProfileParse },
 };
 
 async function fetchToolkitIdentity(
@@ -232,6 +283,11 @@ async function fetchToolkitIdentity(
     const result = await composio.tools.execute(spec.tool, {
       userId: boopUserId(),
       arguments: spec.arguments,
+      // Composio's tools.execute requires a pinned toolkit version OR this
+      // flag. We skip pinning so a toolkit bump doesn't break identity lookup
+      // silently — missed fields fall through to the identityCache/alias
+      // fallback chain in getIdentityFor. Revisit if Composio deprecates the
+      // flag.
       dangerouslySkipVersionCheck: true,
     });
     if (!result.successful || !result.data) return {};

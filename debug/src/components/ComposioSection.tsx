@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { IntegrationLogo } from "../lib/branding.js";
 
 type AuthMode = "managed" | "byo";
@@ -88,6 +88,15 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
   const [toolsBySlug, setToolsBySlug] = useState<
     Record<string, ToolSummary[] | "loading" | "error">
   >({});
+  // OAuth popup polling interval — kept in a ref so we can clear it on unmount
+  // (prevents an orphan interval firing fetches after the panel closes).
+  const authPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(
+    () => () => {
+      if (authPollRef.current) clearInterval(authPollRef.current);
+    },
+    [],
+  );
 
   const fetchToolkits = useCallback(async () => {
     try {
@@ -138,9 +147,14 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
           "composio-auth",
           `width=${w},height=${h},left=${left},top=${top}`,
         );
-        const interval = setInterval(async () => {
+        // Replace any prior poll (defensive — you'd have to spam Connect for this to matter).
+        if (authPollRef.current) clearInterval(authPollRef.current);
+        authPollRef.current = setInterval(async () => {
           if (!popup || popup.closed) {
-            clearInterval(interval);
+            if (authPollRef.current) {
+              clearInterval(authPollRef.current);
+              authPollRef.current = null;
+            }
             try {
               await fetch("/api/composio/refresh", { method: "POST" });
             } catch {
