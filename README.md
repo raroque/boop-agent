@@ -254,6 +254,37 @@ Deep dive: [ARCHITECTURE.md](./ARCHITECTURE.md). Adding your own tools: [INTEGRA
 
 ---
 
+## Skills
+
+Skills are reusable playbooks — `SKILL.md` files under `.claude/skills/` that teach the execution agent how to do a specific kind of task (write a YouTube script, draft a cold email, plan a trip, etc.).
+
+**How the Agent SDK handles them:** every `.claude/skills/*/SKILL.md` is loaded when the execution agent boots, and each skill's `description` gets injected into the agent's system prompt along with an instruction to pick the relevant one for the current task. You do **not** select skills per spawn — the agent picks based on which description matches. Only descriptions load upfront; the full SKILL.md body is pulled into context only when the agent actually invokes the skill, so adding more skills is cheap.
+
+The SDK is pretty smart about picking the right skill as long as your `description` is specific and front-loads the trigger phrases ("Use when the user asks to write a video script, turn research into a YouTube video…"). Vague descriptions = missed invocations.
+
+Wiring (in `server/execution-agent.ts`):
+- `settingSources: ["project"]` — tells the SDK to load `.claude/skills/`
+- `"Skill"` in `allowedTools` — enables the Skill tool
+
+Only the **execution agent** loads skills. The dispatcher (interaction-agent) stays in SDK isolation mode, so it never sees them — which is correct, because the dispatcher should never do work, only route.
+
+**To add a skill:** create `.claude/skills/<kebab-name>/SKILL.md`:
+
+```yaml
+---
+name: youtube-script-writer
+description: Write a tight, retention-focused YouTube script from a topic or outline. Use when the user asks for a video script, wants to turn research into a video, or needs a hook rewritten.
+---
+
+<instructions the agent follows when this skill is invoked>
+```
+
+There's a soft budget (~15k chars by default, via `SLASH_COMMAND_TOOL_CHAR_BUDGET`) for the combined skill-description block in context — if you end up with many skills, keep descriptions sharp so none get truncated.
+
+Example included: `.claude/skills/youtube-script-writer/`.
+
+---
+
 ## Using your Claude Code subscription
 
 The Claude Agent SDK reuses the credentials Claude Code writes to your machine when you sign in. You do not need an `ANTHROPIC_API_KEY`.

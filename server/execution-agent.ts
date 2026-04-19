@@ -4,6 +4,7 @@ import { convex } from "./convex-client.js";
 import { broadcast } from "./broadcast.js";
 import { buildMcpServersForIntegrations, listIntegrations } from "./integrations/registry.js";
 import { createDraftStagingMcp } from "./draft-tools.js";
+import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
 
 const running = new Map<string, AbortController>();
 
@@ -98,13 +99,12 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   const allowedTools = [
     "WebSearch",
     "WebFetch",
+    "Skill",
     ...Object.keys(mcpServers).flatMap((n) => [`mcp__${n}__*`]),
   ];
 
   let buffer = "";
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let costUsd = 0;
+  let usage: UsageTotals = { ...EMPTY_USAGE };
   let status: "completed" | "failed" | "cancelled" = "completed";
   let errorMsg: string | undefined;
 
@@ -116,6 +116,9 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
         model: process.env.BOOP_MODEL ?? "claude-sonnet-4-6",
         mcpServers,
         allowedTools,
+        // Load .claude/skills/ so the model can invoke SKILL.md playbooks. Without
+        // this the SDK runs in isolation mode and skills are silently ignored.
+        settingSources: ["project"],
         permissionMode: "bypassPermissions",
         abortController: abort,
       },
@@ -141,11 +144,6 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
             broadcast("agent_tool", { agentId, toolName: block.name });
           }
         }
-        const u = msg.message.usage;
-        if (u) {
-          inputTokens = u.input_tokens ?? inputTokens;
-          outputTokens = u.output_tokens ?? outputTokens;
-        }
       } else if (msg.type === "user") {
         for (const block of msg.message.content) {
           if (block.type === "tool_result") {
@@ -162,15 +160,9 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
           }
         }
       } else if (msg.type === "result") {
-        // The SDK emits a single result message at the end of each query with
-        // authoritative cost + usage totals (accounts for cache hits/writes and
-        // per-turn accumulation). Prefer these over the per-assistant counts.
-        costUsd = msg.total_cost_usd ?? costUsd;
-        const u = msg.usage as { input_tokens?: number; output_tokens?: number } | undefined;
-        if (u) {
-          inputTokens = u.input_tokens ?? inputTokens;
-          outputTokens = u.output_tokens ?? outputTokens;
-        }
+        // Always take the aggregate from modelUsage — msg.usage is just the
+        // final turn's raw tokens and massively undercounts on tool-heavy runs.
+        usage = aggregateUsageFromResult(msg);
       }
     }
   } catch (err) {
@@ -187,7 +179,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
 
   const elapsed = ((Date.now() - agentStart) / 1000).toFixed(1);
   logAgent(
-    `done (${status}, ${elapsed}s, in/out tokens ${inputTokens}/${outputTokens}, $${costUsd.toFixed(4)})`,
+    `done (${status}, ${elapsed}s, in/out tokens ${usage.inputTokens}/${usage.outputTokens}, cache r/w ${usage.cacheReadTokens}/${usage.cacheCreationTokens}, $${usage.costUsd.toFixed(4)})`,
   );
 
   await convex.mutation(api.agents.update, {
@@ -195,10 +187,27 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
     status,
     result: buffer,
     error: errorMsg,
-    inputTokens,
-    outputTokens,
-    costUsd,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    costUsd: usage.costUsd,
   });
+  // Also append to the usage log so total-cost queries cover every layer.
+  if (usage.costUsd > 0 || usage.inputTokens > 0) {
+    await convex.mutation(api.usageRecords.record, {
+      source: "execution",
+      conversationId: opts.conversationId,
+      agentId,
+      model: usage.model,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheCreationTokens: usage.cacheCreationTokens,
+      costUsd: usage.costUsd,
+      durationMs: Date.now() - agentStart,
+    });
+  }
   broadcast("agent_done", { agentId, status, result: buffer.slice(0, 200) });
 
   return { agentId, result: buffer || errorMsg || "(no output)", status };

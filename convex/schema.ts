@@ -70,6 +70,8 @@ export default defineSchema({
     mcpServers: v.array(v.string()),
     inputTokens: v.number(),
     outputTokens: v.number(),
+    cacheReadTokens: v.optional(v.number()),
+    cacheCreationTokens: v.optional(v.number()),
     costUsd: v.number(),
     startedAt: v.number(),
     completedAt: v.optional(v.number()),
@@ -77,6 +79,34 @@ export default defineSchema({
     .index("by_agent_id", ["agentId"])
     .index("by_status", ["status"])
     .index("by_conversation", ["conversationId"]),
+
+  // Append-only LLM usage log. Every model call (dispatcher, execution,
+  // extract, consolidation) writes a row here so you can query total cost
+  // by source, conversation, or time range.
+  usageRecords: defineTable({
+    source: v.union(
+      v.literal("dispatcher"),
+      v.literal("execution"),
+      v.literal("extract"),
+      v.literal("consolidation-proposer"),
+      v.literal("consolidation-judge"),
+    ),
+    conversationId: v.optional(v.string()),
+    turnId: v.optional(v.string()),
+    agentId: v.optional(v.string()),
+    runId: v.optional(v.string()),
+    model: v.string(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    cacheReadTokens: v.number(),
+    cacheCreationTokens: v.number(),
+    costUsd: v.number(),
+    durationMs: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_conversation", ["conversationId"])
+    .index("by_agent", ["agentId"])
+    .index("by_source", ["source"]),
 
   agentLogs: defineTable({
     agentId: v.string(),

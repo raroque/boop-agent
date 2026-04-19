@@ -2,6 +2,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { api } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 import { embed } from "../embeddings.js";
+import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "../usage.js";
 import { DEFAULT_DECAY, SEGMENT_PREFERRED_TIER, makeMemoryId } from "./types.js";
 
 const EXTRACTION_PROMPT = `You are a memory-extraction subagent.
@@ -36,9 +37,11 @@ export async function extractAndStore(opts: {
   assistantReply: string;
   turnId: string;
 }): Promise<void> {
+  const started = Date.now();
   try {
     const payload = `USER: ${opts.userMessage}\n\nASSISTANT: ${opts.assistantReply}`;
     let buffer = "";
+    let usage: UsageTotals = { ...EMPTY_USAGE };
     for await (const msg of query({
       prompt: payload,
       options: {
@@ -51,7 +54,24 @@ export async function extractAndStore(opts: {
         for (const block of msg.message.content) {
           if (block.type === "text") buffer += block.text;
         }
+      } else if (msg.type === "result") {
+        usage = aggregateUsageFromResult(msg);
       }
+    }
+
+    if (usage.costUsd > 0 || usage.inputTokens > 0) {
+      await convex.mutation(api.usageRecords.record, {
+        source: "extract",
+        conversationId: opts.conversationId,
+        turnId: opts.turnId,
+        model: usage.model,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadTokens,
+        cacheCreationTokens: usage.cacheCreationTokens,
+        costUsd: usage.costUsd,
+        durationMs: Date.now() - started,
+      });
     }
 
     const match = buffer.match(/\{[\s\S]*\}/);

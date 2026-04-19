@@ -2,6 +2,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { broadcast } from "./broadcast.js";
+import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
 
 function randomId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -69,8 +70,13 @@ interface Applied {
   summary: string;
 }
 
-async function runLlm(systemPrompt: string, userPrompt: string): Promise<string> {
+async function runLlm(
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<{ buffer: string; usage: UsageTotals; durationMs: number }> {
+  const started = Date.now();
   let buffer = "";
+  let usage: UsageTotals = { ...EMPTY_USAGE };
   for await (const msg of query({
     prompt: userPrompt,
     options: {
@@ -83,9 +89,31 @@ async function runLlm(systemPrompt: string, userPrompt: string): Promise<string>
       for (const block of msg.message.content) {
         if (block.type === "text") buffer += block.text;
       }
+    } else if (msg.type === "result") {
+      usage = aggregateUsageFromResult(msg);
     }
   }
-  return buffer;
+  return { buffer, usage, durationMs: Date.now() - started };
+}
+
+async function recordConsolidationUsage(
+  source: "consolidation-proposer" | "consolidation-judge",
+  runId: string,
+  usage: UsageTotals,
+  durationMs: number,
+): Promise<void> {
+  if (usage.costUsd <= 0 && usage.inputTokens <= 0) return;
+  await convex.mutation(api.usageRecords.record, {
+    source,
+    runId,
+    model: usage.model,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    costUsd: usage.costUsd,
+    durationMs,
+  });
 }
 
 function parseJson<T>(raw: string): T | null {
@@ -136,8 +164,14 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
       .join("\n");
 
     broadcast("consolidation_phase", { runId, phase: "proposing" });
-    const proposerRaw = await runLlm(PROPOSER_PROMPT, payload);
-    const proposerJson = parseJson<{ proposals: Proposal[] }>(proposerRaw);
+    const proposerCall = await runLlm(PROPOSER_PROMPT, payload);
+    await recordConsolidationUsage(
+      "consolidation-proposer",
+      runId,
+      proposerCall.usage,
+      proposerCall.durationMs,
+    );
+    const proposerJson = parseJson<{ proposals: Proposal[] }>(proposerCall.buffer);
     const proposals = proposerJson?.proposals ?? [];
     broadcast("consolidation_phase", {
       runId,
@@ -165,10 +199,16 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
       .join("\n")}\n\nOriginal memories:\n${payload}`;
 
     broadcast("consolidation_phase", { runId, phase: "judging" });
-    const judgeRaw = await runLlm(JUDGE_PROMPT, judgePayload);
+    const judgeCall = await runLlm(JUDGE_PROMPT, judgePayload);
+    await recordConsolidationUsage(
+      "consolidation-judge",
+      runId,
+      judgeCall.usage,
+      judgeCall.durationMs,
+    );
     const judgeJson = parseJson<{
       decisions: { proposalIndex: number; approve: boolean; rationale: string }[];
-    }>(judgeRaw);
+    }>(judgeCall.buffer);
     const decisions = judgeJson?.decisions ?? [];
     const approved = new Set(
       decisions.filter((d) => d.approve).map((d) => d.proposalIndex),

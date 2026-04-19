@@ -9,6 +9,7 @@ import { createAutomationMcp } from "./automation-tools.js";
 import { createDraftDecisionMcp } from "./draft-tools.js";
 import { broadcast } from "./broadcast.js";
 import { sendImessage } from "./sendblue.js";
+import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
 
 const INTERACTION_SYSTEM = `You are Boop, a personal agent the user texts from iMessage.
 
@@ -212,7 +213,9 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const tag = opts.turnTag ?? turnId.slice(-6);
   const log = (msg: string) => console.log(`[turn ${tag}] ${msg}`);
 
+  const turnStart = Date.now();
   let reply = "";
+  let usage: UsageTotals = { ...EMPTY_USAGE };
   try {
     for await (const msg of query({
       prompt,
@@ -252,6 +255,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           "Glob",
           "Grep",
           "Agent",
+          "Skill",
         ],
         permissionMode: "bypassPermissions",
       },
@@ -269,6 +273,8 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
             );
           }
         }
+      } else if (msg.type === "result") {
+        usage = aggregateUsageFromResult(msg);
       }
     }
   } catch (err) {
@@ -277,6 +283,24 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   }
 
   reply = reply.trim() || "(no reply)";
+
+  if (usage.costUsd > 0 || usage.inputTokens > 0) {
+    log(
+      `cost: in/out ${usage.inputTokens}/${usage.outputTokens}, cache r/w ${usage.cacheReadTokens}/${usage.cacheCreationTokens}, $${usage.costUsd.toFixed(4)}`,
+    );
+    await convex.mutation(api.usageRecords.record, {
+      source: "dispatcher",
+      conversationId: opts.conversationId,
+      turnId,
+      model: usage.model,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheCreationTokens: usage.cacheCreationTokens,
+      costUsd: usage.costUsd,
+      durationMs: Date.now() - turnStart,
+    });
+  }
 
   broadcast("assistant_message", { conversationId: opts.conversationId, content: reply });
 

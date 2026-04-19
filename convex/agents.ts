@@ -37,6 +37,8 @@ export const update = mutation({
     error: v.optional(v.string()),
     inputTokens: v.optional(v.number()),
     outputTokens: v.optional(v.number()),
+    cacheReadTokens: v.optional(v.number()),
+    cacheCreationTokens: v.optional(v.number()),
     costUsd: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
