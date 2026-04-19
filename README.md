@@ -356,59 +356,6 @@ Upgrade path when upstream ships changes: run `/upgrade-boop` inside `claude` (t
 
 ---
 
-## Skills
-
-Boop uses [Claude Code skills](https://docs.claude.com/en/docs/claude-code/skills) as the **evolution mechanism for your fork**. Skills are markdown files under `.claude/skills/<name>/SKILL.md` — invoked with `/<name>` inside the `claude` CLI when you `cd` into this repo. Each skill is a recipe Claude Code follows to modify your fork.
-
-### What ships
-
-- **`/upgrade-boop`** — Pull upstream changes into your customized fork. Previews diffs bucketed by area (core / integrations / UI / schema), creates a timestamped rollback tag, merges with conflict-aware resolution, runs typecheck, and surfaces `[BREAKING]` entries from `CHANGELOG.md` with the migration skills they reference.
-- **`/add-toolkit`** — Add a new Composio toolkit to `CURATED_TOOLKITS` (and the UI branding map). Takes a slug, looks up the Composio catalog entry for it, figures out whether it's `managed` or `byo` auth, edits both files.
-
-Run them from inside `claude`:
-
-```bash
-claude                 # launch Claude Code in the repo
-/upgrade-boop          # pull upstream changes
-/add-toolkit airtable  # add Airtable to the curated list
-```
-
-### How skills fit vs. integrations
-
-Two different "skill"-like concepts live side-by-side in this repo — easy to conflate, so:
-
-| | Claude Code skills (`.claude/skills/`) | Sub-agent task knowledge |
-|---|---|---|
-| Who invokes | **You**, manually, via `claude` CLI | The execution agent, at runtime |
-| Purpose | Evolve your fork (upgrade, add toolkit, customize config) | Complete a spawned task (drafting, research, data analysis) |
-| Where it lives | Markdown file under `.claude/skills/<name>/` | String in `EXECUTION_SYSTEM` in `server/execution-agent.ts`, plus per-spawn `task` text |
-| Scope | The repo itself | A single spawned agent turn |
-
-If you want sub-agents to load skills at runtime too, flip `settingSources: ["project"]` on the `query()` call in `server/execution-agent.ts`. This makes the execution agent auto-discover everything under `.claude/skills/` and use it as reference material. Off by default so sub-agents stay cheap and tightly scoped.
-
-### Adding your own skill
-
-```bash
-mkdir -p .claude/skills/my-thing
-cat > .claude/skills/my-thing/SKILL.md <<'EOF'
----
-name: my-thing
-description: One-line trigger description — what this skill does.
----
-
-# About
-Explain the goal.
-
-# Steps
-1. Step-by-step instructions Claude Code follows.
-2. Use shell commands, file edits, AskUserQuestion, etc.
-EOF
-```
-
-Run `/my-thing` inside `claude` and it executes. Each skill is a self-contained "do X" recipe — this is how the NanoClaw template scales features without bloating the base (`CONTRIBUTING.md` has the full policy).
-
----
-
 ## Project layout
 
 ```
