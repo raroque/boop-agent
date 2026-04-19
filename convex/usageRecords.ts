@@ -48,14 +48,19 @@ export const recent = query({
 });
 
 export const summary = query({
-  args: { conversationId: v.optional(v.string()) },
+  args: { conversationId: v.optional(v.string()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    // Cap the scan. Convex's hard .collect() ceiling is 16,384 docs; this
+    // keeps the summary query from silently breaking once the append-only
+    // log grows past that. Conversation-scoped queries use the index.
+    const limit = args.limit ?? 5000;
     const rows = args.conversationId
       ? await ctx.db
           .query("usageRecords")
           .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId!))
-          .collect()
-      : await ctx.db.query("usageRecords").collect();
+          .order("desc")
+          .take(limit)
+      : await ctx.db.query("usageRecords").order("desc").take(limit);
     const bySource: Record<
       string,
       { costUsd: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; count: number }

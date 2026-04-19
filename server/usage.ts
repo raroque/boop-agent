@@ -8,7 +8,6 @@ export interface UsageTotals {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   costUsd: number;
-  durationMs: number;
 }
 
 export const EMPTY_USAGE: UsageTotals = {
@@ -18,7 +17,6 @@ export const EMPTY_USAGE: UsageTotals = {
   cacheReadTokens: 0,
   cacheCreationTokens: 0,
   costUsd: 0,
-  durationMs: 0,
 };
 
 /**
@@ -66,6 +64,5 @@ export function aggregateUsageFromResult(
     cacheReadTokens,
     cacheCreationTokens,
     costUsd: msg.total_cost_usd ?? 0,
-    durationMs: msg.duration_ms ?? 0,
   };
 }
