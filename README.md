@@ -379,6 +379,16 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
 
 Every execution agent's `total_cost_usd` comes straight from the Claude Agent SDK's `result` message (authoritative, matches Anthropic's billing). You'll see real dollar amounts in the Dashboard tab's Cost tile and per-agent cards.
 
+Every LLM call — dispatcher turn, execution-agent run, memory extraction, consolidation proposer/judge — also writes a row to the `usageRecords` table with per-layer tokens (including cache read/write) and cost. `usageRecords:summary` gives you totals by source so you can see which layer is actually burning the bill.
+
+### A note on runaway cost
+
+Boop's `query()` calls don't currently set `maxTurns` or `maxBudgetUsd`. Those are hard stops the SDK exposes — set them and the agent aborts once the threshold hits, with whatever partial result it has.
+
+Kept as-is intentionally for a single-user personal agent: every task is scoped tight (spawned by the dispatcher with a specific task string + a small integration list), integrations are Composio-scoped per spawn so the tool surface stays small, and the existing 15-minute heartbeat (`server/heartbeat.ts`) marks any long-running agent as `failed` and aborts it. In practice execution agents complete in under 60 seconds.
+
+If you deploy Boop in a higher-throughput setting, or hand it integrations that allow looping (webhooks, scrapers), you probably want to set `maxTurns: 20` and `maxBudgetUsd: 2.00` on the `query()` call in `server/execution-agent.ts` as a belt-and-suspenders cap.
+
 ### Keeping it in sync
 
 Deeper dive — auth modes, toolkit scoping internals, multi-account flow, per-connection identity: [INTEGRATIONS.md](./INTEGRATIONS.md).

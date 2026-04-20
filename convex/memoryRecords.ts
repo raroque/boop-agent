@@ -131,9 +131,14 @@ export const search = query({
   handler: async (ctx, args) => {
     const limit = args.limit ?? 20;
     const q = args.query.toLowerCase();
-    const all = await ctx.db.query("memoryRecords").take(500);
-    return all
-      .filter((m) => m.lifecycle === "active" && m.content.toLowerCase().includes(q))
+    // Filter on the index BEFORE the 500 cap — otherwise archived/pruned
+    // records eat the budget and silently truncate the active set.
+    const active = await ctx.db
+      .query("memoryRecords")
+      .withIndex("by_lifecycle", (idx) => idx.eq("lifecycle", "active"))
+      .take(500);
+    return active
+      .filter((m) => m.content.toLowerCase().includes(q))
       .sort((a, b) => b.importance - a.importance)
       .slice(0, limit);
   },
