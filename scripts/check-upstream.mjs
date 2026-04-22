@@ -2,7 +2,11 @@
 // Background check that nudges the user when upstream has new commits.
 // Runs in parallel with dev.mjs startup; silent on no-op or failure.
 //
+// Opt out: set BOOP_UPSTREAM_CHECK=false in .env.local, or comment out the
+// `spawn("node", ["scripts/check-upstream.mjs"], ...)` block in scripts/dev.mjs.
+//
 // Behavior matrix:
+//   - BOOP_UPSTREAM_CHECK=false → silent (disabled)
 //   - upstream remote + new commits → banner w/ count + /upgrade-boop instruction
 //   - upstream remote, up to date   → silent
 //   - no upstream + forked origin   → one-line hint on how to add upstream
@@ -10,6 +14,7 @@
 
 import { spawn } from "node:child_process";
 import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -94,6 +99,24 @@ function printNoUpstreamHint() {
 `,
   );
 }
+
+// Opt-out via env var. Reads .env.local the same way dev.mjs does so users
+// don't have to export variables in their shell to disable the check.
+function readEnvLocal() {
+  const p = resolve(root, ".env.local");
+  if (!existsSync(p)) return {};
+  const out = {};
+  for (const line of readFileSync(p, "utf8").split("\n")) {
+    const m = line.match(/^([A-Z0-9_]+)=(.*?)(?:\s+#.*)?$/);
+    if (m) out[m[1]] = m[2].trim();
+  }
+  return out;
+}
+
+const envFromFile = readEnvLocal();
+const upstreamCheckEnabled =
+  (process.env.BOOP_UPSTREAM_CHECK ?? envFromFile.BOOP_UPSTREAM_CHECK ?? "true") !== "false";
+if (!upstreamCheckEnabled) process.exit(0);
 
 (async () => {
   const upstreamUrl = tryExec("git remote get-url upstream");

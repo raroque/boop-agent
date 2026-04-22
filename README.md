@@ -307,6 +307,7 @@ Everything lives in `.env.local` (auto-created by `npm run setup`). See `.env.ex
 | `SENDBLUE_API_KEY` / `SENDBLUE_API_SECRET` | yes | From your Sendblue dashboard. |
 | `SENDBLUE_FROM_NUMBER` | yes | Your Sendblue-provisioned number. |
 | `BOOP_MODEL` | no | Default `claude-sonnet-4-6`. |
+| `BOOP_UPSTREAM_CHECK` | no | Set to `false` to disable the new-version banner on `npm run dev`. Default: on. |
 | `PORT` | no | Default `3456`. |
 | `PUBLIC_URL` | no | Base URL used in the Sendblue webhook. Composio handles its own OAuth callbacks on `platform.composio.dev`, so this is just for inbound iMessage. |
 | `VOYAGE_API_KEY` **or** `OPENAI_API_KEY` | optional | Unlocks vector recall. Falls back to substring. |
@@ -479,6 +480,22 @@ git remote add upstream https://github.com/chris/boop-agent.git    # one-time
 git fetch upstream
 git merge upstream/main      # or: git rebase upstream/main
 ```
+
+### New-version notifications
+
+Every time you run `npm run dev`, a small background check (`scripts/check-upstream.mjs`) asks your `upstream` remote if there are new commits. If there are, you'll see a banner up top with the count and a reminder to run `/upgrade-boop`. If you're up to date, or the check fails for any reason (offline, no `upstream` remote, timeout), it stays silent.
+
+Behavior at a glance:
+
+- `upstream` set, new commits → banner with the count
+- `upstream` set, up to date → silent
+- No `upstream` remote, on a fork → one-line hint on adding it
+- No `upstream` remote, on the canonical repo → silent (you *are* upstream)
+
+To turn it off:
+
+- **Env var:** add `BOOP_UPSTREAM_CHECK=false` to `.env.local`
+- **Or comment it out:** the call lives in `scripts/dev.mjs` — the `spawn("node", ["scripts/check-upstream.mjs"], ...)` block. Delete or comment that block and the check never runs.
 
 ### CHANGELOG
 
