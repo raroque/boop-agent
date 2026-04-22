@@ -41,12 +41,18 @@ For each proposal, look for:
 
 Be sharp but fair. If a proposal looks clean, say so — don't manufacture objections. Your objections inform the judge; you don't decide.
 
-Return STRICT JSON only:
+Return STRICT JSON only. Each challenge MUST include an entry for every proposal index. Shape:
 {"challenges":[
-  {"proposalIndex":0,"objection":"specific concern, or null if none","severity":"low"|"medium"|"high"}
+  {"proposalIndex":0,"objection":"merging these loses the distinction between X and Y","severity":"high"},
+  {"proposalIndex":1,"objection":null,"severity":"low"}
 ]}
 
-Include an entry for every proposal index. Use severity "low" for nitpicks, "high" for real information loss. Respond with ONLY the JSON.`;
+Rules for the fields:
+- "severity" MUST be exactly one of the strings: "low", "medium", "high".
+- "objection" is either a plain string describing the concern, or the JSON literal null (not the string "null") when you have no objection.
+- Use "low" for nitpicks, "medium" for real concerns, "high" for real information loss.
+
+Respond with ONLY the JSON object.`;
 
 const JUDGE_PROMPT = `You are a memory-consolidation judge. You see a proposer's suggested changes AND an adversary's objections to each. Weigh both sides and rule.
 
