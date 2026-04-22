@@ -116,7 +116,7 @@ async function runLlm(
         if (block.type === "text") buffer += block.text;
       }
     } else if (msg.type === "result") {
-      usage = aggregateUsageFromResult(msg);
+      usage = aggregateUsageFromResult(msg, model);
     }
   }
   return { buffer, usage, durationMs: Date.now() - started };

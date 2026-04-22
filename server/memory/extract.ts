@@ -38,6 +38,7 @@ export async function extractAndStore(opts: {
   turnId: string;
 }): Promise<void> {
   const started = Date.now();
+  const requestedModel = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
   try {
     const payload = `USER: ${opts.userMessage}\n\nASSISTANT: ${opts.assistantReply}`;
     let buffer = "";
@@ -46,7 +47,7 @@ export async function extractAndStore(opts: {
       prompt: payload,
       options: {
         systemPrompt: EXTRACTION_PROMPT,
-        model: process.env.BOOP_MODEL ?? "claude-sonnet-4-6",
+        model: requestedModel,
         permissionMode: "bypassPermissions",
       },
     })) {
@@ -55,7 +56,7 @@ export async function extractAndStore(opts: {
           if (block.type === "text") buffer += block.text;
         }
       } else if (msg.type === "result") {
-        usage = aggregateUsageFromResult(msg);
+        usage = aggregateUsageFromResult(msg, requestedModel);
       }
     }
 

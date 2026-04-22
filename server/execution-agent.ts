@@ -108,12 +108,13 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   let status: "completed" | "failed" | "cancelled" = "completed";
   let errorMsg: string | undefined;
 
+  const requestedModel = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
   try {
     for await (const msg of query({
       prompt: opts.task,
       options: {
         systemPrompt: EXECUTION_SYSTEM,
-        model: process.env.BOOP_MODEL ?? "claude-sonnet-4-6",
+        model: requestedModel,
         mcpServers,
         allowedTools,
         // Load .claude/skills/ so the model can invoke SKILL.md playbooks. Without
@@ -162,7 +163,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
       } else if (msg.type === "result") {
         // Always take the aggregate from modelUsage — msg.usage is just the
         // final turn's raw tokens and massively undercounts on tool-heavy runs.
-        usage = aggregateUsageFromResult(msg);
+        usage = aggregateUsageFromResult(msg, requestedModel);
       }
     }
   } catch (err) {

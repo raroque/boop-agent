@@ -214,6 +214,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const log = (msg: string) => console.log(`[turn ${tag}] ${msg}`);
 
   const turnStart = Date.now();
+  const requestedModel = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
   let reply = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
   try {
@@ -274,7 +275,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           }
         }
       } else if (msg.type === "result") {
-        usage = aggregateUsageFromResult(msg);
+        usage = aggregateUsageFromResult(msg, requestedModel);
       }
     }
   } catch (err) {
