@@ -44,7 +44,7 @@ Built on:
 - **Pure dispatcher** — the interaction agent has only memory + spawn + automation + draft tools. Web access, files, and integrations are explicitly denied to it; sub-agents get `WebSearch` / `WebFetch` / the integrations.
 - **Tiered memory** (short / long / permanent) with post-turn extraction, decay, and cleaning.
 - **Vector search** for recall when you add an embeddings key (Voyage or OpenAI) — falls back to substring.
-- **Memory consolidation** — a nightly proposer + judge pass that merges duplicates and resolves contradictions.
+- **Memory consolidation** — a daily 3-phase adversarial pipeline (proposer → adversary → judge) that merges duplicates, resolves contradictions, and prunes noise. Proposer and judge on Sonnet; adversary on Haiku for cheap skepticism. Runs every 24h by default, also triggerable manually via `POST /consolidate`.
 - **Automations** — the agent can schedule recurring work from a text ("every morning at 8 summarize my calendar") and push results back to iMessage.
 - **Draft-and-send** — any external action stages a draft first; the agent only commits when the user confirms.
 - **Heartbeat + retry** — stuck agents auto-fail, debug dashboard can retry.
@@ -379,7 +379,7 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
 
 Every execution agent's `total_cost_usd` comes straight from the Claude Agent SDK's `result` message (authoritative, matches Anthropic's billing). You'll see real dollar amounts in the Dashboard tab's Cost tile and per-agent cards.
 
-Every LLM call — dispatcher turn, execution-agent run, memory extraction, consolidation proposer/judge — also writes a row to the `usageRecords` table with per-layer tokens (including cache read/write) and cost. `usageRecords:summary` gives you totals by source so you can see which layer is actually burning the bill.
+Every LLM call — dispatcher turn, execution-agent run, memory extraction, consolidation (proposer / adversary / judge) — also writes a row to the `usageRecords` table with per-layer tokens (including cache read/write) and cost. `usageRecords:summary` gives you totals by source so you can see which layer is actually burning the bill. Each row reports the model the caller requested, not the model-routing the SDK did internally.
 
 ### A note on runaway cost
 
@@ -410,7 +410,8 @@ boop-agent/
 │   ├── automation-tools.ts        # create/list/toggle/delete MCP
 │   ├── draft-tools.ts             # save_draft / send_draft / reject_draft MCP
 │   ├── heartbeat.ts               # Stale-agent sweep
-│   ├── consolidation.ts           # Proposer + judge pipeline
+│   ├── consolidation.ts           # 3-phase adversarial pipeline (proposer → adversary → judge)
+│   ├── usage.ts                   # aggregateUsageFromResult helper (shared cost aggregation)
 │   ├── embeddings.ts              # Voyage / OpenAI wrapper
 │   ├── composio.ts                # Composio SDK wrapper (session + toolkit scoping)
 │   ├── composio-routes.ts         # /composio/* HTTP routes for the Debug UI
@@ -434,6 +435,7 @@ boop-agent/
 │   ├── conversations.ts
 │   ├── drafts.ts
 │   ├── memoryEvents.ts
+│   ├── usageRecords.ts            # Append-only per-call cost log
 │   └── sendblueDedup.ts
 ├── debug/                         # Dashboard: Dashboard / Agents / Automations / Memory / Events / Connections
 ├── scripts/
