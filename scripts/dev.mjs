@@ -185,6 +185,17 @@ ${C.dim}  Install:   brew install ngrok         (macOS)
 
 console.log(`\nBoop dev starting on port ${port}. Ctrl-C to stop everything.\n`);
 
+// Background "new-version available?" check. Runs concurrently with the child
+// services; prints only when upstream has new commits (or user has no upstream
+// remote configured). Silent on the happy path.
+spawn("node", ["scripts/check-upstream.mjs"], {
+  cwd: root,
+  stdio: "inherit",
+  detached: false,
+}).on("error", () => {
+  /* never block dev on this */
+});
+
 const serverChild = run(
   "server",
   "npx",
