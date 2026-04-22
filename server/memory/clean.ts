@@ -6,9 +6,10 @@ const PRUNE_THRESHOLD = 0.05;
 const ARCHIVE_THRESHOLD = 0.15;
 
 // Ping's adaptive-decay constants. beta pulls the curve; half_life is the
-// nominal half-life (days) that gets stretched by importance. With beta=0.8
-// and half_life=11.25, an importance-0.5 memory has an effective half-life of
-// ~14 days, an importance-0.9 memory ~21 days.
+// nominal half-life (days) that gets stretched by importance.
+// Effective half-life ≈ BASE_HALF_LIFE_DAYS × (1 + importance) / DECAY_BETA.
+// With beta=0.8 and half_life=11.25, importance=0.5 → ~21 days,
+// importance=0.9 → ~27 days. (Ignoring per-segment decayRate trim.)
 const DECAY_BETA = 0.8;
 const BASE_HALF_LIFE_DAYS = 11.25;
 const LN2 = Math.log(2);

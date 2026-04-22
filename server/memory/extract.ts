@@ -89,6 +89,12 @@ export async function extractAndStore(opts: {
     for (const f of facts) {
       const defaults = SEGMENT_DEFAULTS[f.segment];
       if (!defaults) continue; // skip unknown segment rather than crashing
+      // Clamp importance to [0, 1]; fall back to segment default when the
+      // LLM omits it or returns garbage.
+      const rawImportance =
+        typeof f.importance === "number" && Number.isFinite(f.importance)
+          ? Math.max(0, Math.min(1, f.importance))
+          : defaults.importance;
       const memoryId = makeMemoryId();
       const embedding = (await embed(f.content)) ?? undefined;
       const metadata =
@@ -100,7 +106,7 @@ export async function extractAndStore(opts: {
         content: f.content,
         tier: defaults.tier,
         segment: f.segment,
-        importance: f.importance,
+        importance: rawImportance,
         decayRate: defaults.decayRate,
         sourceTurn: opts.turnId,
         embedding,

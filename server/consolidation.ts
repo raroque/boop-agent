@@ -207,7 +207,18 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
         if (m.segment === "correction" && m.metadata) {
           try {
             const meta = JSON.parse(m.metadata) as { corrects?: string };
-            if (meta.corrects) suffix = ` [corrects: ${meta.corrects}]`;
+            if (meta.corrects) {
+              // Strip `]` and collapse whitespace so user-supplied text
+              // can't break the `[corrects: ...]` annotation format that
+              // proposer/adversary prompts rely on, and can't inject a
+              // fake second memory entry via embedded newlines.
+              const safe = meta.corrects
+                .replace(/[\r\n]+/g, " ")
+                .replace(/\]/g, "")
+                .trim()
+                .slice(0, 300);
+              if (safe) suffix = ` [corrects: ${safe}]`;
+            }
           } catch {
             /* metadata not JSON — ignore */
           }

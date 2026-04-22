@@ -24,9 +24,10 @@ export interface MemoryRecord {
 }
 
 // Per-segment defaults ported from Ping's `category_defaults` config.
-// The extractor leans on these when the LLM doesn't supply a numeric importance,
-// and clean.ts uses decayRate when computing adaptive half-life. Identity /
-// correction decay the slowest, mood-like context decays fastest.
+// extract.ts uses `tier` and `decayRate` from here when storing a new memory,
+// and clamps/falls back to `importance` when the LLM returns a value that's
+// missing or outside [0, 1]. clean.ts uses decayRate when computing adaptive
+// half-life. Identity / correction decay the slowest, context decays fastest.
 export interface SegmentDefault {
   tier: MemoryTier;
   importance: number;
