@@ -12,8 +12,7 @@
 //   - no upstream + forked origin   → one-line hint on how to add upstream
 //   - no upstream + origin IS upstream (raroque/boop-agent) → silent
 
-import { spawn } from "node:child_process";
-import { execSync } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,7 +27,6 @@ const C = {
   dim: "\x1b[2m",
   bold: "\x1b[1m",
   yellow: "\x1b[33m",
-  cyan: "\x1b[36m",
   reset: "\x1b[0m",
 };
 

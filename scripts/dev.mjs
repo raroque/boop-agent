@@ -59,6 +59,7 @@ const C = {
   convex: "\x1b[35m",
   debug: "\x1b[33m",
   ngrok: "\x1b[32m",
+  upstream: "\x1b[34m",
   banner: "\x1b[1;32m",
   dim: "\x1b[2m",
   reset: "\x1b[0m",
@@ -185,16 +186,12 @@ ${C.dim}  Install:   brew install ngrok         (macOS)
 
 console.log(`\nBoop dev starting on port ${port}. Ctrl-C to stop everything.\n`);
 
-// Background "new-version available?" check. Runs concurrently with the child
-// services; prints only when upstream has new commits (or user has no upstream
-// remote configured). Silent on the happy path.
-spawn("node", ["scripts/check-upstream.mjs"], {
-  cwd: root,
-  stdio: "inherit",
-  detached: false,
-}).on("error", () => {
-  /* never block dev on this */
-});
+// Background "new-version available?" check. Runs concurrently with the
+// child services; output is prefixed with `upstream │ ` by run() so it
+// won't collide with startup logs. Silent on the happy path. Not added to
+// the `children` array because it exits on its own — we don't want its
+// non-zero exit (which shouldn't happen but hedge anyway) to tear down dev.
+run("upstream", "node", ["scripts/check-upstream.mjs"]);
 
 const serverChild = run(
   "server",
