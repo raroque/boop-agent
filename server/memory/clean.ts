@@ -5,16 +5,44 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const PRUNE_THRESHOLD = 0.05;
 const ARCHIVE_THRESHOLD = 0.15;
 
+// Ping's adaptive-decay constants. beta pulls the curve; half_life is the
+// nominal half-life (days) that gets stretched by importance. With beta=0.8
+// and half_life=11.25, an importance-0.5 memory has an effective half-life of
+// ~14 days, an importance-0.9 memory ~21 days.
+const DECAY_BETA = 0.8;
+const BASE_HALF_LIFE_DAYS = 11.25;
+const LN2 = Math.log(2);
+
+/**
+ * Adaptive exponential decay ported from Ping's `applyMemoryDecay`
+ * (ping/server/memory/background/decay.ts). The half-life scales with
+ * importance so identity / correction memories persist much longer than
+ * context.
+ *
+ * Access-count reinforcement multiplies the post-decay score — recent,
+ * frequently-recalled memories resist decay. This replaces the old
+ * `min(1, 1 + log1p(accessCount) × 0.1)` formula, which was a no-op because
+ * the floor of the inner expression is ≥ 1 and the cap was also 1.
+ */
 function effectiveScore(mem: {
   importance: number;
   decayRate: number;
   lastAccessedAt: number;
   accessCount: number;
 }): number {
-  const daysSinceAccess = (Date.now() - mem.lastAccessedAt) / DAY_MS;
-  const decay = Math.max(0, 1 - mem.decayRate * daysSinceAccess);
-  const reinforcement = Math.min(1, 1 + Math.log1p(mem.accessCount) * 0.1);
-  return mem.importance * decay * reinforcement;
+  const daysSinceAccess = Math.max(0, (Date.now() - mem.lastAccessedAt) / DAY_MS);
+  const adaptiveHalfLife = BASE_HALF_LIFE_DAYS * (1 + mem.importance);
+  const lambda = (LN2 / Math.max(adaptiveHalfLife, 0.001)) * DECAY_BETA;
+  // decayRate is the per-segment multiplier — higher rate shortens half-life.
+  // Keeps backward-compat for callers that still set decayRate per-tier.
+  const effectiveLambda = lambda * (1 + mem.decayRate);
+  const decayed = mem.importance * Math.exp(-effectiveLambda * daysSinceAccess);
+  const reinforcement = 1 + Math.log1p(mem.accessCount) * 0.1;
+  return clamp(decayed * reinforcement, 0, 1);
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
 }
 
 export async function cleanMemories(): Promise<{

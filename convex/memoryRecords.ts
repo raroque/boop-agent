@@ -7,6 +7,7 @@ const tierV = v.union(v.literal("short"), v.literal("long"), v.literal("permanen
 const segmentV = v.union(
   v.literal("identity"),
   v.literal("preference"),
+  v.literal("correction"),
   v.literal("relationship"),
   v.literal("project"),
   v.literal("knowledge"),
@@ -25,6 +26,7 @@ export const upsert = mutation({
     sourceTurn: v.optional(v.string()),
     supersedes: v.optional(v.array(v.string())),
     embedding: v.optional(v.array(v.float64())),
+    metadata: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -59,6 +61,7 @@ export const upsert = mutation({
         decayRate: args.decayRate,
         supersedes: args.supersedes,
         embedding: args.embedding ?? existing.embedding,
+        metadata: args.metadata ?? existing.metadata,
         lastAccessedAt: now,
       });
       return existing._id;

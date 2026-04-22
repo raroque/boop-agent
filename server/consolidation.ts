@@ -10,7 +10,7 @@ function randomId(prefix: string): string {
 
 const PROPOSER_PROMPT = `You are a memory-consolidation proposer.
 
-Given a list of the user's active memories, find cases where memories should be:
+Given a list of the user's active memories (each tagged with its segment — identity, correction, preference, relationship, project, knowledge, or context), find cases where memories should be:
 - merged: multiple entries say the same durable fact in different words
 - superseded: a newer memory replaces an older one with a conflicting value
 - pruned: an entry is redundant given stronger ones, or obviously wrong
@@ -27,17 +27,28 @@ Hard rules:
   absorb, there's nothing to merge — skip it entirely.
 - "absorb" MUST NOT contain the same id as "keep".
 - "rewriteContent" must be a single clear sentence combining both sources.
-- Be conservative. Similar but distinct facts stay separate.
-- If no changes needed, return {"proposals":[]}.
-- Respond with ONLY the JSON.`;
+- Be conservative on DISTINCT facts — similar but distinct facts stay separate.
 
-const ADVERSARY_PROMPT = `You are a memory-consolidation adversary. A proposer has suggested changes to the user's memory. Your job is to find reasons each proposal could be WRONG or harmful before a judge rules on them.
+Segment-aware rules:
+- A memory tagged "correction" is the user FIXING something they previously said or something in your memory. When a correction contradicts an older fact about the same subject, propose a "supersede" with the correction as "newer" and the contradicted fact(s) as "older". Correction almost always wins.
+- Never merge a correction into a non-correction. If you keep just one, keep the correction.
+- Identity memories (name, role, location) are high-priority. Only supersede an identity with another identity or a correction that clearly updates it.
+- Context memories are low-priority and short-lived — prefer prune over merge for context clutter.
+
+If no changes needed, return {"proposals":[]}. Respond with ONLY the JSON.`;
+
+const ADVERSARY_PROMPT = `You are a memory-consolidation adversary. A proposer has suggested changes to the user's memory (each tagged with segment: identity, correction, preference, relationship, project, knowledge, or context). Your job is to find reasons each proposal could be WRONG or harmful before a judge rules on them.
 
 For each proposal, look for:
 - merges that would blur genuinely distinct facts
 - supersedes where the "newer" memory doesn't actually cover everything the "older" one said
 - prunes that would remove a fact that's rare or harder to rediscover than it looks
 - any loss of context, specificity, source info, or nuance
+
+Segment-aware skepticism:
+- If a correction is being superseded by a non-correction, flag it — that's almost always wrong. Corrections are durable.
+- If an identity memory is being merged or pruned, verify it's clearly redundant — identity facts are expensive to recover.
+- If a correction supersede looks aggressive (removing useful context along with the wrong part), flag the context loss.
 
 Be sharp but fair. If a proposal looks clean, say so — don't manufacture objections. Your objections inform the judge; you don't decide.
 
@@ -187,12 +198,22 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
     }
 
     const payload = memories
-      .map(
-        (m) =>
-          `- [${m.memoryId}] (${m.tier}/${m.segment} i=${m.importance.toFixed(2)} age=${Math.round(
-            (Date.now() - m.createdAt) / 86400000,
-          )}d) ${m.content}`,
-      )
+      .map((m) => {
+        const ageDays = Math.round((Date.now() - m.createdAt) / 86400000);
+        const prefix = `- [${m.memoryId}] (${m.tier}/${m.segment} i=${m.importance.toFixed(2)} age=${ageDays}d)`;
+        // Surface correction metadata inline so the LLM sees what was being
+        // corrected without having to infer it from content alone.
+        let suffix = "";
+        if (m.segment === "correction" && m.metadata) {
+          try {
+            const meta = JSON.parse(m.metadata) as { corrects?: string };
+            if (meta.corrects) suffix = ` [corrects: ${meta.corrects}]`;
+          } catch {
+            /* metadata not JSON — ignore */
+          }
+        }
+        return `${prefix} ${m.content}${suffix}`;
+      })
       .join("\n");
 
     broadcast("consolidation_phase", { runId, phase: "proposing" });

@@ -3,32 +3,38 @@ import { api } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 import { embed } from "../embeddings.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "../usage.js";
-import { DEFAULT_DECAY, SEGMENT_PREFERRED_TIER, makeMemoryId } from "./types.js";
+import { SEGMENT_DEFAULTS, makeMemoryId, type MemorySegment } from "./types.js";
 
 const EXTRACTION_PROMPT = `You are a memory-extraction subagent.
 
 Given a user message + assistant reply, extract any DURABLE facts worth remembering.
-Return STRICT JSON: {"facts":[{"content":"...","segment":"identity|preference|relationship|project|knowledge|context","importance":0.0-1.0}]}
+Return STRICT JSON:
+{"facts":[
+  {"content":"...","segment":"identity|preference|correction|relationship|project|knowledge|context","importance":0.0-1.0,"corrects":"what was wrong, if this is a correction"}
+]}
 
 Rules:
 - Prefer fewer, higher-quality facts over many trivial ones.
 - Skip anything transient ("I'm tired right now"). Context facts should describe ongoing state, not momentary feelings.
 - Segment meanings:
-  - identity: name, role, location, core traits
-  - preference: how they like things done
+  - identity: name, role, location, core traits (highest priority — rarely changes)
+  - correction: the user explicitly corrected something. "No, it's Sarah not Sara." "Actually I prefer X not Y." Set "corrects" to the wrong value or prior belief being overturned. Use this instead of preference/identity when the user is FIXING something rather than stating it fresh.
+  - preference: how they like things done (style, defaults)
   - relationship: people they know + how
   - project: ongoing work or goals
   - knowledge: facts about their world
   - context: current ongoing situation
-- Importance: 0.9+ for identity, 0.5-0.8 for preferences/projects, 0.3-0.5 for context.
+- Importance defaults: identity 0.85, correction 0.80, relationship 0.75, preference 0.70, project 0.65, knowledge 0.60, context 0.40. Bump up or down only when you have a clear reason — trust the defaults.
+- The "corrects" field is ONLY for segment="correction". Omit it (or null) for everything else.
 - Return empty facts array if nothing durable.
 
 Respond with ONLY the JSON object.`;
 
 interface ExtractedFact {
   content: string;
-  segment: "identity" | "preference" | "relationship" | "project" | "knowledge" | "context";
+  segment: MemorySegment;
   importance: number;
+  corrects?: string | null;
 }
 
 export async function extractAndStore(opts: {
@@ -81,18 +87,24 @@ export async function extractAndStore(opts: {
     const facts = parsed.facts ?? [];
 
     for (const f of facts) {
-      const tier = SEGMENT_PREFERRED_TIER[f.segment];
+      const defaults = SEGMENT_DEFAULTS[f.segment];
+      if (!defaults) continue; // skip unknown segment rather than crashing
       const memoryId = makeMemoryId();
       const embedding = (await embed(f.content)) ?? undefined;
+      const metadata =
+        f.segment === "correction" && f.corrects
+          ? JSON.stringify({ corrects: f.corrects })
+          : undefined;
       await convex.mutation(api.memoryRecords.upsert, {
         memoryId,
         content: f.content,
-        tier,
+        tier: defaults.tier,
         segment: f.segment,
         importance: f.importance,
-        decayRate: DEFAULT_DECAY[tier],
+        decayRate: defaults.decayRate,
         sourceTurn: opts.turnId,
         embedding,
+        metadata,
       });
     }
 

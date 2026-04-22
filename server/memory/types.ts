@@ -3,6 +3,7 @@ export type MemoryTier = "short" | "long" | "permanent";
 export type MemorySegment =
   | "identity"
   | "preference"
+  | "correction"
   | "relationship"
   | "project"
   | "knowledge"
@@ -19,8 +20,30 @@ export interface MemoryRecord {
   lastAccessedAt: number;
   sourceTurn?: string;
   supersedes?: string[];
+  metadata?: string;
 }
 
+// Per-segment defaults ported from Ping's `category_defaults` config.
+// The extractor leans on these when the LLM doesn't supply a numeric importance,
+// and clean.ts uses decayRate when computing adaptive half-life. Identity /
+// correction decay the slowest, mood-like context decays fastest.
+export interface SegmentDefault {
+  tier: MemoryTier;
+  importance: number;
+  decayRate: number;
+}
+
+export const SEGMENT_DEFAULTS: Record<MemorySegment, SegmentDefault> = {
+  identity: { tier: "permanent", importance: 0.85, decayRate: 0.01 },
+  correction: { tier: "long", importance: 0.80, decayRate: 0.015 },
+  relationship: { tier: "long", importance: 0.75, decayRate: 0.02 },
+  preference: { tier: "long", importance: 0.70, decayRate: 0.02 },
+  project: { tier: "long", importance: 0.65, decayRate: 0.025 },
+  knowledge: { tier: "long", importance: 0.60, decayRate: 0.03 },
+  context: { tier: "short", importance: 0.40, decayRate: 0.08 },
+};
+
+// Kept for backward compat. New code should prefer SEGMENT_DEFAULTS[segment].decayRate.
 export const DEFAULT_DECAY: Record<MemoryTier, number> = {
   short: 0.05,
   long: 0.02,
@@ -28,12 +51,13 @@ export const DEFAULT_DECAY: Record<MemoryTier, number> = {
 };
 
 export const SEGMENT_PREFERRED_TIER: Record<MemorySegment, MemoryTier> = {
-  identity: "permanent",
-  preference: "long",
-  relationship: "long",
-  project: "long",
-  knowledge: "long",
-  context: "short",
+  identity: SEGMENT_DEFAULTS.identity.tier,
+  preference: SEGMENT_DEFAULTS.preference.tier,
+  correction: SEGMENT_DEFAULTS.correction.tier,
+  relationship: SEGMENT_DEFAULTS.relationship.tier,
+  project: SEGMENT_DEFAULTS.project.tier,
+  knowledge: SEGMENT_DEFAULTS.knowledge.tier,
+  context: SEGMENT_DEFAULTS.context.tier,
 };
 
 export function makeMemoryId(): string {

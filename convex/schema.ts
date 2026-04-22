@@ -28,6 +28,7 @@ export default defineSchema({
     segment: v.union(
       v.literal("identity"),
       v.literal("preference"),
+      v.literal("correction"),
       v.literal("relationship"),
       v.literal("project"),
       v.literal("knowledge"),
@@ -41,6 +42,11 @@ export default defineSchema({
     lifecycle: v.union(v.literal("active"), v.literal("archived"), v.literal("pruned")),
     supersedes: v.optional(v.array(v.string())),
     embedding: v.optional(v.array(v.float64())),
+    // Structured sidecar data (JSON blob). Currently used to carry
+    // `corrects` text on correction-segment memories. Intentionally loose
+    // so extraction prompts can stash provider-specific hints without
+    // schema churn.
+    metadata: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_memory_id", ["memoryId"])
