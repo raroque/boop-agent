@@ -6,6 +6,7 @@ const sourceV = v.union(
   v.literal("execution"),
   v.literal("extract"),
   v.literal("consolidation-proposer"),
+  v.literal("consolidation-adversary"),
   v.literal("consolidation-judge"),
 );
 

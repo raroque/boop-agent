@@ -31,9 +31,24 @@ Hard rules:
 - If no changes needed, return {"proposals":[]}.
 - Respond with ONLY the JSON.`;
 
-const JUDGE_PROMPT = `You are a memory-consolidation judge.
+const ADVERSARY_PROMPT = `You are a memory-consolidation adversary. A proposer has suggested changes to the user's memory. Your job is to find reasons each proposal could be WRONG or harmful before a judge rules on them.
 
-Given a proposer's suggested changes, approve or reject each one based on whether it actually improves memory quality without losing information.
+For each proposal, look for:
+- merges that would blur genuinely distinct facts
+- supersedes where the "newer" memory doesn't actually cover everything the "older" one said
+- prunes that would remove a fact that's rare or harder to rediscover than it looks
+- any loss of context, specificity, source info, or nuance
+
+Be sharp but fair. If a proposal looks clean, say so — don't manufacture objections. Your objections inform the judge; you don't decide.
+
+Return STRICT JSON only:
+{"challenges":[
+  {"proposalIndex":0,"objection":"specific concern, or null if none","severity":"low"|"medium"|"high"}
+]}
+
+Include an entry for every proposal index. Use severity "low" for nitpicks, "high" for real information loss. Respond with ONLY the JSON.`;
+
+const JUDGE_PROMPT = `You are a memory-consolidation judge. You see a proposer's suggested changes AND an adversary's objections to each. Weigh both sides and rule.
 
 Return STRICT JSON only:
 {"decisions":[
@@ -42,9 +57,10 @@ Return STRICT JSON only:
 ]}
 
 Rules:
-- Reject merges that would blur distinct facts.
-- Reject prunes that would remove unique information.
-- Approve supersedes only if the newer memory covers the older entirely.
+- A "high" severity adversary objection should usually result in rejection unless the proposal's benefit clearly outweighs the loss.
+- "medium" objections: weigh case-by-case; often approve with the note that the judge acknowledged the concern.
+- "low" objections and clean proposals: approve.
+- Your rationale should cite the adversary's objection when relevant ("approved despite adversary concern about X because...").
 - Respond with ONLY the JSON.`;
 
 interface Proposal {
@@ -57,6 +73,15 @@ interface Proposal {
   memoryId?: string;
   reason?: string;
 }
+
+interface Challenge {
+  proposalIndex: number;
+  objection: string | null;
+  severity: "low" | "medium" | "high";
+}
+
+const ADVERSARY_MODEL = process.env.BOOP_ADVERSARY_MODEL ?? "claude-haiku-4-5";
+const DEFAULT_MODEL = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
 
 interface Decision {
   proposalIndex: number;
@@ -73,6 +98,7 @@ interface Applied {
 async function runLlm(
   systemPrompt: string,
   userPrompt: string,
+  model: string = DEFAULT_MODEL,
 ): Promise<{ buffer: string; usage: UsageTotals; durationMs: number }> {
   const started = Date.now();
   let buffer = "";
@@ -81,7 +107,7 @@ async function runLlm(
     prompt: userPrompt,
     options: {
       systemPrompt,
-      model: process.env.BOOP_MODEL ?? "claude-sonnet-4-6",
+      model,
       permissionMode: "bypassPermissions",
     },
   })) {
@@ -97,7 +123,7 @@ async function runLlm(
 }
 
 async function recordConsolidationUsage(
-  source: "consolidation-proposer" | "consolidation-judge",
+  source: "consolidation-proposer" | "consolidation-adversary" | "consolidation-judge",
   runId: string,
   usage: UsageTotals,
   durationMs: number,
@@ -194,9 +220,38 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
       return { runId, proposals: 0, merged: 0, pruned: 0 };
     }
 
-    const judgePayload = `Proposals:\n${proposals
+    const proposalsList = proposals
       .map((p, i) => `#${i}: ${JSON.stringify(p)}`)
-      .join("\n")}\n\nOriginal memories:\n${payload}`;
+      .join("\n");
+
+    broadcast("consolidation_phase", { runId, phase: "challenging" });
+    const adversaryPayload = `Proposals:\n${proposalsList}\n\nOriginal memories:\n${payload}`;
+    const adversaryCall = await runLlm(ADVERSARY_PROMPT, adversaryPayload, ADVERSARY_MODEL);
+    await recordConsolidationUsage(
+      "consolidation-adversary",
+      runId,
+      adversaryCall.usage,
+      adversaryCall.durationMs,
+    );
+    const adversaryJson = parseJson<{ challenges: Challenge[] }>(adversaryCall.buffer);
+    const challenges = adversaryJson?.challenges ?? [];
+    broadcast("consolidation_phase", {
+      runId,
+      phase: "challenged",
+      challengesCount: challenges.length,
+      challenges,
+    });
+
+    const challengesByIndex = new Map(challenges.map((c) => [c.proposalIndex, c]));
+    const challengesBlock = proposals
+      .map((_p, i) => {
+        const c = challengesByIndex.get(i);
+        if (!c || !c.objection) return `#${i}: adversary raised no objection`;
+        return `#${i}: [${c.severity}] ${c.objection}`;
+      })
+      .join("\n");
+
+    const judgePayload = `Proposals:\n${proposalsList}\n\nAdversary challenges:\n${challengesBlock}\n\nOriginal memories:\n${payload}`;
 
     broadcast("consolidation_phase", { runId, phase: "judging" });
     const judgeCall = await runLlm(JUDGE_PROMPT, judgePayload);
@@ -288,6 +343,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
       details: JSON.stringify({
         memoriesScanned: memories.length,
         proposals,
+        challenges,
         decisions,
         applied,
       }),
