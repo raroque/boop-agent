@@ -1,0 +1,38 @@
+services:
+  boop:
+    build:
+      context: .
+    image: boop-agent:local
+    command: npm run dev
+    init: true
+    restart: unless-stopped
+    stop_signal: SIGINT
+    env_file:
+      - .env.local
+    environment:
+      NODE_ENV: development
+      BOOP_UPSTREAM_CHECK: "false"
+    ports:
+      - "3456:3456"
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - boop_node_modules:/app/node_modules
+      - boop_npm_cache:/home/boop/.npm
+      - ${HOME}/.convex:/home/boop/.convex
+      - ${HOME}/.claude:/home/boop/.claude
+      - ${HOME}/.sendblue:/home/boop/.sendblue
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3456/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  boop_node_modules:
+  boop_npm_cache:
