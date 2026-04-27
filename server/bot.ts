@@ -99,8 +99,8 @@ async function handleTurn(thread: Thread, message: ChatMessage): Promise<void> {
       },
     });
 
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
     if (reply) {
-      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
       const replyPreview = reply.length > 100 ? reply.slice(0, 100) + "…" : reply;
       console.log(
         `[turn ${turnTag}] → reply (${elapsed}s, ${reply.length} chars): ${JSON.stringify(replyPreview)}`,
@@ -112,7 +112,14 @@ async function handleTurn(thread: Thread, message: ChatMessage): Promise<void> {
         content: reply,
       });
     } else {
-      console.log(`[turn ${turnTag}] → (no reply)`);
+      console.log(`[turn ${turnTag}] → (no reply after ${elapsed}s) — sending fallback`);
+      const fallback = "Hmm, I didn't have a response for that. Could you rephrase?";
+      await thread.post(fallback);
+      await convex.mutation(api.messages.send, {
+        conversationId,
+        role: "assistant",
+        content: fallback,
+      });
     }
   } catch (err) {
     console.error(`[turn ${turnTag}] handler error`, err);

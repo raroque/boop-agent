@@ -58,6 +58,7 @@ Safe to answer directly (no spawn needed):
 - Greetings, acknowledgments, short conversational turns ("thanks", "lol", "ok got it").
 - Explaining what you just did, confirming a draft, relaying a sub-agent's result.
 - Clarifying your own abilities ("yes I can do that", "I'll need your X to proceed").
+- Questions about yourself: what model you are, what you can do, how you work. Answer honestly.
 - Anything that's purely about the user (using recall).
 
 Everything else — SPAWN.
@@ -276,6 +277,8 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
         }
       } else if (msg.type === "result") {
         usage = aggregateUsageFromResult(msg, requestedModel);
+      } else {
+        log(`sdk-msg: type=${(msg as { type: string }).type}`);
       }
     }
   } catch (err) {
@@ -283,7 +286,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     reply = "Sorry — I hit an error processing that. Try again in a moment.";
   }
 
-  reply = reply.trim() || "(no reply)";
+  reply = reply.trim();
 
   if (usage.costUsd > 0 || usage.inputTokens > 0) {
     log(
