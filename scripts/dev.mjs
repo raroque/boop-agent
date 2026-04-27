@@ -225,11 +225,9 @@ if (useNgrok && ngrokInstalled) {
 
 // Wait for all the core services to be ready before printing the banner,
 // so the URL isn't dangled in front of the user while Convex is still booting.
-async function autoRegisterWebhook(publicUrl) {
-  if (envVars.SENDBLUE_AUTO_WEBHOOK === "false") return;
-  const webhookUrl = `${publicUrl}/sendblue/webhook`;
-  const prefix = `${C.ngrok}webhook${C.reset} │ `;
-  const child = spawn("node", ["scripts/sendblue-webhook.mjs", webhookUrl], {
+function runWebhookScript(script, args, label) {
+  const prefix = `${C.ngrok}${label.padEnd(8)}${C.reset} │ `;
+  const child = spawn("node", [script, ...args], {
     cwd: root,
     env: { ...process.env },
   });
@@ -243,7 +241,33 @@ async function autoRegisterWebhook(publicUrl) {
       if (line.trim()) process.stdout.write(prefix + line + "\n");
     }
   });
-  await new Promise((r) => child.on("exit", r));
+  return new Promise((r) => child.on("exit", r));
+}
+
+async function autoRegisterWebhook(publicUrl) {
+  const tasks = [];
+
+  if (envVars.SENDBLUE_AUTO_WEBHOOK !== "false") {
+    tasks.push(
+      runWebhookScript(
+        "scripts/sendblue-webhook.mjs",
+        [`${publicUrl}/sendblue/webhook`],
+        "sendblue",
+      ),
+    );
+  }
+
+  if (envVars.TELEGRAM_BOT_TOKEN) {
+    tasks.push(
+      runWebhookScript(
+        "scripts/telegram-webhook.mjs",
+        [`${publicUrl}/telegram/webhook`],
+        "telegram",
+      ),
+    );
+  }
+
+  await Promise.all(tasks);
 }
 
 Promise.all([

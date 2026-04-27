@@ -4,7 +4,7 @@ import cors from "cors";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { addClient } from "./broadcast.js";
-import { createSendblueRouter } from "./sendblue.js";
+import { bot, webhookPaths } from "./bot.js";
 import { handleUserMessage } from "./interaction-agent.js";
 import { loadIntegrations } from "./integrations/registry.js";
 import { startCleanupLoop } from "./memory/clean.js";
@@ -13,6 +13,33 @@ import { startHeartbeatLoop } from "./heartbeat.js";
 import { startConsolidationLoop } from "./consolidation.js";
 import { cancelAgent, retryAgent } from "./execution-agent.js";
 import { createComposioRouter } from "./composio-routes.js";
+
+/** Bridge Express req/res to Web API Request/Response (used by Chat SDK webhooks) */
+async function bridgeWebhook(
+  name: string,
+  req: express.Request,
+  res: express.Response,
+  handler: ((r: Request, opts?: { waitUntil?: (p: Promise<unknown>) => void }) => Promise<Response>) | undefined,
+): Promise<void> {
+  if (!handler) {
+    console.error(`[webhook:${name}] handler not found on bot.webhooks`);
+    res.status(500).json({ error: `no handler for adapter "${name}"` });
+    return;
+  }
+  const url = `http://localhost${req.originalUrl}`;
+  // Forward all incoming headers so adapter verification logic (e.g. x-webhook-secret) works
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (typeof v === "string") headers[k] = v;
+  }
+  const rawBody = JSON.stringify(req.body);
+  console.log(`[webhook:${name}] incoming POST body=${rawBody.slice(0, 200)}`);
+  const webReq = new Request(url, { method: req.method, headers, body: rawBody });
+  const webRes = await handler(webReq);
+  console.log(`[webhook:${name}] handler status=${webRes.status}`);
+  const data = await webRes.json().catch(() => null);
+  res.status(webRes.status).json(data ?? {});
+}
 
 async function main() {
   await loadIntegrations();
@@ -29,7 +56,17 @@ async function main() {
     res.json({ ok: true, service: "boop-agent" });
   });
 
-  app.use("/sendblue", createSendblueRouter());
+  // Mount webhook routes for all registered chat adapters
+  for (const [name, path] of Object.entries(webhookPaths)) {
+    const handler = (bot.webhooks as Record<string, (r: Request) => Promise<Response>>)[name];
+    app.post(path, (req, res) => {
+      bridgeWebhook(name, req, res, handler).catch((err) => {
+        console.error(`[${name}] webhook error`, err);
+        if (!res.headersSent) res.status(500).json({ error: String(err) });
+      });
+    });
+  }
+
   app.use("/composio", createComposioRouter());
 
   app.post("/agents/:id/cancel", (req, res) => {
@@ -40,7 +77,6 @@ async function main() {
   app.post("/consolidate", async (_req, res) => {
     try {
       const { runConsolidation } = await import("./consolidation.js");
-      // Fire-and-forget so the HTTP request returns immediately.
       runConsolidation("manual").catch((err) =>
         console.error("[consolidation] manual run failed", err),
       );
@@ -87,7 +123,9 @@ async function main() {
     console.log(`boop-agent server listening on :${port}`);
     console.log(`  health      GET  http://localhost:${port}/health`);
     console.log(`  chat        POST http://localhost:${port}/chat`);
-    console.log(`  sendblue    POST http://localhost:${port}/sendblue/webhook`);
+    for (const [name, path] of Object.entries(webhookPaths)) {
+      console.log(`  ${name.padEnd(12)}POST http://localhost:${port}${path}`);
+    }
     console.log(`  websocket   WS   ws://localhost:${port}/ws`);
   });
 }

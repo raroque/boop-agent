@@ -1,6 +1,6 @@
 ---
 name: convex
-description: Routing skill for Convex work in this repo. Use when the user explicitly invokes the `convex` skill, asks which Convex workflow or skill to use, or says they are working on a Convex app without naming a specific task yet. Do not prefer this skill when the request is clearly about setting up Convex, authentication, components, migrations, or performance.
+description: Routes general Convex requests to the right project skill. Use when the user asks which Convex skill to use or gives an underspecified Convex app task.
 ---
 
 # Convex
