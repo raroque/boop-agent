@@ -1,0 +1,4 @@
+User-Agent: *
+Allow: /
+
+Sitemap: https://boop-agent.vercel.app/sitemap.xml
