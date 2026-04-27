@@ -212,6 +212,7 @@ const debugChild = run(
   /Local:\s+http/,
 );
 const children = [serverChild, convexChild, debugChild];
+const criticalChildren = [serverChild, convexChild, debugChild];
 
 let ngrokUrlReady = Promise.resolve(null);
 if (useNgrok && ngrokInstalled) {
@@ -220,6 +221,16 @@ if (useNgrok && ngrokInstalled) {
     : ["http", port, "--log=stdout", "--log-format=term", "--log-level=info"];
   const ngrokChild = run("ngrok", "ngrok", args);
   children.push(ngrokChild);
+  ngrokChild.on("exit", (code) => {
+    if (!shuttingDown && code !== null && code !== 0) {
+      console.error(
+        `${C.ngrok}ngrok${C.reset} │ exited with code ${code}; keeping local dev services running.`,
+      );
+      console.error(
+        `${C.dim}  iMessage replies via Sendblue need a public tunnel. Check ngrok auth/network, set a stable PUBLIC_URL, or use npm run dev:parallel for local-only work.${C.reset}`,
+      );
+    }
+  });
   ngrokUrlReady = waitForNgrokUrl().catch(() => null);
 }
 
@@ -299,7 +310,7 @@ const shutdown = (code = 0) => {
 };
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
-for (const c of children) {
+for (const c of criticalChildren) {
   c.on("exit", (code) => {
     if (!shuttingDown && code !== null && code !== 0) {
       console.error(`\nA child process exited with code ${code}. Shutting down.`);
