@@ -29,7 +29,7 @@ function readEnv() {
   const p = resolve(root, ".env.local");
   if (!existsSync(p)) return {};
   const env = {};
-  for (const line of readFileSync(p, "utf8").split("\n")) {
+  for (const line of readFileSync(p, "utf8").split(/\r?\n/)) {
     const m = line.match(/^([A-Z0-9_]+)=(.*?)(?:\s+#.*)?$/);
     if (m) env[m[1]] = m[2].trim();
   }

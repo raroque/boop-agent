@@ -3,6 +3,7 @@ import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { broadcast } from "./broadcast.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
+import { pickModel } from "./model-router.js";
 
 function randomId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -97,9 +98,6 @@ interface Challenge {
   severity: "low" | "medium" | "high";
 }
 
-const ADVERSARY_MODEL = process.env.BOOP_ADVERSARY_MODEL ?? "claude-haiku-4-5";
-const DEFAULT_MODEL = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
-
 interface Decision {
   proposalIndex: number;
   approve: boolean;
@@ -115,7 +113,7 @@ interface Applied {
 async function runLlm(
   systemPrompt: string,
   userPrompt: string,
-  model: string = DEFAULT_MODEL,
+  model: string,
 ): Promise<{ buffer: string; usage: UsageTotals; durationMs: number }> {
   const started = Date.now();
   let buffer = "";
@@ -228,7 +226,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
       .join("\n");
 
     broadcast("consolidation_phase", { runId, phase: "proposing" });
-    const proposerCall = await runLlm(PROPOSER_PROMPT, payload);
+    const proposerCall = await runLlm(PROPOSER_PROMPT, payload, pickModel("proposer"));
     await recordConsolidationUsage(
       "consolidation-proposer",
       runId,
@@ -264,7 +262,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
 
     broadcast("consolidation_phase", { runId, phase: "challenging" });
     const adversaryPayload = `Proposals:\n${proposalsList}\n\nOriginal memories:\n${payload}`;
-    const adversaryCall = await runLlm(ADVERSARY_PROMPT, adversaryPayload, ADVERSARY_MODEL);
+    const adversaryCall = await runLlm(ADVERSARY_PROMPT, adversaryPayload, pickModel("adversary"));
     await recordConsolidationUsage(
       "consolidation-adversary",
       runId,
@@ -292,7 +290,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
     const judgePayload = `Proposals:\n${proposalsList}\n\nAdversary challenges:\n${challengesBlock}\n\nOriginal memories:\n${payload}`;
 
     broadcast("consolidation_phase", { runId, phase: "judging" });
-    const judgeCall = await runLlm(JUDGE_PROMPT, judgePayload);
+    const judgeCall = await runLlm(JUDGE_PROMPT, judgePayload, pickModel("judge"));
     await recordConsolidationUsage(
       "consolidation-judge",
       runId,

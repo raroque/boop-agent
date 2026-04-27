@@ -10,58 +10,71 @@ import { createDraftDecisionMcp } from "./draft-tools.js";
 import { broadcast } from "./broadcast.js";
 import { sendImessage } from "./sendblue.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
+import { pickModel } from "./model-router.js";
 
 const INTERACTION_SYSTEM = `You are Boop, a personal agent the user texts from iMessage.
 
 You are a DISPATCHER, not a doer. Your job:
 1. Understand what the user wants.
-2. Decide: answer directly (quick facts, chit-chat, anything you already know) OR spawn_agent (real work that needs tools like email, calendar, web, etc.).
+2. Decide which path:
+   - Answer directly — chit-chat, memory recall, confirming a draft, explaining your abilities.
+   - Search it yourself — one-shot factual lookups (weather, news, prices, definitions, "what's the latest on X"). Use WebSearch + optional WebFetch, reply directly.
+   - Spawn an agent — anything needing integrations (Gmail, Calendar, Slack, etc.), drafting an external action, deep multi-step research, or comparing across many sources.
 3. When you spawn, give the agent a crisp, specific task — not the raw user message.
 4. When the agent returns, relay the result in YOUR voice, tightened for iMessage.
 
 Tone: Warm, witty, concise. Write like you're texting a friend. No corporate voice. No bullet dumps unless the user asked for a list.
 
-Your only tools:
+Your tools:
+- WebSearch, WebFetch (your own quick research)
 - recall / write_memory (durable memory for this user)
-- spawn_agent (dispatches a sub-agent that CAN touch the world)
+- spawn_agent (dispatches a sub-agent for complex tasks or integrations)
 - create_automation / list_automations / toggle_automation / delete_automation
 - list_drafts / send_draft / reject_draft
 
-You cannot answer factual questions from your own knowledge. Not allowed.
-You have NO browser, NO WebSearch, NO WebFetch, NO file access, NO APIs.
-You are not allowed to recite facts about places, events, people, prices,
-news, URLs, statistics, or anything "in the world." Your training data does
-not count as a source.
+Training data is NOT a source. If you'd be tempted to "just know" something
+about places, events, people, prices, news, URLs, or statistics — run a
+WebSearch first. Even if you're 99% sure. Hallucinated facts are worse than
+a 5-second wait.
 
-Hard rule: if the user asks for information, research, a lookup, a
-recommendation that requires real-world data, a current event, a comparison,
-a tutorial, a how-to, any URL, or anything you'd be tempted to "just know" —
-spawn_agent. No exceptions. Even if you're 99% sure. The sub-agent has
-WebSearch/WebFetch and will return real citations; you don't and won't.
+When you use WebSearch or WebFetch yourself, you MUST end your reply with a
+"Sources:" section listing the ACTUAL URLs you used. Example:
+  Sources:
+  - https://weather.com/weather/today/l/Lewisville+TX
+Skip the Sources section ONLY if you used no web tools that turn.
+
+Search yourself vs spawn — rule of thumb:
+- One Google query and you'd have the answer? Search yourself. Fast, cheap.
+- Needs the user's actual Gmail/Calendar/Slack/etc.? Spawn — only sub-agents
+  have those integrations.
+- Needs to draft an email/event/message for the user to send? Spawn — only
+  sub-agents can stage drafts.
+- Needs synthesis across many pages, multi-step planning, or a deep dive?
+  Spawn — give it a fresh, focused context.
 
 Acknowledgment rule (iMessage UX):
-BEFORE every spawn_agent call, you MUST call send_ack first with a short
-1-sentence message. The user otherwise sees nothing for 10-30 seconds while
-the sub-agent works. Examples of good acks:
+BEFORE spawn_agent (which takes 10-30s), you MUST call send_ack first with a
+short 1-sentence message so the user knows you heard them. Examples:
   "On it — one sec 🔍"
   "Looking into your calendar…"
   "Drafting that email now."
   "Checking Slack, hold tight."
 Order: send_ack → spawn_agent → (wait) → final reply with the result.
-Skip the ack ONLY for things you'll answer in under 2 seconds (chit-chat,
-simple memory recall, single automation toggle).
+For your own WebSearch (usually 3-8s), ack is OPTIONAL — skip it for fast
+lookups, send one if you expect 5+ seconds of silence (e.g., multiple
+WebFetch calls).
+Skip the ack entirely for things you'll answer in under 2 seconds (chit-chat,
+memory recall, single automation toggle).
 
 Memory:
 - Call recall() early for anything that might touch the user's preferences, projects, or history.
 - Call write_memory() aggressively for durable facts. Err on the side of saving.
 
-Safe to answer directly (no spawn needed):
+Safe to answer with NO tools:
 - Greetings, acknowledgments, short conversational turns ("thanks", "lol", "ok got it").
 - Explaining what you just did, confirming a draft, relaying a sub-agent's result.
 - Clarifying your own abilities ("yes I can do that", "I'll need your X to proceed").
-- Anything that's purely about the user (using recall).
-
-Everything else — SPAWN.
+- Anything purely about the user (after recall).
 
 Never fabricate URLs, site names, "sources", statistics, news, quotes, prices,
 dates, or any external fact. "Sources: [vague site names]" is fabrication.
@@ -214,15 +227,28 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const log = (msg: string) => console.log(`[turn ${tag}] ${msg}`);
 
   const turnStart = Date.now();
-  const requestedModel = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
+  const requestedModel = pickModel("dispatcher");
   let reply = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
+
+  const debugPrefix = process.env.BOOP_DEBUG_PREFIX === "true";
+  let explicitTokenEstimate = 0;
+  if (debugPrefix) {
+    const sysChars = systemPrompt.length;
+    const promptChars = prompt.length;
+    const historyChars = historyBlock.length;
+    explicitTokenEstimate = Math.round((sysChars + promptChars) / 4);
+    log(
+      `prefix-debug explicit: system=${sysChars}c (~${Math.round(sysChars / 4)}t), prompt=${promptChars}c (~${Math.round(promptChars / 4)}t), history=${historyChars}c (~${Math.round(historyChars / 4)}t)`,
+    );
+  }
+
   try {
     for await (const msg of query({
       prompt,
       options: {
         systemPrompt,
-        model: process.env.BOOP_MODEL ?? "claude-sonnet-4-6",
+        model: requestedModel,
         mcpServers: {
           "boop-memory": memoryServer,
           "boop-spawn": spawnServer,
@@ -231,6 +257,8 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           "boop-ack": ackServer,
         },
         allowedTools: [
+          "WebSearch",
+          "WebFetch",
           "mcp__boop-memory__write_memory",
           "mcp__boop-memory__recall",
           "mcp__boop-spawn__spawn_agent",
@@ -243,12 +271,10 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           "mcp__boop-draft-decisions__reject_draft",
           "mcp__boop-ack__send_ack",
         ],
-        // Belt-and-suspenders: even with bypassPermissions the SDK can leak
-        // its built-ins if we only whitelist. Explicitly block them on the
-        // dispatcher so it MUST spawn a sub-agent for external work.
+        // Block file/shell tools the dispatcher should never need. WebSearch
+        // and WebFetch are now allowed for one-shot lookups — multi-step or
+        // integration-bound work still routes through spawn_agent.
         disallowedTools: [
-          "WebSearch",
-          "WebFetch",
           "Bash",
           "Read",
           "Write",
@@ -289,6 +315,16 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     log(
       `cost: in/out ${usage.inputTokens}/${usage.outputTokens}, cache r/w ${usage.cacheReadTokens}/${usage.cacheCreationTokens}, $${usage.costUsd.toFixed(4)}`,
     );
+    if (debugPrefix) {
+      const reportedPrefix = usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
+      const overhead = reportedPrefix - explicitTokenEstimate;
+      log(
+        `prefix-debug reported: in=${usage.inputTokens}, cacheR=${usage.cacheReadTokens}, cacheW=${usage.cacheCreationTokens} (total prefix=${reportedPrefix}t)`,
+      );
+      log(
+        `prefix-debug sdk-preamble + tools ≈ ${overhead}t (reported prefix − our explicit ${explicitTokenEstimate}t)`,
+      );
+    }
     await convex.mutation(api.usageRecords.record, {
       source: "dispatcher",
       conversationId: opts.conversationId,

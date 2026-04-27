@@ -24,7 +24,7 @@ const envPath = resolve(root, ".env.local");
 function readEnv() {
   if (!existsSync(envPath)) return {};
   const env = {};
-  for (const line of readFileSync(envPath, "utf8").split("\n")) {
+  for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
     const m = line.match(/^([A-Z0-9_]+)=(.*?)(?:\s+#.*)?$/);
     if (m) env[m[1]] = m[2].trim();
   }

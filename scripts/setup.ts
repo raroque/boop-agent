@@ -24,7 +24,7 @@ function spawnChild(cmd: string, args: string[], options: object) {
 
 function readEnv(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
-  const lines = readFileSync(path, "utf8").split("\n");
+  const lines = readFileSync(path, "utf8").split(/\r?\n/);
   const env: Record<string, string> = {};
   for (const line of lines) {
     const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
@@ -376,7 +376,8 @@ Before you start:
       {
         type: "select",
         name: "BOOP_MODEL",
-        message: "Which Claude model should the agent use?",
+        message:
+          "Default Claude model? (Background tasks like memory extract + nightly consolidation auto-route to Haiku regardless. See .env.example for per-task overrides.)",
         choices: [
           { title: "claude-sonnet-4-6 (recommended)", value: "claude-sonnet-4-6" },
           { title: "claude-opus-4-6 (slowest, most capable)", value: "claude-opus-4-6" },
