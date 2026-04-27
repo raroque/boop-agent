@@ -1,4 +1,4 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query } from "../providers/index.js";
 import { api } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 import { embed } from "../embeddings.js";

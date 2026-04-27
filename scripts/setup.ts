@@ -310,12 +310,15 @@ async function main() {
   console.log(`
 What this does:
   1. Pulls your Sendblue keys (via their CLI, or you paste them)
-  2. Asks about your Claude model preference
-  3. Runs \`npx convex dev\` to create a Convex project
-  4. Writes .env.local
+  2. Asks which AI provider to use (Claude or OpenAI Codex)
+  3. Asks about your model preference
+  4. Runs \`npx convex dev\` to create a Convex project
+  5. Writes .env.local
 
 Before you start:
-  • A Claude Code subscription:    https://claude.com/code
+  • One of the following AI subscriptions:
+      – Claude Code subscription:  https://claude.com/code  (default, no API key needed)
+      – OpenAI API key:            https://platform.openai.com/api-keys
   • Convex account (free tier):    https://convex.dev
   • Sendblue (free on agent plan): https://sendblue.co
 `);
@@ -361,6 +364,22 @@ Before you start:
       ...sendbluePrompts,
       {
         type: "select",
+        name: "BOOP_PROVIDER",
+        message: "Which AI provider do you want to use?",
+        choices: [
+          {
+            title: "Claude (uses Claude Code subscription — no API key needed)",
+            value: "claude",
+          },
+          {
+            title: "OpenAI Codex (requires an OpenAI API key)",
+            value: "openai",
+          },
+        ],
+        initial: existing.BOOP_PROVIDER === "openai" ? 1 : 0,
+      },
+      {
+        type: (prev: string) => (prev === "claude" ? "select" : null),
         name: "BOOP_MODEL",
         message: "Which Claude model should the agent use?",
         choices: [
@@ -390,6 +409,38 @@ Before you start:
       },
     },
   );
+
+  // ---- OpenAI model selection (only when provider is openai) ---------------
+  if (answers.BOOP_PROVIDER === "openai") {
+    const { OPENAI_MODEL } = await prompts(
+      {
+        type: "select",
+        name: "OPENAI_MODEL",
+        message: "Which OpenAI model should the agent use?",
+        choices: [
+          {
+            title: "codex-mini-latest (recommended for coding tasks)",
+            value: "codex-mini-latest",
+          },
+          { title: "gpt-4.1 (general purpose)", value: "gpt-4.1" },
+          { title: "gpt-4.1-mini (fast and cheap)", value: "gpt-4.1-mini" },
+          { title: "o4-mini (advanced reasoning)", value: "o4-mini" },
+        ],
+        initial: (() => {
+          const cur = existing.OPENAI_MODEL ?? "codex-mini-latest";
+          const idx = ["codex-mini-latest", "gpt-4.1", "gpt-4.1-mini", "o4-mini"].indexOf(cur);
+          return idx >= 0 ? idx : 0;
+        })(),
+      },
+      {
+        onCancel: () => {
+          console.log("Setup cancelled.");
+          process.exit(1);
+        },
+      },
+    );
+    (answers as any).OPENAI_MODEL = OPENAI_MODEL ?? existing.OPENAI_MODEL ?? "codex-mini-latest";
+  }
 
   // Merge CLI-sourced defaults with what the user answered (answer wins).
   Object.assign(answers, {
@@ -455,6 +506,53 @@ Before you start:
     console.log(
       `\nSkipped. Add COMPOSIO_API_KEY to .env.local later to enable integrations.`,
     );
+  }
+
+  // ---- OpenAI API key (only when provider is openai) -------------------------
+  if (answers.BOOP_PROVIDER === "openai") {
+    banner("OpenAI API key");
+    const existingOpenAI = existing.OPENAI_API_KEY ?? "";
+    const { openaiKeyMode } = await prompts(
+      {
+        type: "select",
+        name: "openaiKeyMode",
+        message: existingOpenAI
+          ? "OpenAI API key detected. Keep it or replace?"
+          : "Paste your OpenAI API key (from https://platform.openai.com/api-keys)",
+        choices: existingOpenAI
+          ? [
+              { title: "Keep existing key", value: "keep" },
+              { title: "Replace", value: "replace" },
+            ]
+          : [{ title: "Paste key now", value: "replace" }],
+        initial: 0,
+      },
+      {
+        onCancel: () => {
+          console.log("Setup cancelled.");
+          process.exit(1);
+        },
+      },
+    );
+    if (openaiKeyMode === "replace") {
+      const { OPENAI_API_KEY } = await prompts(
+        {
+          type: "password",
+          name: "OPENAI_API_KEY",
+          message: "OpenAI API key (starts with sk-):",
+          initial: "",
+        },
+        {
+          onCancel: () => {
+            console.log("Setup cancelled.");
+            process.exit(1);
+          },
+        },
+      );
+      (answers as any).OPENAI_API_KEY = OPENAI_API_KEY || existingOpenAI;
+    } else {
+      (answers as any).OPENAI_API_KEY = existingOpenAI;
+    }
   }
 
   // ---- Tunnel configuration ------------------------------------------------
@@ -525,8 +623,16 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
   if (env.VITE_CONVEX_URL?.includes("example.convex.cloud")) delete env.VITE_CONVEX_URL;
   writeEnv(ENV_PATH, env);
 
-  banner("Claude authentication");
-  console.log(`This project uses your Claude Code subscription — no Anthropic API key needed.
+  banner(answers.BOOP_PROVIDER === "openai" ? "OpenAI Codex setup" : "Claude authentication");
+  if (answers.BOOP_PROVIDER === "openai") {
+    console.log(`Your OpenAI API key has been saved to .env.local.
+
+The agent will use model: ${(answers as any).OPENAI_MODEL ?? "codex-mini-latest"}
+
+To switch back to Claude at any time, set BOOP_PROVIDER=claude in .env.local.
+`);
+  } else {
+    console.log(`This project uses your Claude Code subscription — no Anthropic API key needed.
 
 If you haven't already:
   • Install Claude Code:  npm install -g @anthropic-ai/claude-code
@@ -536,6 +642,7 @@ If you haven't already:
 The Claude Agent SDK reads the credentials Claude Code saves on disk.
 You can override with ANTHROPIC_API_KEY in .env.local if you'd rather use an API key.
 `);
+  }
 
   if (answers.runConvex) {
     await runConvexDev();

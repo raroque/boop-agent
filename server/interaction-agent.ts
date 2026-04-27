@@ -1,4 +1,4 @@
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { query, tool, createSdkMcpServer } from "./providers/index.js";
 import { z } from "zod";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
