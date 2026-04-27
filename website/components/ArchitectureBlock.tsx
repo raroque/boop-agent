@@ -1,9 +1,5 @@
 import { Bot, Cpu, Database, Plug } from 'lucide-react'
-
-const ASCII_DIAGRAM = ` iMessage  →  Sendblue webhook  →  Interaction agent  →  Sub-agents (per task)
-                                        │                    │
-                                        ▼                    ▼
-                                  Memory store  ←──  Integrations (your MCP tools)`
+import { MermaidDiagram } from './MermaidDiagram'
 
 const COMPONENTS = [
   {
@@ -43,14 +39,9 @@ export function ArchitectureBlock() {
           A clean separation between receiving messages, deciding what to do, and doing the work.
         </p>
 
-        {/* ASCII diagram */}
-        <div className="relative mb-12">
-          <pre
-            className="font-mono text-xs sm:text-sm text-status-green bg-[#111] border border-border rounded-lg p-4 sm:p-6 overflow-x-auto whitespace-pre leading-relaxed"
-            aria-label="Architecture diagram"
-          >
-            {ASCII_DIAGRAM}
-          </pre>
+        {/* Architecture diagram */}
+        <div className="mb-12">
+          <MermaidDiagram />
         </div>
 
         {/* Component cards */}

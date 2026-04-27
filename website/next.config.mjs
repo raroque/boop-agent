@@ -8,6 +8,9 @@ const nextConfig = {
       },
     ],
   },
+  experimental: {
+    optimizePackageImports: ['mermaid'],
+  },
 }
 
 export default nextConfig

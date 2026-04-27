@@ -9,26 +9,27 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "lucide-react": "^0.468.0",
+    "mermaid": "^11.14.0",
     "next": "^14.2.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "lucide-react": "^0.468.0",
-    "remark": "^15.0.1",
-    "remark-gfm": "^4.0.0",
-    "remark-parse": "^11.0.0",
     "rehype": "^13.0.1",
     "rehype-pretty-code": "^0.13.2",
     "rehype-stringify": "^10.0.0",
+    "remark": "^15.0.1",
+    "remark-gfm": "^4.0.0",
+    "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.0",
     "shiki": "^1.0.0",
     "unified": "^11.0.5"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
-    "@types/react": "^18.3.0",
     "@types/node": "^20.0.0",
-    "tailwindcss": "^3.4.0",
+    "@types/react": "^18.3.0",
     "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.47"
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.6.0"
   }
 }
