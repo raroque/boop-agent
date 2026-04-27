@@ -14,10 +14,12 @@ import { startConsolidationLoop } from "./consolidation.js";
 import { cancelAgent, retryAgent } from "./execution-agent.js";
 import { createComposioRouter } from "./composio-routes.js";
 
+const DEBUG_WEBHOOKS = process.env.DEBUG_WEBHOOKS === "true";
+
 /** Bridge Express req/res to Web API Request/Response (used by Chat SDK webhooks) */
 async function bridgeWebhook(
   name: string,
-  req: express.Request,
+  req: express.Request & { rawBody?: Buffer },
   res: express.Response,
   handler: ((r: Request, opts?: { waitUntil?: (p: Promise<unknown>) => void }) => Promise<Response>) | undefined,
 ): Promise<void> {
@@ -28,17 +30,26 @@ async function bridgeWebhook(
   }
   const url = `http://localhost${req.originalUrl}`;
   // Forward all incoming headers so adapter verification logic (e.g. x-webhook-secret) works
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(req.headers)) {
     if (typeof v === "string") headers[k] = v;
   }
-  const rawBody = JSON.stringify(req.body);
-  console.log(`[webhook:${name}] incoming POST body=${rawBody.slice(0, 200)}`);
-  const webReq = new Request(url, { method: req.method, headers, body: rawBody });
+  // Preserve original bytes for HMAC signature verification (Slack, GitHub, Discord, etc.)
+  const body = req.rawBody?.toString("utf-8") ?? JSON.stringify(req.body);
+  if (DEBUG_WEBHOOKS) {
+    console.log(`[webhook:${name}] incoming POST ${body.length}b`);
+  }
+  const webReq = new Request(url, { method: req.method, headers, body });
   const webRes = await handler(webReq);
-  console.log(`[webhook:${name}] handler status=${webRes.status}`);
-  const data = await webRes.json().catch(() => null);
-  res.status(webRes.status).json(data ?? {});
+  if (DEBUG_WEBHOOKS) {
+    console.log(`[webhook:${name}] handler status=${webRes.status}`);
+  }
+  // Proxy response faithfully — some adapters return plain text (URL verification challenges)
+  for (const [k, v] of webRes.headers.entries()) {
+    res.setHeader(k, v);
+  }
+  const responseBody = Buffer.from(await webRes.arrayBuffer());
+  res.status(webRes.status).send(responseBody);
 }
 
 async function main() {
@@ -50,7 +61,13 @@ async function main() {
 
   const app = express();
   app.use(cors());
-  app.use(express.json({ limit: "2mb" }));
+  // Capture raw body bytes before parsing so HMAC signature verification works in all adapters
+  app.use(express.json({
+    limit: "2mb",
+    verify: (req: express.Request & { rawBody?: Buffer }, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }));
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, service: "boop-agent" });

@@ -125,13 +125,18 @@ async function handleTurn(thread: Thread, message: ChatMessage): Promise<void> {
 // Event routing
 // ---------------------------------------------------------------------------
 
-// Catch-all for unsubscribed threads — covers SMS/RCS/iMessage (Sendblue
-// adapter doesn't implement isDM so onDirectMessage never fires for it),
-// and also Telegram/Slack DMs that don't use @-mentions.
-bot.onNewMessage(/[\s\S]*/, handleTurn);
+// DMs on platforms that implement isDM (Telegram, Slack, Discord, Teams, etc.)
+bot.onDirectMessage(async (thread, message) => handleTurn(thread, message));
 
 // @-mentions in channels (Slack, Discord, Teams, Google Chat)
 bot.onNewMention(async (thread, message) => handleTurn(thread, message));
+
+// Sendblue fallback: adapter doesn't implement isDM so onDirectMessage never fires.
+// Scoped to sendblue only to prevent double-firing alongside onDirectMessage/onNewMention.
+bot.onNewMessage(/[\s\S]*/, async (thread, message) => {
+  if (thread.adapter.name !== "sendblue") return;
+  await handleTurn(thread, message);
+});
 
 // Subscribed threads (follow-up messages after first interaction)
 bot.onSubscribedMessage(async (thread, message) => handleTurn(thread, message));
