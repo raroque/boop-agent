@@ -43,6 +43,20 @@ const hasStaticUrl =
   publicUrl && !publicUrl.includes("localhost") && !publicUrl.includes("127.0.0.1");
 const useNgrok = !hasStaticUrl || Boolean(ngrokDomain);
 
+// On Windows, npm-installed CLIs (npx, sendblue, …) are .cmd batch files.
+// Use shell:true so the shell resolves the .cmd extension AND propagates stdio
+// from grandchildren (tsx watch's child node process). Pass cmd+args as a
+// single string with empty args array to avoid the DEP0190 deprecation warning.
+const IS_WIN = process.platform === "win32";
+const NPM_CMDS = new Set(["npx", "npm", "sendblue"]);
+function spawnChild(cmd, args, options) {
+  if (IS_WIN && NPM_CMDS.has(cmd)) {
+    const line = [cmd, ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
+    return spawn(line, [], { ...options, shell: true, windowsHide: true });
+  }
+  return spawn(cmd, args, options);
+}
+
 // --- binary detection ---------------------------------------------------
 function hasBinary(name) {
   return new Promise((ok) => {
@@ -73,12 +87,13 @@ const NOISE_TRIGGERS = [
   /\[vite\] ws proxy error/,
   /Error: write EPIPE/,
   /Error: read ECONNRESET/,
+  /Error: write ECONNABORTED/,
   /AggregateError \[ECONNREFUSED\]/,
 ];
 const STACK_LINE = /^\s+at\s/;
 
 function run(name, cmd, args, readyPattern) {
-  const child = spawn(cmd, args, {
+  const child = spawnChild(cmd, args, {
     cwd: root,
     env: { ...process.env, FORCE_COLOR: "1" },
   });
@@ -193,10 +208,13 @@ console.log(`\nBoop dev starting on port ${port}. Ctrl-C to stop everything.\n`)
 // non-zero exit (which shouldn't happen but hedge anyway) to tear down dev.
 run("upstream", "node", ["scripts/check-upstream.mjs"]);
 
+// Use `node --import tsx --watch` instead of `npx tsx watch` so we spawn a real
+// .exe directly (no .cmd shell layer). Avoids stdio loss when tsx watch's
+// grandchild node process writes to a piped stdout through cmd.exe on Windows.
 const serverChild = run(
   "server",
-  "npx",
-  ["tsx", "watch", "server/index.ts"],
+  "node",
+  ["--import", "tsx", "--watch", "server/index.ts"],
   /listening on :/,
 );
 const convexChild = run(

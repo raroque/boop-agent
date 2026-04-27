@@ -11,11 +11,19 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const envPath = resolve(root, ".env.local");
 
+const IS_WIN = process.platform === "win32";
+const NPM_CMDS = new Set(["npx", "npm", "sendblue"]);
+function spawnChild(cmd, args, options) {
+  if (IS_WIN && NPM_CMDS.has(cmd)) {
+    const line = [cmd, ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
+    return spawn(line, [], { ...options, shell: true, windowsHide: true });
+  }
+  return spawn(cmd, args, options);
+}
+
 function hasBinary(name) {
   return new Promise((ok) => {
-    const p = spawn(process.platform === "win32" ? "where" : "which", [name], {
-      stdio: "ignore",
-    });
+    const p = spawn(IS_WIN ? "where" : "which", [name], { stdio: "ignore" });
     p.on("exit", (code) => ok(code === 0));
     p.on("error", () => ok(false));
   });
@@ -23,7 +31,7 @@ function hasBinary(name) {
 
 function runCapture(cmd, args) {
   return new Promise((ok, fail) => {
-    const p = spawn(cmd, args, { cwd: root });
+    const p = spawnChild(cmd, args, { cwd: root });
     let out = "";
     p.stdout.on("data", (d) => {
       const s = d.toString();

@@ -2,11 +2,25 @@
 import prompts from "prompts";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_PATH = resolve(ROOT, ".env.local");
 const EXAMPLE_PATH = resolve(ROOT, ".env.example");
+
+// On Windows, npm-installed CLIs are .cmd batch files. Use shell:true so the
+// shell resolves the extension and propagates stdio from grandchildren. Pass
+// cmd+args as a single string with empty args array to avoid DEP0190.
+const IS_WIN = process.platform === "win32";
+const NPM_CMDS = new Set(["npx", "npm", "sendblue"]);
+function spawnChild(cmd: string, args: string[], options: object) {
+  if (IS_WIN && NPM_CMDS.has(cmd)) {
+    const line = [cmd, ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
+    return spawn(line, [], { ...options, shell: true, windowsHide: true } as any);
+  }
+  return spawn(cmd, args, options as any);
+}
 
 function readEnv(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
@@ -80,7 +94,7 @@ async function runConvexDev(): Promise<void> {
   }
 
   await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn("npx", args, { stdio: "inherit", cwd: ROOT });
+    const child = spawnChild("npx", args, { stdio: "inherit", cwd: ROOT });
     child.on("exit", (code) =>
       code === 0 ? resolvePromise() : reject(new Error(`convex dev exited ${code}`)),
     );
@@ -97,14 +111,14 @@ function hasBinary(name: string): Promise<boolean> {
 }
 
 function openInBrowser(url: string): void {
-  const cmd =
-    process.platform === "darwin"
-      ? "open"
-      : process.platform === "win32"
-        ? "start"
-        : "xdg-open";
   try {
-    spawn(cmd, [url], { stdio: "ignore", detached: true }).unref();
+    if (process.platform === "darwin") {
+      spawn("open", [url], { stdio: "ignore", detached: true }).unref();
+    } else if (process.platform === "win32") {
+      spawn("cmd.exe", ["/c", "start", url], { stdio: "ignore", detached: true }).unref();
+    } else {
+      spawn("xdg-open", [url], { stdio: "ignore", detached: true }).unref();
+    }
   } catch {
     /* ignore — fall back to the printed URL */
   }
@@ -112,7 +126,7 @@ function openInBrowser(url: string): void {
 
 function runInherit(cmd: string, args: string[]): Promise<void> {
   return new Promise((ok, fail) => {
-    const child = spawn(cmd, args, { stdio: "inherit", cwd: ROOT });
+    const child = spawnChild(cmd, args, { stdio: "inherit", cwd: ROOT });
     child.on("exit", (code) =>
       code === 0 ? ok() : fail(new Error(`${cmd} ${args.join(" ")} exited ${code}`)),
     );
@@ -122,7 +136,7 @@ function runInherit(cmd: string, args: string[]): Promise<void> {
 
 function runCapture(cmd: string, args: string[]): Promise<string> {
   return new Promise((ok, fail) => {
-    const child = spawn(cmd, args, { stdio: ["inherit", "pipe", "pipe"], cwd: ROOT });
+    const child = spawnChild(cmd, args, { stdio: ["inherit", "pipe", "pipe"], cwd: ROOT });
     let out = "";
     child.stdout.on("data", (d) => {
       const s = d.toString();
@@ -565,6 +579,7 @@ You can override with ANTHROPIC_API_KEY in .env.local if you'd rather use an API
 Before you start: install ngrok (one-time).
 
   brew install ngrok                           # macOS
+  choco install ngrok                          # Windows (chocolatey)
   # or download:  https://ngrok.com/download
   ngrok config add-authtoken <your-token>      # free at https://dashboard.ngrok.com
 
