@@ -16,11 +16,7 @@ export default defineConfig(({ mode }) => {
     envDir: PROJECT_ROOT,
     plugins: [react(), tailwindcss()],
     server: {
-<<<<<<< Updated upstream
-      host: "0.0.0.0",
-=======
       host: true,
->>>>>>> Stashed changes
       port: 5173,
       proxy: {
         "/api": {
