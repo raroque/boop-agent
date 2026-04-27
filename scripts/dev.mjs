@@ -137,24 +137,26 @@ async function waitForNgrokUrl(timeoutMs = 15000) {
 
 function showBanner(url, stable) {
   const line = "═".repeat(68);
-  const webhook = `${url}/sendblue/webhook`;
   const dashboard = `http://localhost:5173`;
-  const from = envVars.SENDBLUE_FROM_NUMBER;
-  const fromLine = from
-    ? `  📱 Text this Sendblue number:  ${from}  (from a DIFFERENT phone)`
-    : `  ⚠ SENDBLUE_FROM_NUMBER is not set — outbound sends will fail.\n     Run: npm run sendblue:sync   (pulls it from the Sendblue CLI)`;
+
+  // Build per-platform webhook lines dynamically
+  const platformLines = [];
+  if (envVars.SENDBLUE_API_KEY && envVars.SENDBLUE_API_SECRET && envVars.SENDBLUE_FROM_NUMBER) {
+    platformLines.push(`  📮 Sendblue webhook:             ${url}/sendblue/webhook`);
+    platformLines.push(`  📱 Text this number:             ${envVars.SENDBLUE_FROM_NUMBER}  (from a DIFFERENT phone)`);
+  }
+  if (envVars.TELEGRAM_BOT_TOKEN) {
+    platformLines.push(`  ✈️  Telegram webhook:             ${url}/telegram/webhook`);
+  }
 
   const headline = stable
     ? `your STABLE public URL is live.`
-    : `ngrok tunnel is live  (webhook auto-registered with Sendblue).`;
+    : `ngrok tunnel is live  (webhooks auto-registered).`;
   const footer = stable
     ? ``
-    : `\n${C.dim}  ℹ The inbound webhook above was registered with Sendblue automatically.
-    Set SENDBLUE_AUTO_WEBHOOK=false in .env.local to disable, or pick a
-    stable URL (ngrok paid / Cloudflare Tunnel) via \`npm run setup\`.${C.reset}\n`;
-  const guide = stable
-    ? `\n  → First time? Sendblue dashboard → API Settings → Webhook\n    Configuration → add ${webhook} as INBOUND MESSAGE.\n`
-    : ``;
+    : `\n${C.dim}  ℹ Webhooks above were registered automatically on boot.
+    Set SENDBLUE_AUTO_WEBHOOK=false in .env.local to disable Sendblue auto-register.
+    Use a stable URL (ngrok paid / Cloudflare Tunnel) via \`npm run setup\`.${C.reset}\n`;
 
   console.log(`
 ${C.banner}${line}
@@ -162,8 +164,7 @@ ${C.banner}${line}
 
   🐶 Debug dashboard (click me):   ${dashboard}
   🌐 Public URL:                   ${url}
-  📮 Sendblue webhook (inbound):   ${webhook}
-${fromLine}${guide}
+${platformLines.join("\n")}
 ${line}${C.reset}${footer}`);
 }
 
@@ -225,11 +226,9 @@ if (useNgrok && ngrokInstalled) {
 
 // Wait for all the core services to be ready before printing the banner,
 // so the URL isn't dangled in front of the user while Convex is still booting.
-async function autoRegisterWebhook(publicUrl) {
-  if (envVars.SENDBLUE_AUTO_WEBHOOK === "false") return;
-  const webhookUrl = `${publicUrl}/sendblue/webhook`;
-  const prefix = `${C.ngrok}webhook${C.reset} │ `;
-  const child = spawn("node", ["scripts/sendblue-webhook.mjs", webhookUrl], {
+function runWebhookScript(script, args, label) {
+  const prefix = `${C.ngrok}${label.padEnd(8)}${C.reset} │ `;
+  const child = spawn("node", [script, ...args], {
     cwd: root,
     env: { ...process.env },
   });
@@ -243,7 +242,33 @@ async function autoRegisterWebhook(publicUrl) {
       if (line.trim()) process.stdout.write(prefix + line + "\n");
     }
   });
-  await new Promise((r) => child.on("exit", r));
+  return new Promise((r) => child.on("exit", r));
+}
+
+async function autoRegisterWebhook(publicUrl) {
+  const tasks = [];
+
+  if (envVars.SENDBLUE_AUTO_WEBHOOK !== "false") {
+    tasks.push(
+      runWebhookScript(
+        "scripts/sendblue-webhook.mjs",
+        [`${publicUrl}/sendblue/webhook`],
+        "sendblue",
+      ),
+    );
+  }
+
+  if (envVars.TELEGRAM_BOT_TOKEN) {
+    tasks.push(
+      runWebhookScript(
+        "scripts/telegram-webhook.mjs",
+        [`${publicUrl}/telegram/webhook`],
+        "telegram",
+      ),
+    );
+  }
+
+  await Promise.all(tasks);
 }
 
 Promise.all([

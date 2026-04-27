@@ -271,6 +271,79 @@ Visit `http://localhost:5173` for the debug dashboard (chat, agents, memory, eve
 
 ---
 
+## Adding more chat platforms
+
+Boop uses [Chat SDK](https://chat-sdk.dev) under the hood. iMessage (Sendblue) and Telegram ship out of the box — adding WhatsApp, Slack, Discord, Teams, or any other supported platform is a one-file change.
+
+### How it works
+
+All adapters are registered in [`server/bot.ts`](server/bot.ts). Each call to `registerIfConfigured` adds a platform: it checks for the required env vars, creates the adapter, and mounts a webhook route automatically. No changes needed anywhere else.
+
+```typescript
+// server/bot.ts — add this block for your new platform
+registerIfConfigured(
+  "slack",                               // adapter name (must match adapter's .name)
+  "/slack/webhook",                      // webhook path Express will mount
+  ["SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"],  // env vars that must be set
+  () => createSlackAdapter(),            // factory called only when vars are present
+);
+```
+
+`npm run dev` picks up the new route automatically and prints it in the startup output:
+
+```
+server │ [bot] registered adapter: slack → POST /slack/webhook
+```
+
+### Supported platforms
+
+| Platform | Package | Required env vars |
+|---|---|---|
+| iMessage (Sendblue) | `chat-adapter-sendblue` | `SENDBLUE_API_KEY`, `SENDBLUE_API_SECRET`, `SENDBLUE_FROM_NUMBER` |
+| Telegram | `@chat-adapter/telegram` | `TELEGRAM_BOT_TOKEN` |
+| Slack | `@chat-adapter/slack` | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` |
+| WhatsApp (via Twilio) | `@chat-adapter/whatsapp` | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER` |
+| Discord | `@chat-adapter/discord` | `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY` |
+| Microsoft Teams | `@chat-adapter/teams` | `TEAMS_APP_ID`, `TEAMS_APP_PASSWORD` |
+| Google Chat | `@chat-adapter/google-chat` | `GOOGLE_CHAT_SERVICE_ACCOUNT_KEY` |
+| GitHub | `@chat-adapter/github` | `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET` |
+| Linear | `@chat-adapter/linear` | `LINEAR_WEBHOOK_SECRET` |
+
+See the [Chat SDK adapter directory](https://chat-sdk.dev/adapters) for the full list and exact config options.
+
+### Step-by-step: adding Slack
+
+1. Install the adapter:
+   ```bash
+   npm install @chat-adapter/slack
+   ```
+
+2. Add env vars to `.env.local`:
+   ```
+   SLACK_BOT_TOKEN=xoxb-...
+   SLACK_SIGNING_SECRET=...
+   ```
+
+3. Add one block to `server/bot.ts`:
+   ```typescript
+   import { createSlackAdapter } from "@chat-adapter/slack";
+
+   registerIfConfigured(
+     "slack",
+     "/slack/webhook",
+     ["SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"],
+     () => createSlackAdapter(),
+   );
+   ```
+
+4. Point your Slack app's Event Subscriptions URL to `<PUBLIC_URL>/slack/webhook`.
+
+5. Restart `npm run dev`. The agent now responds on both iMessage and Slack using the same logic.
+
+All platforms share the same handlers, memory, automations, and Composio integrations — everything just works.
+
+---
+
 ## Architecture in 30 seconds
 
 ```

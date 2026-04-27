@@ -2,7 +2,7 @@ import { Cron } from "croner";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { spawnExecutionAgent } from "./execution-agent.js";
-import { sendImessage } from "./sendblue.js";
+import { bot } from "./bot.js";
 import { broadcast } from "./broadcast.js";
 
 function randomId(prefix: string): string {
@@ -59,10 +59,14 @@ async function runAutomation(a: {
     });
 
     if (a.notifyConversationId && res.result) {
-      if (a.notifyConversationId.startsWith("sms:")) {
-        const number = a.notifyConversationId.slice(4);
-        const preamble = `[${a.name}]\n\n`;
-        await sendImessage(number, preamble + res.result);
+      // Post via Chat SDK — works for any registered adapter (sms, slack, etc.)
+      // Normalise legacy "sms:" prefix stored before Sendblue adapter rename.
+      const dmTarget = a.notifyConversationId.replace(/^sms:/, "sendblue:");
+      try {
+        const dm = await bot.openDM(dmTarget);
+        await dm.post(`[${a.name}]\n\n${res.result}`);
+      } catch (err) {
+        console.error(`[automations] failed to notify ${dmTarget}`, err);
       }
       await convex.mutation(api.messages.send, {
         conversationId: a.notifyConversationId,
