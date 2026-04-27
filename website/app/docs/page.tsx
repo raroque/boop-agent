@@ -5,6 +5,8 @@ import { Footer } from '@/components/Footer'
 import { DocsLayout } from '@/components/DocsLayout'
 import { DocSection } from '@/components/DocSection'
 
+export const revalidate = 3600
+
 export const metadata: Metadata = {
   title: 'Docs',
   description: 'Full documentation for Boop Agent — architecture, integrations, contributing guide, and changelog.',

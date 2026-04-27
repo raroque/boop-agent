@@ -15,6 +15,7 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://boop-agent.vercel.app'),
   title: { default: 'Boop Agent', template: '%s | Boop Agent' },
   description:
     'A proactive iMessage-based personal agent built on the Claude Agent SDK. Multi-agent architecture, robust memory, automations, and 1000+ integrations via Composio.',
