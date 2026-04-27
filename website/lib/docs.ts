@@ -30,7 +30,13 @@ async function parseMarkdown(markdown: string): Promise<string> {
     })
     .use(rehypeStringify, { allowDangerousHtml: true })
     .process(markdown)
-  return String(file)
+
+  // Rewrite relative asset paths to full GitHub raw URLs
+  const html = String(file).replace(
+    /src="(assets\/[^"]+)"/g,
+    'src="https://raw.githubusercontent.com/raroque/boop-agent/main/$1"'
+  )
+  return html
 }
 
 export async function getAllDocs(): Promise<DocFile[]> {

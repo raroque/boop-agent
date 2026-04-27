@@ -39,6 +39,12 @@ export function Navbar() {
           >
             Docs
           </Link>
+          <Link
+            href="/#quickstart"
+            className="text-sm text-text-secondary hover:text-text-primary transition-colors focus-visible:ring-2 focus-visible:ring-accent rounded px-1"
+          >
+            Quick start
+          </Link>
           <a
             href="https://github.com/raroque/boop-agent"
             target="_blank"
@@ -82,6 +88,13 @@ export function Navbar() {
               onClick={() => setOpen(false)}
             >
               Docs
+            </Link>
+            <Link
+              href="/#quickstart"
+              className="text-sm text-text-secondary hover:text-text-primary py-1"
+              onClick={() => setOpen(false)}
+            >
+              Quick start
             </Link>
             <a
               href="https://github.com/raroque/boop-agent"

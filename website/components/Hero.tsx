@@ -1,4 +1,3 @@
-import Image from 'next/image'
 import { Star, Play } from 'lucide-react'
 
 export function Hero() {
@@ -24,12 +23,12 @@ export function Hero() {
           className="absolute inset-0 rounded-full blur-2xl opacity-40"
           style={{ background: 'radial-gradient(circle, rgba(249,115,22,0.4) 0%, transparent 70%)' }}
         />
-        <Image
-          src="/assets/boop.png"
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/assets/boop.gif"
           alt="Boop — your iMessage AI agent mascot"
-          width={120}
-          height={120}
-          priority
+          width={140}
+          height={140}
           className="relative z-10 rounded-2xl"
           style={{ filter: 'drop-shadow(0 0 24px rgba(249,115,22,0.3))' }}
         />
@@ -37,7 +36,15 @@ export function Hero() {
 
       {/* Headline */}
       <h1 className="text-4xl sm:text-5xl md:text-6xl xl:text-7xl font-bold text-text-primary mb-4 tracking-tight leading-tight">
-        Your new best friend 🐶
+        Your new best friend{' '}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/assets/boop.gif"
+          alt="Boop"
+          aria-hidden="true"
+          className="inline-block align-middle"
+          style={{ width: '1em', height: '1em', marginBottom: '0.1em' }}
+        />
       </h1>
 
       {/* Subtitle */}
@@ -65,6 +72,12 @@ export function Hero() {
         >
           <Play size={16} />
           Watch the walkthrough
+        </a>
+        <a
+          href="#quickstart"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-accent/40 text-accent font-semibold text-sm hover:bg-accent/10 transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base"
+        >
+          Quick start ↓
         </a>
       </div>
 

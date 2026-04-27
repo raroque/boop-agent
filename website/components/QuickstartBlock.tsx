@@ -31,7 +31,7 @@ const STEPS = [
 
 export function QuickstartBlock() {
   return (
-    <section className="py-20 px-4" aria-label="Quickstart">
+    <section id="quickstart" className="py-20 px-4 scroll-mt-14" aria-label="Quickstart">
       <div className="max-w-3xl mx-auto">
         <h2 className="text-2xl sm:text-3xl font-bold text-text-primary mb-2 text-center">
           Get running in 5 steps
