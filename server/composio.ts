@@ -43,7 +43,7 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
   { slug: "salesforce", displayName: "Salesforce", authMode: "managed" },
   { slug: "twitter", displayName: "Twitter / X", authMode: "byo" },
   { slug: "linkedin", displayName: "LinkedIn", authMode: "managed" },
-  { slug: "fireflies", displayName: "Fireflies", authMode: "byo" },
+  { slug: "fireflies", displayName: "Fireflies", authMode: "managed" },
 ];
 
 const DISPLAY_NAME_BY_SLUG = new Map(CURATED_TOOLKITS.map((t) => [t.slug, t.displayName]));
@@ -131,6 +131,14 @@ async function fetchAllToolkitMeta(): Promise<Map<string, ToolkitMeta>> {
       toolsCount: it.meta?.toolsCount,
       authScheme: it.auth_config_details?.[0]?.mode,
     });
+  }
+  // Detect breakage if Composio renames `auth_config_details` (we read it as
+  // an undocumented field on the catalog response). One toolkit having it set
+  // is enough — fire a single warning if the whole catalog lacks it.
+  if (out.size > 0 && ![...out.values()].some((m) => m.authScheme)) {
+    console.warn(
+      "[composio] no toolkit in the catalog reported an authScheme — auth_config_details may have been renamed; API_KEY toolkits will fall back to the OAuth path",
+    );
   }
   // Backfill any curated toolkits the list endpoint omitted (e.g. MCP-only
   // toolkits like granola_mcp that don't appear in the paginated catalog).
