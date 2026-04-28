@@ -32,15 +32,18 @@ export interface RequireAdminOptions {
   verifyJwt?: VerifyJwt;
 }
 
-function defaultVerifier(): VerifyJwt {
-  const convexUrl = process.env.CONVEX_URL;
-  if (!convexUrl) {
+// @convex-dev/auth signs JWTs with `CONVEX_SITE_URL` as issuer and serves
+// /.well-known/jwks.json on the .convex.site host (see auth.config.ts).
+// Using CONVEX_URL here would 401 every request in production.
+export function defaultVerifier(): VerifyJwt {
+  const siteUrl = process.env.CONVEX_SITE_URL;
+  if (!siteUrl) {
     throw new Error(
-      "CONVEX_URL not set — Express auth middleware requires it to fetch the Convex JWKS",
+      "CONVEX_SITE_URL not set — Express auth middleware requires it to fetch the Convex JWKS",
     );
   }
-  const jwks = createRemoteJWKSet(new URL("/.well-known/jwks.json", convexUrl));
-  return async (token) => jwtVerify(token, jwks, { issuer: convexUrl });
+  const jwks = createRemoteJWKSet(new URL("/.well-known/jwks.json", siteUrl));
+  return async (token) => jwtVerify(token, jwks, { issuer: siteUrl });
 }
 
 export function requireAdmin(opts: RequireAdminOptions = {}): RequestHandler {
