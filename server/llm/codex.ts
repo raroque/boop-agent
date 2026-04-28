@@ -239,6 +239,8 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
       "networkAccessEnabled",
       "webSearchMode",
       "webSearchEnabled",
+      "modelReasoningEffort",
+      "config",
     ]);
     if (isRecord(options)) {
       const ignored = Object.keys(options).filter((key) => !knownOptionKeys.has(key));
@@ -262,6 +264,7 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
       ...(typeof options?.model === "string" ? { model: options.model } : {}),
       ...(typeof options?.workingDirectory === "string" ? { workingDirectory: options.workingDirectory } : {}),
       ...(Array.isArray(options?.additionalDirectories) ? { additionalDirectories: options.additionalDirectories } : {}),
+      ...(typeof options?.modelReasoningEffort === "string" ? { modelReasoningEffort: options.modelReasoningEffort } : {}),
       ...(typeof options?.webSearchEnabled === "boolean" ? { webSearchEnabled: options.webSearchEnabled } : {}),
       ...(webSearchMode === "disabled" || webSearchMode === "cached" || webSearchMode === "live" ? { webSearchMode } : {}),
       ...(typeof networkAccessEnabled === "boolean" ? { networkAccessEnabled } : {}),

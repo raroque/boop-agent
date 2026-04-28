@@ -347,6 +347,10 @@ The Claude Agent SDK reuses the credentials Claude Code writes to your machine w
 
 If you'd prefer an API key (e.g. for a deployed server), set `ANTHROPIC_API_KEY` in `.env.local` and the SDK will use it instead.
 
+## Using Codex instead
+
+Set `AI_PROVIDER=codex` and run `codex login` once on the machine that runs Boop. `CODEX_MODEL` controls the Codex model; if unset, Boop uses `gpt-5.3-codex`.
+
 ---
 
 ## Environment variables
@@ -358,7 +362,9 @@ Everything lives in `.env.local` (auto-created by `npm run setup`). See `.env.ex
 | `CONVEX_URL` / `VITE_CONVEX_URL` | yes | Convex deployment URL. Written by `npx convex dev`. |
 | `SENDBLUE_API_KEY` / `SENDBLUE_API_SECRET` | yes | From your Sendblue dashboard. |
 | `SENDBLUE_FROM_NUMBER` | yes | Your Sendblue-provisioned number. |
-| `BOOP_MODEL` | no | Default `claude-sonnet-4-6`. |
+| `AI_PROVIDER` | no | `anthropic` (default) or `codex`. |
+| `BOOP_MODEL` | no | Claude model when `AI_PROVIDER=anthropic`. Default `claude-sonnet-4-6`. |
+| `CODEX_MODEL` | no | Codex model when `AI_PROVIDER=codex`. Default `gpt-5.3-codex`. |
 | `BOOP_UPSTREAM_CHECK` | no | Set to `false` to disable the new-version banner on `npm run dev`. Default: on. |
 | `PORT` | no | Default `3456`. |
 | `PUBLIC_URL` | no | Base URL used in the Sendblue webhook. Composio handles its own OAuth callbacks on `platform.composio.dev`, so this is just for inbound iMessage. |

@@ -310,12 +310,12 @@ async function main() {
   console.log(`
 What this does:
   1. Pulls your Sendblue keys (via their CLI, or you paste them)
-  2. Asks about your Claude model preference
+  2. Asks which AI provider/model to use
   3. Runs \`npx convex dev\` to create a Convex project
   4. Writes .env.local
 
 Before you start:
-  • A Claude Code subscription:    https://claude.com/code
+  • Claude Code or Codex login
   • Convex account (free tier):    https://convex.dev
   • Sendblue (free on agent plan): https://sendblue.co
 `);
@@ -361,14 +361,32 @@ Before you start:
       ...sendbluePrompts,
       {
         type: "select",
+        name: "AI_PROVIDER",
+        message: "Which AI provider should Boop use?",
+        choices: [
+          { title: "Anthropic Claude Agent SDK", value: "anthropic" },
+          { title: "OpenAI Codex SDK", value: "codex" },
+        ],
+        initial: existing.AI_PROVIDER === "codex" ? 1 : 0,
+      },
+      {
+        type: "select",
         name: "BOOP_MODEL",
         message: "Which Claude model should the agent use?",
+        skip: (_prev: unknown, values: any) => values.AI_PROVIDER === "codex",
         choices: [
           { title: "claude-sonnet-4-6 (recommended)", value: "claude-sonnet-4-6" },
           { title: "claude-opus-4-6 (slowest, most capable)", value: "claude-opus-4-6" },
           { title: "claude-haiku-4-5 (fastest, cheapest)", value: "claude-haiku-4-5" },
         ],
         initial: 0,
+      },
+      {
+        type: "text",
+        name: "CODEX_MODEL",
+        message: "Which Codex model should the agent use?",
+        skip: (_prev: unknown, values: any) => values.AI_PROVIDER !== "codex",
+        initial: existing.CODEX_MODEL ?? "gpt-5.3-codex",
       },
       {
         type: "text",

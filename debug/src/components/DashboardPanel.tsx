@@ -37,7 +37,7 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
     if (!data) return null;
     const cutoff = cutoffDate(range);
     const days = cutoff
-      ? data.dailyBuckets.filter((d) => d.day >= cutoff)
+      ? data.dailyBuckets.filter((d: any) => d.day >= cutoff)
       : data.dailyBuckets;
 
     let agentCost = 0;

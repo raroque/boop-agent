@@ -67,7 +67,7 @@ export function App() {
   const counts = useQuery(api.memoryRecords.countsByTier, {});
   const agents = useQuery(api.agents.list, {});
   const activeAgentCount = (agents ?? []).filter(
-    (a) => a.status === "running" || a.status === "spawned",
+    (a: any) => a.status === "running" || a.status === "spawned",
   ).length;
 
   useEffect(() => {

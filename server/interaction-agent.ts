@@ -10,6 +10,7 @@ import { createDraftDecisionMcp } from "./draft-tools.js";
 import { broadcast } from "./broadcast.js";
 import { sendImessage } from "./sendblue.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
+import { defaultModel } from "./llm/model.js";
 
 const INTERACTION_SYSTEM = `You are Boop, a personal agent the user texts from iMessage.
 
@@ -198,7 +199,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   });
   const historyBlock = history
     .slice(0, -1)
-    .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+    .map((m: any) => `${m.role.toUpperCase()}: ${m.content}`)
     .join("\n");
 
   const systemPrompt = INTERACTION_SYSTEM.replace(
@@ -214,7 +215,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const log = (msg: string) => console.log(`[turn ${tag}] ${msg}`);
 
   const turnStart = Date.now();
-  const requestedModel = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
+  const requestedModel = defaultModel();
   let reply = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
   try {
@@ -222,7 +223,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
       prompt,
       options: {
         systemPrompt,
-        model: process.env.BOOP_MODEL ?? "claude-sonnet-4-6",
+        model: requestedModel,
         mcpServers: {
           "boop-memory": memoryServer,
           "boop-spawn": spawnServer,

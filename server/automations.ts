@@ -92,7 +92,7 @@ async function runAutomation(a: {
 export async function tickAutomations(): Promise<void> {
   const all = await convex.query(api.automations.list, { enabledOnly: true });
   const now = Date.now();
-  const due = all.filter((a) => a.nextRunAt !== undefined && a.nextRunAt <= now);
+  const due = all.filter((a: any) => a.nextRunAt !== undefined && a.nextRunAt <= now);
   for (const a of due) {
     // fire-and-forget so one slow automation doesn't block others
     runAutomation({

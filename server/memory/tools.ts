@@ -3,7 +3,13 @@ import { z } from "zod";
 import { api } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 import { embed, embeddingsAvailable } from "../embeddings.js";
-import { DEFAULT_DECAY, SEGMENT_PREFERRED_TIER, makeMemoryId } from "./types.js";
+import {
+  DEFAULT_DECAY,
+  SEGMENT_PREFERRED_TIER,
+  makeMemoryId,
+  type MemorySegment,
+  type MemoryTier,
+} from "./types.js";
 
 const tierEnum = z.enum(["short", "long", "permanent"]);
 const segmentEnum = z.enum([
@@ -36,7 +42,7 @@ export function createMemoryMcp(conversationId: string) {
             .describe("memoryId(s) this replaces (will be archived)."),
         },
         async (args) => {
-          const tier = args.tier ?? SEGMENT_PREFERRED_TIER[args.segment];
+          const tier = args.tier ?? SEGMENT_PREFERRED_TIER[args.segment as MemorySegment];
           const memoryId = makeMemoryId();
           const embedding = (await embed(args.content)) ?? undefined;
           await convex.mutation(api.memoryRecords.upsert, {
@@ -45,7 +51,7 @@ export function createMemoryMcp(conversationId: string) {
             tier,
             segment: args.segment,
             importance: args.importance,
-            decayRate: DEFAULT_DECAY[tier],
+            decayRate: DEFAULT_DECAY[tier as MemoryTier],
             supersedes: args.supersedes,
             embedding,
           });
@@ -84,7 +90,7 @@ export function createMemoryMcp(conversationId: string) {
                 embedding: queryVec,
                 limit: args.limit,
               });
-              results = hits.map((h) => h.record);
+              results = hits.map((h: any) => h.record);
               mode = "vector";
             }
           }

@@ -33,7 +33,7 @@ export function EventsPanel({ isDark }: { isDark: boolean }) {
         </div>
       ) : (
         <div className="space-y-1.5">
-          {events.map((e) => (
+          {events.map((e: any) => (
             <div key={e._id} className={`border rounded-lg p-2.5 ${row}`}>
               <div className="flex items-center gap-2 text-[10px] mono">
                 <span

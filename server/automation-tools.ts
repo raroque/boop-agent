@@ -91,12 +91,12 @@ Integrations available: ${integrationHint}`,
           const all = await convex.query(api.automations.list, {
             enabledOnly: args.enabledOnly,
           });
-          const mine = all.filter((a) => a.conversationId === conversationId);
+          const mine = all.filter((a: any) => a.conversationId === conversationId);
           if (mine.length === 0) {
             return { content: [{ type: "text" as const, text: "No automations." }] };
           }
           const lines = mine.map(
-            (a) =>
+            (a: any) =>
               `• [${a.automationId}] ${a.enabled ? "●" : "○"} "${a.name}" — ${a.schedule} — ${a.task}`,
           );
           return { content: [{ type: "text" as const, text: lines.join("\n") }] };
