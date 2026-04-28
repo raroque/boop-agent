@@ -38,7 +38,7 @@ async function main() {
   // BEFORE requireAdmin gates the API surface.
   if (process.env.NODE_ENV === "production") {
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const debugDist = path.resolve(here, "../../debug/dist");
+    const debugDist = path.resolve(here, "../debug/dist");
     app.use(express.static(debugDist));
     app.get("/debug/*", (_req, res) => {
       res.sendFile(path.join(debugDist, "index.html"));
