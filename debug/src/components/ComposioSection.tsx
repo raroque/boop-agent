@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { IntegrationLogo } from "../lib/branding.js";
+import { useApiClient } from "../api-client.js";
 
 type AuthMode = "managed" | "byo";
 
@@ -80,6 +81,7 @@ interface NeedsAuthConfigInfo {
 }
 
 export function ComposioSection({ isDark }: { isDark: boolean }) {
+  const apiClient = useApiClient();
   const [data, setData] = useState<ToolkitsResponse | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -100,7 +102,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
 
   const fetchToolkits = useCallback(async () => {
     try {
-      const r = await fetch("/api/composio/toolkits");
+      const r = await apiClient("/api/composio/toolkits");
       const json = (await r.json()) as ToolkitsResponse;
       setData(json);
     } catch {
@@ -108,7 +110,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [apiClient]);
 
   useEffect(() => {
     fetchToolkits();
@@ -119,7 +121,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
       setBusy(slug);
       setNeedsAuthConfig(null);
       try {
-        const r = await fetch(`/api/composio/toolkits/${slug}/authorize`, { method: "POST" });
+        const r = await apiClient(`/api/composio/toolkits/${slug}/authorize`, { method: "POST" });
         if (!r.ok) {
           const err = await r.json().catch(() => ({}));
           if (err?.needsAuthConfig) {
@@ -156,7 +158,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
               authPollRef.current = null;
             }
             try {
-              await fetch("/api/composio/refresh", { method: "POST" });
+              await apiClient("/api/composio/refresh", { method: "POST" });
             } catch {
               /* ignore */
             }
@@ -169,14 +171,14 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         setBusy(null);
       }
     },
-    [fetchToolkits],
+    [apiClient, fetchToolkits],
   );
 
   const disconnect = useCallback(
     async (slug: string, connectionId: string) => {
       setBusy(`${slug}:${connectionId}`);
       try {
-        const r = await fetch(`/api/composio/toolkits/${slug}/disconnect`, {
+        const r = await apiClient(`/api/composio/toolkits/${slug}/disconnect`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ connectionId }),
@@ -193,7 +195,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         setBusy(null);
       }
     },
-    [fetchToolkits],
+    [apiClient, fetchToolkits],
   );
 
   const rename = useCallback(
@@ -203,7 +205,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
       const alias = next.trim();
       if (!alias || alias === current) return;
       try {
-        const r = await fetch(`/api/composio/connections/${connectionId}/rename`, {
+        const r = await apiClient(`/api/composio/connections/${connectionId}/rename`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ alias }),
@@ -218,7 +220,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         alert(`Rename failed: ${String(err)}`);
       }
     },
-    [fetchToolkits],
+    [apiClient, fetchToolkits],
   );
 
   const toggleTools = useCallback(
@@ -229,7 +231,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
       if (toolsBySlug[slug] && toolsBySlug[slug] !== "error") return;
       setToolsBySlug((prev) => ({ ...prev, [slug]: "loading" }));
       try {
-        const r = await fetch(`/api/composio/toolkits/${slug}/tools`);
+        const r = await apiClient(`/api/composio/toolkits/${slug}/tools`);
         if (!r.ok) throw new Error(r.statusText);
         const json = (await r.json()) as { tools: ToolSummary[] };
         setToolsBySlug((prev) => ({ ...prev, [slug]: json.tools }));
@@ -237,7 +239,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         setToolsBySlug((prev) => ({ ...prev, [slug]: "error" }));
       }
     },
-    [expanded, toolsBySlug],
+    [apiClient, expanded, toolsBySlug],
   );
 
   const cardBg = isDark ? "bg-slate-900/50 border-slate-800" : "bg-white border-slate-200";

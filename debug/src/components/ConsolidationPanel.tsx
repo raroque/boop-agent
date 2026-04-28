@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
 import { useSocket, type SocketEvent } from "../lib/useSocket.js";
+import { useApiClient } from "../api-client.js";
 
 type Phase =
   | "loaded"
@@ -71,6 +72,7 @@ function timeAgo(ts?: number): string {
 }
 
 export function ConsolidationPanel({ isDark }: { isDark: boolean }) {
+  const apiClient = useApiClient();
   const runs = useQuery(api.consolidation.listRuns, { limit: 50 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [livePhases, setLivePhases] = useState<Record<string, LivePhase[]>>({});
@@ -105,7 +107,7 @@ export function ConsolidationPanel({ isDark }: { isDark: boolean }) {
   async function triggerManual() {
     setTriggering(true);
     try {
-      await fetch("/api/consolidate", { method: "POST" });
+      await apiClient("/api/consolidate", { method: "POST" });
     } finally {
       setTimeout(() => setTriggering(false), 1500);
     }
