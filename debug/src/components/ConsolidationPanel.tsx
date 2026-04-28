@@ -3,6 +3,8 @@ import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
 import { useSocket, type SocketEvent } from "../lib/useSocket.js";
 
+const MEMORY_ID_RE = /mem_[a-z0-9]+_[a-z0-9]+/gi;
+
 type Phase =
   | "loaded"
   | "proposing"
@@ -512,6 +514,12 @@ function ReasoningSection({ run, isDark }: { run: any; isDark: boolean }) {
   } catch {
     /* invalid JSON */
   }
+  const memoryIds = memoryIdsFrom(details);
+  const memoryRecords = useQuery(api.memoryRecords.getByMemoryIds, { memoryIds });
+  const memoryById = new Map<string, any>((memoryRecords ?? []).map((m: any) => [m.memoryId, m]));
+  const renderMemoryText = (text = "") => (
+    <MemoryText text={text} memoryById={memoryById} isDark={isDark} />
+  );
 
   if (!details || !details.proposals?.length) {
     return (
@@ -590,11 +598,12 @@ function ReasoningSection({ run, isDark }: { run: any; isDark: boolean }) {
                 {p.type === "merge" && (
                   <>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>keep:</span> {p.keep}
+                      <span className={muted}>keep:</span>{" "}
+                      {renderMemoryText(p.keep)}
                     </div>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
                       <span className={muted}>absorb:</span>{" "}
-                      {(p.absorb ?? []).join(", ")}
+                      {renderMemoryText((p.absorb ?? []).join(", "))}
                     </div>
                     {p.rewriteContent && (
                       <div
@@ -610,22 +619,25 @@ function ReasoningSection({ run, isDark }: { run: any; isDark: boolean }) {
                 {p.type === "supersede" && (
                   <>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>newer:</span> {p.newer}
+                      <span className={muted}>newer:</span>{" "}
+                      {renderMemoryText(p.newer)}
                     </div>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
                       <span className={muted}>older:</span>{" "}
-                      {(p.older ?? []).join(", ")}
+                      {renderMemoryText((p.older ?? []).join(", "))}
                     </div>
                   </>
                 )}
                 {p.type === "prune" && (
                   <>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>memoryId:</span> {p.memoryId}
+                      <span className={muted}>memoryId:</span>{" "}
+                      {renderMemoryText(p.memoryId)}
                     </div>
                     {p.reason && (
                       <div className={isDark ? "text-slate-400" : "text-slate-600"}>
-                        <span className={muted}>reason:</span> {p.reason}
+                        <span className={muted}>reason:</span>{" "}
+                        {renderMemoryText(p.reason)}
                       </div>
                     )}
                   </>
@@ -654,7 +666,7 @@ function ReasoningSection({ run, isDark }: { run: any; isDark: boolean }) {
                   >
                     JUDGE{" "}
                   </span>
-                  {d.rationale}
+                  {renderMemoryText(d.rationale)}
                 </div>
               )}
             </div>
@@ -662,6 +674,106 @@ function ReasoningSection({ run, isDark }: { run: any; isDark: boolean }) {
         })}
       </div>
     </section>
+  );
+}
+
+function memoryIdsFrom(details: any): string[] {
+  if (!details) return [];
+  return [...new Set(JSON.stringify(details).match(MEMORY_ID_RE) ?? [])];
+}
+
+function MemoryText({
+  text,
+  memoryById,
+  isDark,
+}: {
+  text: string;
+  memoryById: Map<string, any>;
+  isDark: boolean;
+}) {
+  const parts = text.split(MEMORY_ID_RE);
+  const ids = text.match(MEMORY_ID_RE) ?? [];
+  return (
+    <>
+      {parts.map((part, idx) => (
+        <span key={`${idx}-${part.slice(0, 8)}`}>
+          {part}
+          {ids[idx] && (
+            <MemoryIdHover memoryId={ids[idx]} memory={memoryById.get(ids[idx])} isDark={isDark} />
+          )}
+        </span>
+      ))}
+    </>
+  );
+}
+
+function MemoryIdHover({
+  memoryId,
+  memory,
+  isDark,
+}: {
+  memoryId?: string;
+  memory?: any;
+  isDark: boolean;
+}) {
+  if (!memoryId) return null;
+  const muted = isDark ? "text-slate-500" : "text-slate-400";
+  const panel = isDark
+    ? "bg-slate-950 border-slate-700 text-slate-200 shadow-black/40"
+    : "bg-white border-slate-200 text-slate-800 shadow-slate-900/15";
+  const pill =
+    memory?.lifecycle === "active"
+      ? isDark
+        ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+        : "bg-emerald-50 text-emerald-700 border-emerald-200"
+      : memory?.lifecycle === "archived"
+        ? isDark
+          ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
+          : "bg-amber-50 text-amber-700 border-amber-200"
+        : isDark
+          ? "bg-rose-500/10 text-rose-300 border-rose-500/20"
+          : "bg-rose-50 text-rose-700 border-rose-200";
+
+  return (
+    <span className="relative inline-block group align-baseline">
+      <span
+        tabIndex={0}
+        className={`cursor-help rounded px-1 py-0.5 font-semibold underline decoration-dotted underline-offset-2 ${
+          isDark
+            ? "text-slate-200 hover:bg-slate-800"
+            : "text-slate-700 hover:bg-slate-100"
+        }`}
+      >
+        {memoryId}
+      </span>
+      <span
+        className={`pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-[24rem] whitespace-normal rounded-lg border p-3 text-left text-xs leading-relaxed shadow-xl group-hover:block group-focus-within:block ${panel}`}
+      >
+        <span className="mb-2 flex items-center gap-2">
+          <span className="font-semibold mono">{memoryId}</span>
+          {memory && (
+            <span className={`rounded border px-1.5 py-0.5 text-[10px] uppercase ${pill}`}>
+              {memory.lifecycle}
+            </span>
+          )}
+        </span>
+        {memory ? (
+          <>
+            <span className={`mb-2 block ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+              {memory.content}
+            </span>
+            <span className={`grid grid-cols-2 gap-x-3 gap-y-1 mono text-[10px] ${muted}`}>
+              <span>tier: {memory.tier}</span>
+              <span>segment: {memory.segment}</span>
+              <span>importance: {Number(memory.importance ?? 0).toFixed(2)}</span>
+              <span>accesses: {memory.accessCount ?? 0}</span>
+            </span>
+          </>
+        ) : (
+          <span className={muted}>Memory not found in current store.</span>
+        )}
+      </span>
+    </span>
   );
 }
 
