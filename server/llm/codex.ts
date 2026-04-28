@@ -13,6 +13,105 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { SdkMcpToolDefinition, McpSdkServerConfigWithInstance } from "./types.js";
 import { z } from "zod";
 
+type CodexApprovalPolicy = "never" | "on-request" | "on-failure" | "untrusted";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isZodSchema(value: unknown): value is z.ZodTypeAny {
+  return isRecord(value) && "_def" in value && typeof (value as { parse?: unknown }).parse === "function";
+}
+
+function isJsonSchemaLike(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  if (Object.keys(value).length === 0) return true;
+  return (
+    typeof value.type === "string" ||
+    "properties" in value ||
+    "$schema" in value ||
+    "oneOf" in value ||
+    "anyOf" in value ||
+    "allOf" in value
+  );
+}
+
+function normalizeInputSchema(inputSchema: unknown): {
+  jsonSchema: unknown;
+  zodSchema?: z.ZodTypeAny;
+} {
+  if (isJsonSchemaLike(inputSchema)) {
+    return { jsonSchema: inputSchema };
+  }
+  const zodSchema = isZodSchema(inputSchema)
+    ? inputSchema
+    : z.object((isRecord(inputSchema) ? inputSchema : {}) as Record<string, z.ZodTypeAny>);
+  return {
+    jsonSchema: zodToJsonSchema(zodSchema, { target: "openAi" }),
+    zodSchema,
+  };
+}
+
+function serializePrompt(prompt: unknown): string {
+  if (typeof prompt === "string") return prompt;
+  if (Array.isArray(prompt)) {
+    return prompt
+      .map((m) => {
+        if (typeof m === "string") return m;
+        if (isRecord(m)) {
+          if (typeof m.text === "string") return m.text;
+          if (Array.isArray(m.content)) {
+            return m.content
+              .map((c) => {
+                if (!isRecord(c)) return "";
+                return typeof c.text === "string" ? c.text : "";
+              })
+              .join("\n");
+          }
+        }
+        try {
+          return JSON.stringify(m);
+        } catch {
+          return String(m);
+        }
+      })
+      .join("\n");
+  }
+  try {
+    return JSON.stringify(prompt);
+  } catch {
+    return String(prompt ?? "");
+  }
+}
+
+function buildInput(prompt: unknown, systemPrompt?: unknown): string {
+  const userPrompt = serializePrompt(prompt);
+  if (typeof systemPrompt !== "string" || !systemPrompt.trim()) {
+    return userPrompt;
+  }
+  return [
+    "System instructions:",
+    systemPrompt.trim(),
+    "",
+    "User request:",
+    userPrompt,
+  ].join("\n");
+}
+
+function mapPermissionModeToApprovalPolicy(permissionMode: unknown): CodexApprovalPolicy | undefined {
+  if (permissionMode === "bypassPermissions") return "never";
+  if (permissionMode === "on-request") return "on-request";
+  if (permissionMode === "on-failure") return "on-failure";
+  if (permissionMode === "untrusted") return "untrusted";
+  return undefined;
+}
+
+function abortError(): Error {
+  const err = new Error("Codex query aborted");
+  err.name = "AbortError";
+  return err;
+}
+
 export function tool(name: string, description: string, inputSchema: any, handler: any): SdkMcpToolDefinition<any> {
   return { name, description, inputSchema, handler };
 }
@@ -23,34 +122,33 @@ export function createSdkMcpServer(options: { name: string; version?: string; to
     { capabilities: { tools: {} } }
   );
 
-  const tools = options.tools || [];
+  const normalizedTools = (options.tools || []).map((t: any) => {
+    const normalized = normalizeInputSchema(t.inputSchema);
+    return {
+      ...t,
+      normalizedInputSchema: normalized.jsonSchema,
+      normalizedZodSchema: normalized.zodSchema,
+    };
+  });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools.map((t: any) => {
-      let schema;
-      if (t.inputSchema && typeof t.inputSchema === "object" && t.inputSchema.type === "object") {
-        // If it's already a plain JSON schema (e.g. from Composio), use it directly
-        schema = t.inputSchema;
-      } else {
-        // Otherwise, treat as Zod object or raw Zod shape and convert
-        const zodObj = t.inputSchema._def ? t.inputSchema : z.object(t.inputSchema);
-        schema = zodToJsonSchema(zodObj, { target: "openAi" });
-      }
-
-      return {
+    tools: normalizedTools.map((t: any) => ({
         name: t.name,
         description: t.description,
-        inputSchema: schema,
-      };
-    }),
+        inputSchema: t.normalizedInputSchema,
+      })),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const t = tools.find((tool: any) => tool.name === request.params.name);
+    const t = normalizedTools.find((tool: any) => tool.name === request.params.name);
     if (!t) {
       throw new Error(`Tool not found: ${request.params.name}`);
     }
-    const result = await t.handler(request.params.arguments || {}, {});
+    const rawArguments = request.params.arguments || {};
+    const parsedArguments = t.normalizedZodSchema
+      ? t.normalizedZodSchema.parse(rawArguments)
+      : rawArguments;
+    const result = await t.handler(parsedArguments, {});
     return result;
   });
 
@@ -95,70 +193,95 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
       };
     }
 
-    const disallowed = options?.disallowedTools || [];
-    const allowed = options?.allowedTools || [];
+    const disallowed = new Set<string>(options?.disallowedTools || []);
+    const allowed = new Set<string>(options?.allowedTools || []);
+    const hasWhitelist = allowed.size > 0;
 
-    // Map high-level tool names to Codex CLI config features
-    const features: Record<string, boolean> = {};
-
-    if (allowed.length > 0) {
-      // If a whitelist is provided, start by disabling common built-ins
-      features["shell_tool"] = allowed.includes("Bash");
-      // Map WebSearch/WebFetch to available browsing features
-      const browsingAllowed = allowed.includes("WebSearch") || allowed.includes("WebFetch");
-      features["browser_use"] = browsingAllowed;
-      features["in_app_browser"] = browsingAllowed;
-      features["multi_agent"] = allowed.includes("Agent") || allowed.includes("Skill");
+    let sandboxMode: "read-only" | "workspace-write" | "danger-full-access" = "workspace-write";
+    if (options?.sandboxMode === "read-only" || options?.sandboxMode === "workspace-write" || options?.sandboxMode === "danger-full-access") {
+      sandboxMode = options.sandboxMode;
     } else {
-      // Fallback to blacklist logic if no whitelist is present
-      if (disallowed.includes("Bash")) features["shell_tool"] = false;
-      if (disallowed.includes("WebSearch") || disallowed.includes("WebFetch")) {
-        features["browser_use"] = false;
-        features["in_app_browser"] = false;
-      }
-      if (disallowed.includes("Agent") || disallowed.includes("Skill")) {
-        features["multi_agent"] = false;
+      const disallowWrites = disallowed.has("Write") || disallowed.has("Edit");
+      const whitelistDisallowsWrites = hasWhitelist && !allowed.has("Write") && !allowed.has("Edit");
+      if (disallowWrites || whitelistDisallowsWrites) {
+        sandboxMode = "read-only";
       }
     }
 
-    // Decide sandbox mode based on disallowed write/edit tools
-    let sandboxMode = "workspace-write";
-    if (disallowed.includes("Write") || disallowed.includes("Edit") || disallowed.includes("Read")) {
-      sandboxMode = "read-only";
-    }
-    // Also enforce read-only if we have a whitelist that DOES NOT include Write/Edit
-    if (allowed.length > 0 && !allowed.includes("Write") && !allowed.includes("Edit")) {
-      sandboxMode = "read-only";
+    const webAllowedByWhitelist = hasWhitelist ? (allowed.has("WebSearch") || allowed.has("WebFetch")) : undefined;
+    const webBlockedByBlacklist = disallowed.has("WebSearch") || disallowed.has("WebFetch");
+    const webSearchMode = options?.webSearchMode ?? (webAllowedByWhitelist === false || webBlockedByBlacklist ? "disabled" : "live");
+    const networkAccessEnabled =
+      typeof options?.networkAccessEnabled === "boolean"
+        ? options.networkAccessEnabled
+        : hasWhitelist
+          ? webAllowedByWhitelist === true
+          : !webBlockedByBlacklist;
+
+    const approvalPolicy =
+      options?.approvalPolicy ??
+      mapPermissionModeToApprovalPolicy(options?.permissionMode);
+
+    const knownOptionKeys = new Set([
+      "mcpServers",
+      "allowedTools",
+      "disallowedTools",
+      "model",
+      "systemPrompt",
+      "permissionMode",
+      "approvalPolicy",
+      "abortController",
+      "settingSources",
+      "workingDirectory",
+      "additionalDirectories",
+      "skipGitRepoCheck",
+      "sandboxMode",
+      "networkAccessEnabled",
+      "webSearchMode",
+      "webSearchEnabled",
+    ]);
+    if (isRecord(options)) {
+      const ignored = Object.keys(options).filter((key) => !knownOptionKeys.has(key));
+      if (ignored.length > 0) {
+        console.warn(`[codex] Ignoring unsupported query options: ${ignored.join(", ")}`);
+      }
+      if (Array.isArray(options.settingSources) && options.settingSources.length > 0) {
+        console.warn("[codex] `settingSources` is not supported by Codex SDK and will be ignored.");
+      }
     }
 
     const codex = new Codex({
       config: {
         mcp: { servers: mcpConfig },
-        features,
-        sandbox: { 
-          mode: sandboxMode,
-        },
-        ...(options?.model ? { model: options.model } : {}),
+        ...(options?.config && isRecord(options.config) ? options.config : {}),
       },
     });
 
     const thread = codex.startThread({
-      skipGitRepoCheck: true,
-      ...(options?.systemPrompt ? { instructions: options.systemPrompt } : {}),
+      skipGitRepoCheck: typeof options?.skipGitRepoCheck === "boolean" ? options.skipGitRepoCheck : true,
+      ...(typeof options?.model === "string" ? { model: options.model } : {}),
+      ...(typeof options?.workingDirectory === "string" ? { workingDirectory: options.workingDirectory } : {}),
+      ...(Array.isArray(options?.additionalDirectories) ? { additionalDirectories: options.additionalDirectories } : {}),
+      ...(typeof options?.webSearchEnabled === "boolean" ? { webSearchEnabled: options.webSearchEnabled } : {}),
+      ...(webSearchMode === "disabled" || webSearchMode === "cached" || webSearchMode === "live" ? { webSearchMode } : {}),
+      ...(typeof networkAccessEnabled === "boolean" ? { networkAccessEnabled } : {}),
+      ...(approvalPolicy ? { approvalPolicy } : {}),
+      sandboxMode,
     });
 
-    const input = typeof prompt === "string"
-      ? prompt
-      : Array.isArray(prompt)
-        ? prompt.map((m: any) => (typeof m === "string" ? m : m.text ?? m.content?.map((c: any) => c.text || "").join("\n") ?? JSON.stringify(m))).join("\n")
-        : JSON.stringify(prompt);
+    const input = buildInput(prompt, options?.systemPrompt);
 
     const abortSignal = options?.abortController?.signal;
+    if (abortSignal?.aborted) {
+      throw abortError();
+    }
     const { events } = await thread.runStreamed(input, { signal: abortSignal });
 
     let fullText = "";
     for await (const event of events) {
-      if (abortSignal?.aborted) break;
+      if (abortSignal?.aborted) {
+        throw abortError();
+      }
 
       if (event.type === "item.updated" || event.type === "item.completed") {
         if (event.item.type === "agent_message") {
@@ -186,8 +309,7 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
           },
           total_cost_usd: 0, // Codex is subscription-based, no per-token cost
         };
-      }
- else if (event.type === "item.started" && event.item.type === "mcp_tool_call") {
+      } else if (event.type === "item.started" && event.item.type === "mcp_tool_call") {
         yield {
           type: "assistant",
           message: {
@@ -210,8 +332,6 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
         fs.unlinkSync(s.socketPath);
       } catch {}
     }
-    try {
-      fs.rmdirSync(socketDir);
-    } catch {}
+    fs.rmSync(socketDir, { recursive: true, force: true });
   }
 }

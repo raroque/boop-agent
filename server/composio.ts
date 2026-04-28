@@ -1,4 +1,4 @@
-import { Composio } from "@composio/core";
+import { Composio, OpenAIProvider } from "@composio/core";
 import { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
 import { createSdkMcpServer, type McpSdkServerConfigWithInstance } from "./llm/index.js";
 import type { IntegrationModule } from "./integrations/registry.js";
@@ -47,16 +47,20 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
 
 const DISPLAY_NAME_BY_SLUG = new Map(CURATED_TOOLKITS.map((t) => [t.slug, t.displayName]));
 
-let singleton: Composio<ClaudeAgentSDKProvider> | null = null;
+let singleton: Composio<any> | null = null;
 
-export function getComposio(): Composio<ClaudeAgentSDKProvider> | null {
+export function getComposio(): Composio<any> | null {
   if (singleton) return singleton;
   const apiKey = process.env.COMPOSIO_API_KEY;
   if (!apiKey) return null;
 
-  singleton = new Composio<ClaudeAgentSDKProvider>({
+  const provider = process.env.AI_PROVIDER === "codex"
+    ? new OpenAIProvider()
+    : new ClaudeAgentSDKProvider();
+
+  singleton = new Composio({
     apiKey,
-    provider: new ClaudeAgentSDKProvider(),
+    provider,
   });
   return singleton;
 }

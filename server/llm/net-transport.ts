@@ -58,8 +58,21 @@ export class NetServerTransport implements Transport {
 
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.server.listen(this.socketPath, () => resolve());
-      this.server.on("error", reject);
+      const previousUmask = process.umask(0o177);
+      const restoreUmask = () => {
+        process.umask(previousUmask);
+      };
+      const onError = (err: Error) => {
+        this.server.off("error", onError);
+        restoreUmask();
+        reject(err);
+      };
+      this.server.once("error", onError);
+      this.server.listen(this.socketPath, () => {
+        this.server.off("error", onError);
+        restoreUmask();
+        resolve();
+      });
     });
   }
 
