@@ -187,7 +187,7 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
         command: process.execPath,
         args: [
           "-e",
-          "const { createConnection } = require('net'); const c = createConnection(process.argv[1], () => { process.stdin.pipe(c); c.pipe(process.stdout); }); c.on('error', () => process.exit(1)); c.on('close', () => process.exit(0));",
+          "const { createConnection } = require('net'); const socketPath = process.argv[process.argv.length - 1]; if (!socketPath) process.exit(1); const c = createConnection(socketPath, () => { process.stdin.pipe(c); c.pipe(process.stdout); }); c.on('error', () => process.exit(1)); c.on('close', () => process.exit(0));",
           socketPath
         ],
       };

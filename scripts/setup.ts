@@ -58,6 +58,12 @@ function writeEnv(path: string, env: Record<string, string>): void {
   writeFileSync(path, out.trim() + "\n");
 }
 
+function cleanConvexUrlEnv(path: string): void {
+  const envContent = readFileSync(path, "utf8");
+  const updated = envContent.replace(/^VITE_CONVEX_URL=.*(\r?\n)?/gm, "");
+  writeFileSync(path, updated);
+}
+
 function banner(s: string) {
   console.log("\n" + "━".repeat(60));
   console.log("  " + s);
@@ -73,7 +79,14 @@ async function runConvexDev(): Promise<void> {
     ? ["convex", "dev", "--once"]
     : ["convex", "dev", "--once", "--configure", "new"];
 
-  console.log(`\nLaunching \`npx ${args.join(" ")}\` to configure your deployment.`);
+  if (!existing.CONVEX_DEPLOYMENT) {
+    // Remove VITE_CONVEX_URL from the env file to allow convex cli to populate it.
+    cleanConvexUrlEnv(ENV_PATH);
+  }
+
+  console.log(
+    `\nLaunching \`npx ${args.join(" ")}\` to configure your deployment.`,
+  );
   console.log("Convex will open a browser window if you're not logged in.");
   if (existing.CONVEX_DEPLOYMENT) {
     console.log(`Reusing existing deployment: ${existing.CONVEX_DEPLOYMENT}`);
@@ -317,7 +330,7 @@ What this does:
 Before you start:
   • Claude Code or Codex login
   • Convex account (free tier):    https://convex.dev
-  • Sendblue (free on agent plan): https://sendblue.co
+  • Sendblue (free on agent plan): https://sendblue.com
 `);
 
   const existing = readEnv(ENV_PATH);
@@ -559,11 +572,16 @@ You can override with ANTHROPIC_API_KEY in .env.local if you'd rather use an API
     await runConvexDev();
     const after = readEnv(ENV_PATH);
 
-    // CONVEX_DEPLOYMENT is what `convex dev` writes; derive CONVEX_URL from it
-    // so it matches even if a stale URL lingered from a previous setup.
-    const deploymentMatch = after.CONVEX_DEPLOYMENT?.match(/^([a-z]+):([\w-]+)/);
+    // CONVEX_URL or VITE_CONVEX_URL is written to .env.local as part of `convex dev`; derive CONVEX_URL from it
+    // if not available, fallback to deriving from CONVEX_DEPLOYMENT.
+    const deploymentMatch =
+      after.CONVEX_DEPLOYMENT?.match(/^([a-z]+):([\w-]+)/);
+
     if (deploymentMatch) {
-      const url = `https://${deploymentMatch[2]}.convex.cloud`;
+      const url =
+        after.CONVEX_URL ||
+        after.VITE_CONVEX_URL ||
+        `https://${deploymentMatch[2]}.convex.cloud`;
       if (after.CONVEX_URL !== url || after.VITE_CONVEX_URL !== url) {
         writeEnv(ENV_PATH, {
           ...after,

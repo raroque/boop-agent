@@ -6,6 +6,7 @@ import { IntegrationLogo, BrailleIndicator, prettyToolName } from "../lib/brandi
 interface LogEntry {
   logType: string;
   toolName?: string;
+  accounts?: string[];
   content: string;
 }
 
@@ -487,7 +488,7 @@ function TimelineRow({
   isLast,
   isDark,
 }: {
-  log: { logType: string; toolName?: string; content: string };
+  log: { logType: string; toolName?: string; accounts?: string[]; content: string };
   isLast: boolean;
   isDark: boolean;
 }) {
@@ -550,6 +551,18 @@ function TimelineRow({
               }`}
             >
               {prettyToolName(log.toolName)}
+            </span>
+          )}
+          {isToolUse && log.accounts && log.accounts.length > 0 && (
+            <span
+              className={`text-[10px] mono px-1.5 py-px rounded ${
+                isDark
+                  ? "bg-sky-500/10 text-sky-300/80 border border-sky-500/20"
+                  : "bg-sky-50 text-sky-700 border border-sky-200"
+              }`}
+              title="Composio account(s) targeted by this call"
+            >
+              {log.accounts.join(", ")}
             </span>
           )}
         </div>

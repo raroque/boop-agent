@@ -4,7 +4,7 @@ import { convex } from "./convex-client.js";
 import { handleUserMessage } from "./interaction-agent.js";
 import { broadcast } from "./broadcast.js";
 
-const API_BASE = "https://api.sendblue.co/api";
+const API_BASE = "https://api.sendblue.com/api";
 const MAX_CHUNK = 2900;
 
 function stripMarkdown(text: string): string {
