@@ -32,14 +32,23 @@ export function createSdkMcpServer(options: { name: string; version?: string; to
   const tools = options.tools || [];
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools.map((t: any) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: zodToJsonSchema(
-        t.inputSchema._def ? t.inputSchema : z.object(t.inputSchema),
-        { target: "openAi" }
-      ),
-    })),
+    tools: tools.map((t: any) => {
+      let schema;
+      if (t.inputSchema && typeof t.inputSchema === "object" && t.inputSchema.type === "object") {
+        // If it's already a plain JSON schema (e.g. from Composio), use it directly
+        schema = t.inputSchema;
+      } else {
+        // Otherwise, treat as Zod object or raw Zod shape and convert
+        const zodObj = t.inputSchema._def ? t.inputSchema : z.object(t.inputSchema);
+        schema = zodToJsonSchema(zodObj, { target: "openAi" });
+      }
+
+      return {
+        name: t.name,
+        description: t.description,
+        inputSchema: schema,
+      };
+    }),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
