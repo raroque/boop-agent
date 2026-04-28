@@ -144,7 +144,12 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
       ...(options?.systemPrompt ? { instructions: options.systemPrompt } : {}),
     });
 
-    const input = typeof prompt === "string" ? prompt : "Continue conversation";
+    const input = typeof prompt === "string"
+      ? prompt
+      : Array.isArray(prompt)
+        ? prompt.map((m: any) => (typeof m === "string" ? m : m.text ?? m.content?.map((c: any) => c.text || "").join("\n") ?? JSON.stringify(m))).join("\n")
+        : JSON.stringify(prompt);
+
     const { events } = await thread.runStreamed(input);
 
     let fullText = "";
