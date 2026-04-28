@@ -348,7 +348,7 @@ If you'd prefer an API key (e.g. for a deployed server), set `ANTHROPIC_API_KEY`
 
 ## Using Codex instead
 
-Set `AI_PROVIDER=codex` and run `codex login` once on the machine that runs Boop. `CODEX_MODEL` controls the Codex model; if unset, Boop uses `gpt-5.3-codex`.
+Set `AI_PROVIDER=codex` and run `codex login` once on the machine that runs Boop. Leave `CODEX_MODEL` unset to use the model selected by your Codex account/session, or set it to a model your account supports.
 
 ---
 
@@ -363,7 +363,7 @@ Everything lives in `.env.local` (auto-created by `npm run setup`). See `.env.ex
 | `SENDBLUE_FROM_NUMBER` | yes | Your Sendblue-provisioned number. |
 | `AI_PROVIDER` | no | `anthropic` (default) or `codex`. |
 | `BOOP_MODEL` | no | Claude model when `AI_PROVIDER=anthropic`. Default `claude-sonnet-4-6`. Used as the fallback when no runtime override is set. The user can switch supported models at runtime from iMessage via the `set_model` self-tool — that override is stored in the Convex `settings` table and takes precedence over this env var. |
-| `CODEX_MODEL` | no | Codex model when `AI_PROVIDER=codex`. Default `gpt-5.3-codex`. |
+| `CODEX_MODEL` | no | Optional Codex model override when `AI_PROVIDER=codex`. If unset, Boop lets the Codex CLI/session choose its default model. |
 | `BOOP_UPSTREAM_CHECK` | no | Set to `false` to disable the new-version banner on `npm run dev`. Default: on. |
 | `PORT` | no | Default `3456`. |
 | `PUBLIC_URL` | no | Base URL used in the Sendblue webhook. Composio handles its own OAuth callbacks on `platform.composio.dev`, so this is just for inbound iMessage. |

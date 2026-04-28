@@ -4,7 +4,7 @@ import { aiProvider, defaultModel } from "./llm/model.js";
 
 const MODEL_KEY = "model";
 const MODEL_TTL_MS = 30 * 1000;
-let cached: { at: number; value: string } | null = null;
+let cached: { at: number; value: string | undefined } | null = null;
 
 // User-friendly aliases the agent can pass through from iMessage. Resolved to
 // canonical provider model IDs before being handed to the selected SDK.
@@ -42,7 +42,7 @@ export function modelsForCurrentProvider(): string[] {
   return [...KNOWN_MODELS].filter(modelMatchesProvider);
 }
 
-export async function getRuntimeModel(): Promise<string> {
+export async function getRuntimeModel(): Promise<string | undefined> {
   if (cached && Date.now() - cached.at < MODEL_TTL_MS) return cached.value;
   let stored: string | null = null;
   try {

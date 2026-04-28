@@ -8,7 +8,6 @@ import { NetServerTransport } from "./net-transport.js";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
-import { randomBytes } from "crypto";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { SdkMcpToolDefinition, McpSdkServerConfigWithInstance } from "./types.js";
 import { z } from "zod";
@@ -158,8 +157,8 @@ export function createSdkMcpServer(options: { name: string; version?: string; to
 export async function* query(params: { prompt: any; options?: any }): AsyncGenerator<any> {
   const { prompt, options } = params;
   const mcpServers = options?.mcpServers || {};
-  const socketDir = path.join(os.tmpdir(), `boop-mcp-${randomBytes(4).toString("hex")}`);
-  fs.mkdirSync(socketDir, { recursive: true, mode: 0o700 });
+  const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), "boop-mcp-"));
+  fs.chmodSync(socketDir, 0o700);
 
   const activeServers: { transport: NetServerTransport; socketPath: string }[] = [];
   const mcpConfig: Record<string, any> = {};
