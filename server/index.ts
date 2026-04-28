@@ -3,6 +3,8 @@ import express from "express";
 import cors from "cors";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { addClient } from "./broadcast.js";
 import { createSendblueRouter } from "./sendblue.js";
 import { handleUserMessage } from "./interaction-agent.js";
@@ -13,6 +15,7 @@ import { startHeartbeatLoop } from "./heartbeat.js";
 import { startConsolidationLoop } from "./consolidation.js";
 import { cancelAgent, retryAgent } from "./execution-agent.js";
 import { createComposioRouter } from "./composio-routes.js";
+import { requireAdmin } from "./auth.js";
 
 async function main() {
   await loadIntegrations();
@@ -25,9 +28,26 @@ async function main() {
   app.use(cors());
   app.use(express.json({ limit: "2mb" }));
 
+  // PUBLIC: health check.
   app.get("/health", (_req, res) => {
     res.json({ ok: true, service: "boop-agent" });
   });
+
+  // PUBLIC (in production): the built debug UI bundle. Static assets must
+  // load before the SPA can render the login form, so they're served
+  // BEFORE requireAdmin gates the API surface.
+  if (process.env.NODE_ENV === "production") {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const debugDist = path.resolve(here, "../../debug/dist");
+    app.use(express.static(debugDist));
+    app.get("/debug/*", (_req, res) => {
+      res.sendFile(path.join(debugDist, "index.html"));
+    });
+  }
+
+  // AUTH GATE: every route below requires a valid Convex Auth JWT, except
+  // the explicit allowlist inside requireAdmin() (/sendblue/webhook + /health).
+  app.use(requireAdmin());
 
   app.use("/sendblue", createSendblueRouter());
   app.use("/composio", createComposioRouter());
@@ -76,7 +96,38 @@ async function main() {
   });
 
   const server = createServer(app);
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", async (req, socket, head) => {
+    const requestUrl = new URL(req.url ?? "", `http://${req.headers.host}`);
+    if (requestUrl.pathname !== "/ws") {
+      socket.destroy();
+      return;
+    }
+    // Token is passed as a ?token=<jwt> query param. The browser EventSource /
+    // WebSocket APIs can't set custom headers on the handshake, so query is
+    // the standard workaround.
+    const token = requestUrl.searchParams.get("token");
+    if (!token) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    try {
+      const { jwtVerify, createRemoteJWKSet } = await import("jose");
+      const convexUrl = process.env.CONVEX_URL!;
+      const jwks = createRemoteJWKSet(new URL("/.well-known/jwks.json", convexUrl));
+      await jwtVerify(token, jwks, { issuer: convexUrl });
+    } catch {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  });
+
   wss.on("connection", (ws) => {
     addClient(ws);
     ws.send(JSON.stringify({ event: "hello", data: { ok: true }, at: Date.now() }));
