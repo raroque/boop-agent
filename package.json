@@ -25,8 +25,10 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "@auth/core": "^0.37.4",
     "@composio/claude-agent-sdk": "^0.6.10",
     "@composio/core": "^0.6.10",
+    "@convex-dev/auth": "^0.0.91",
     "@hugeicons/core-free-icons": "^1.0.0",
     "@hugeicons/react": "^1.0.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
