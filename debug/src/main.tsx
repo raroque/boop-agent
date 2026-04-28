@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { ConvexProvider, ConvexReactClient } from "convex/react";
+import { ConvexReactClient } from "convex/react";
+import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { App } from "./App.js";
 import { ErrorBoundary } from "./ErrorBoundary.js";
 import "./styles.css";
@@ -26,9 +27,9 @@ if (!convexUrl) {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <ErrorBoundary>
-        <ConvexProvider client={convex}>
+        <ConvexAuthProvider client={convex}>
           <App />
-        </ConvexProvider>
+        </ConvexAuthProvider>
       </ErrorBoundary>
     </React.StrictMode>,
   );

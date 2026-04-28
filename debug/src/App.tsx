@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "convex/react";
+import { useQuery, Authenticated, Unauthenticated, AuthLoading } from "convex/react";
+import { LoginForm } from "./auth.js";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   MachineRobotIcon,
@@ -60,6 +61,22 @@ function getStoredTheme(): Theme {
 }
 
 export function App() {
+  return (
+    <>
+      <AuthLoading>
+        <div className="h-full flex items-center justify-center">Loading…</div>
+      </AuthLoading>
+      <Unauthenticated>
+        <LoginForm />
+      </Unauthenticated>
+      <Authenticated>
+        <AppInner />
+      </Authenticated>
+    </>
+  );
+}
+
+function AppInner() {
   const [view, setView] = useState<View>("dashboard");
   const [theme, setTheme] = useState<Theme>(getStoredTheme);
   const { connected } = useSocket();
