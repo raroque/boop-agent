@@ -150,10 +150,13 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
         ? prompt.map((m: any) => (typeof m === "string" ? m : m.text ?? m.content?.map((c: any) => c.text || "").join("\n") ?? JSON.stringify(m))).join("\n")
         : JSON.stringify(prompt);
 
-    const { events } = await thread.runStreamed(input);
+    const abortSignal = options?.abortController?.signal;
+    const { events } = await thread.runStreamed(input, { signal: abortSignal });
 
     let fullText = "";
     for await (const event of events) {
+      if (abortSignal?.aborted) break;
+
       if (event.type === "item.updated" || event.type === "item.completed") {
         if (event.item.type === "agent_message") {
           const delta = event.item.text.slice(fullText.length);
