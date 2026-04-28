@@ -539,10 +539,7 @@ export function buildComposioIntegrationModule(slug: string): IntegrationModule 
             t.description,
             t.inputSchema || t.inputParameters || {},
             async (args: any) => {
-              const result = await composio.tools.execute(t.name || t.slug, {
-                userId: boopUserId(),
-                arguments: args,
-              });
+              const result = await session.execute(t.name || t.slug, args);
               return {
                 content: [{
                   type: "text",
