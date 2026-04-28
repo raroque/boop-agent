@@ -168,13 +168,14 @@ Seven tables. Read `convex/schema.ts` for the exact shape.
 | `conversations` | Per-thread metadata | conversationId, messageCount, lastActivityAt |
 | `memoryRecords` | The memory store | memoryId, content, tier, segment, importance, decayRate, accessCount, lifecycle, supersedes |
 | `executionAgents` | One row per spawned agent | agentId, task, status, tokens, cost |
-| `agentLogs` | Per-agent audit trail | agentId, logType, toolName, content |
+| `agentLogs` | Per-agent audit trail | agentId, logType, toolName, accounts, content |
 | `automations` | Scheduled recurring tasks | automationId, schedule, task, integrations, enabled, nextRunAt |
 | `automationRuns` | One row per automation run | runId, automationId, status, result, agentId |
 | `drafts` | Staged external actions | draftId, kind, summary, payload, status |
 | `consolidationRuns` | History of consolidation passes | runId, proposalsCount, mergedCount, prunedCount |
 | `sendblueDedup` | Webhook dedup by `message_handle` | handle, claimedAt |
 | `memoryEvents` | Append-only event log for the debug UI | eventType, conversationId, memoryId, data |
+| `settings` | Runtime overrides (model, etc.) read by `server/runtime-config.ts` | key, value, updatedAt |
 
 `memoryRecords` also carries a `vectorIndex("by_embedding")` with 1024-dimension vectors filtered by `lifecycle`.
 
