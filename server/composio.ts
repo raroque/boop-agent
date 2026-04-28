@@ -1,6 +1,6 @@
-import { Composio } from "@composio/core";
+import { Composio, OpenAIProvider } from "@composio/core";
 import { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
-import { createSdkMcpServer, type McpSdkServerConfigWithInstance } from "./llm/index.js";
+import { createSdkMcpServer, type McpSdkServerConfigWithInstance, tool } from "./llm/index.js";
 import type { IntegrationModule } from "./integrations/registry.js";
 
 export type ToolkitAuthMode = "managed" | "byo";
@@ -47,15 +47,19 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
 
 const DISPLAY_NAME_BY_SLUG = new Map(CURATED_TOOLKITS.map((t) => [t.slug, t.displayName]));
 
-let singleton: Composio<ClaudeAgentSDKProvider> | null = null;
+let singleton: Composio<any> | null = null;
 
-export function getComposio(): Composio<ClaudeAgentSDKProvider> | null {
+export function getComposio(): Composio<any> | null {
   if (singleton) return singleton;
   const apiKey = process.env.COMPOSIO_API_KEY;
   if (!apiKey) return null;
-  singleton = new Composio<ClaudeAgentSDKProvider>({
+
+  const isCodex = process.env.AI_PROVIDER === "codex";
+  const provider = isCodex ? new OpenAIProvider() : new ClaudeAgentSDKProvider();
+
+  singleton = new Composio({
     apiKey,
-    provider: new ClaudeAgentSDKProvider(),
+    provider,
   });
   return singleton;
 }
@@ -522,7 +526,34 @@ export function buildComposioIntegrationModule(slug: string): IntegrationModule 
           ? { multiAccount: { enable: true, requireExplicitSelection: true } }
           : {}),
       });
-      const tools = await session.tools();
+      let tools = await session.tools();
+
+      // If we are using Codex, the OpenAIProvider from Composio might return 
+      // tools that don't have the "handler" property we expect in our mock.
+      // We wrap them here to ensure they work with our createSdkMcpServer.
+      if (process.env.AI_PROVIDER === "codex") {
+        tools = tools.map((t: any) => {
+          if (t.handler) return t;
+          return tool(
+            t.name || t.slug,
+            t.description,
+            t.inputSchema || t.inputParameters || {},
+            async (args: any) => {
+              const result = await composio.tools.execute(t.name || t.slug, {
+                userId: boopUserId(),
+                arguments: args,
+              });
+              return {
+                content: [{
+                  type: "text",
+                  text: typeof result === "string" ? result : JSON.stringify(result) ?? ""
+                }]
+              };
+            }
+          );
+        });
+      }
+
       return createSdkMcpServer({
         name: slug,
         version: "0.1.0",

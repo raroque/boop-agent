@@ -19,12 +19,23 @@ export class NetServerTransport implements Transport {
       this.socket = socket;
       
       let buffer = "";
+      const MAX_LINE_LENGTH = 1024 * 1024; // 1MB limit per line
       socket.on("data", (data) => {
         buffer += data.toString();
+        // Prevent memory exhaustion from too much data without newlines
+        if (buffer.length > MAX_LINE_LENGTH * 2) {
+          this.onerror?.(new Error("Incoming message line buffer exceeded limit"));
+          socket.destroy();
+          return;
+        }
         let lines = buffer.split("\n");
         buffer = lines.pop() || "";
         for (const line of lines) {
           if (!line.trim()) continue;
+          if (line.length > MAX_LINE_LENGTH) {
+            this.onerror?.(new Error("Line exceeded maximum allowed length"));
+            continue;
+          }
           try {
             const message = JSONRPCMessageSchema.parse(JSON.parse(line));
             this.onmessage?.(message);

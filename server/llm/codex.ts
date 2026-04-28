@@ -11,6 +11,7 @@ import * as fs from "fs";
 import { randomBytes } from "crypto";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { SdkMcpToolDefinition, McpSdkServerConfigWithInstance } from "./index.js";
+import { z } from "zod";
 
 import { fileURLToPath } from "url";
 import { dirname } from "path";
@@ -34,7 +35,10 @@ export function createSdkMcpServer(options: { name: string; version?: string; to
     tools: tools.map((t: any) => ({
       name: t.name,
       description: t.description,
-      inputSchema: zodToJsonSchema(t.inputSchema, { target: "openAi" }),
+      inputSchema: zodToJsonSchema(
+        t.inputSchema._def ? t.inputSchema : z.object(t.inputSchema),
+        { target: "openAi" }
+      ),
     })),
   }));
 
@@ -54,7 +58,7 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
   const { prompt, options } = params;
   const mcpServers = options?.mcpServers || {};
   const socketDir = path.join(os.tmpdir(), `boop-mcp-${randomBytes(4).toString("hex")}`);
-  fs.mkdirSync(socketDir, { recursive: true });
+  fs.mkdirSync(socketDir, { recursive: true, mode: 0o700 });
 
   const activeServers: { transport: NetServerTransport; socketPath: string }[] = [];
   const mcpConfig: Record<string, any> = {};
@@ -65,14 +69,18 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
       const socketPath = path.join(socketDir, `${name}.sock`);
       const transport = new NetServerTransport(socketPath);
       await transport.start();
+      
+      // Register BEFORE connecting to ensure cleanup if connect() fails
+      activeServers.push({ transport, socketPath });
+
       // SECURITY: Strictly limit socket access so other VPS users cannot hijack MCPs
       try {
         fs.chmodSync(socketPath, 0o600);
       } catch (err) {
         console.warn(`[codex-mcp] Could not chmod 0600 on ${socketPath}`, err);
       }
+      
       await serverConfig.instance.connect(transport);
-      activeServers.push({ transport, socketPath });
 
       mcpConfig[name] = {
         command: "node",
