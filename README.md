@@ -49,6 +49,7 @@ Built on:
 - **Debug dashboard** (React + Vite) with a Boop mascot — Dashboard (spend + tokens + agent status), Agents (timeline + integration logos), Automations, Memory (table + force-directed graph), Events, Connections.
 - **Convex** for persistence — real-time, typed, free tier.
 - **Uses your Claude Code subscription** — no separate Anthropic API key required.
+- **Deploy** — one-command production setup with `npm run deploy`. See [`docs/deploying.md`](docs/deploying.md).
 
 <p align="center">
   <img src="assets/agents-view.jpg" alt="Agents view in the Boop debug dashboard" width="900" />
