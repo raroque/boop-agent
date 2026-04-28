@@ -18,7 +18,6 @@ interface Toolkit {
   slug: string;
   displayName: string;
   authMode: AuthMode;
-  authScheme: string | null;
   hasAuthConfig: boolean;
   logoUrl: string | null;
   description: string | null;
@@ -212,6 +211,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
     dataRef.current = data;
   }, [data]);
   const [loaded, setLoaded] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [needsAuthConfig, setNeedsAuthConfig] = useState<NeedsAuthConfigInfo | null>(null);
   const [showIntro, setShowIntro] = useState(() => {
@@ -266,10 +266,12 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
   const fetchToolkits = useCallback(async () => {
     try {
       const r = await fetch("/api/composio/toolkits");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const json = (await r.json()) as ToolkitsResponse;
       setData(json);
+      setFetchError(false);
     } catch {
-      setData({ enabled: false, toolkits: [] });
+      setFetchError(true);
     } finally {
       setLoaded(true);
     }
@@ -281,24 +283,11 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
 
   const connect = useCallback(
     async (slug: string) => {
-      const toolkit = dataRef.current?.toolkits.find((t) => t.slug === slug);
-      // API_KEY toolkits (e.g. Fireflies) don't have an OAuth redirect — collect
-      // the key from the user and pass it straight to the authorize endpoint.
-      let apiKey: string | undefined;
-      if (toolkit?.authScheme === "API_KEY") {
-        const entered = window.prompt(`Paste your ${toolkit.displayName} API key:`);
-        if (!entered?.trim()) {
-          return;
-        }
-        apiKey = entered.trim();
-      }
       setBusy(slug);
       setNeedsAuthConfig(null);
       try {
         const r = await fetch(`/api/composio/toolkits/${slug}/authorize`, {
           method: "POST",
-          headers: apiKey ? { "Content-Type": "application/json" } : undefined,
-          body: apiKey ? JSON.stringify({ apiKey }) : undefined,
         });
         if (!r.ok) {
           const err = await r.json().catch(() => ({}));
@@ -317,7 +306,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         }
         const { redirectUrl } = await r.json();
         if (!redirectUrl) {
-          // API_KEY (and any other no-redirect) flow — connection is active now.
+          // No-redirect flow — connection is active now.
           try {
             await fetch("/api/composio/refresh", { method: "POST" });
           } catch {
@@ -439,10 +428,18 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         title="Composio toolkits"
         count={activeCount}
         isDark={isDark}
-        hint={data?.enabled === false ? "Disabled — set COMPOSIO_API_KEY in .env.local" : undefined}
+        hint={
+          fetchError
+            ? "Couldn't load toolkits — server unreachable or request timed out"
+            : data?.enabled === false
+              ? "Disabled — set COMPOSIO_API_KEY in .env.local"
+              : undefined
+        }
       />
 
-      {showIntro && data?.enabled !== false && <IntroCard isDark={isDark} onDismiss={dismissIntro} />}
+      {showIntro && !fetchError && data?.enabled !== false && (
+        <IntroCard isDark={isDark} onDismiss={dismissIntro} />
+      )}
 
       {needsAuthConfig && (
         <div
@@ -480,7 +477,23 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         </div>
       )}
 
-      {data?.enabled === false ? (
+      {fetchError ? (
+        <div className={`rounded-xl border px-4 py-6 text-sm ${cardBg} ${muted}`}>
+          Couldn't reach the Composio toolkits endpoint. The server may still be starting, or the
+          request timed out. Check the dev server logs, then{" "}
+          <button
+            onClick={() => {
+              setFetchError(false);
+              setLoaded(false);
+              fetchToolkits();
+            }}
+            className="text-sky-500 underline"
+          >
+            retry
+          </button>
+          .
+        </div>
+      ) : data?.enabled === false ? (
         <div className={`rounded-xl border px-4 py-6 text-sm ${cardBg} ${muted}`}>
           Add <code>COMPOSIO_API_KEY</code> to <code>.env.local</code> and restart the server to
           connect integrations like Gmail, Slack, GitHub, Linear, Notion, and more. Get a key at{" "}

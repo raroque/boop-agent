@@ -1,4 +1,4 @@
-import { AuthScheme, Composio } from "@composio/core";
+import { Composio } from "@composio/core";
 import { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
 import { createSdkMcpServer, type McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { IntegrationModule } from "./integrations/registry.js";
@@ -43,7 +43,6 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
   { slug: "salesforce", displayName: "Salesforce", authMode: "managed" },
   { slug: "twitter", displayName: "Twitter / X", authMode: "byo" },
   { slug: "linkedin", displayName: "LinkedIn", authMode: "managed" },
-  { slug: "fireflies", displayName: "Fireflies", authMode: "managed" },
 ];
 
 const DISPLAY_NAME_BY_SLUG = new Map(CURATED_TOOLKITS.map((t) => [t.slug, t.displayName]));
@@ -95,9 +94,6 @@ export interface ToolkitMeta {
   logo?: string;
   description?: string;
   toolsCount?: number;
-  // Auth mode used to initiate a connection — "API_KEY", "OAUTH2", "BASIC", etc.
-  // Only set when the toolkit's catalog entry exposes it; absent → assume OAuth-style flow.
-  authScheme?: string;
 }
 
 export interface ToolSummary {
@@ -121,7 +117,6 @@ async function fetchAllToolkitMeta(): Promise<Map<string, ToolkitMeta>> {
     slug: string;
     name: string;
     meta?: { logo?: string; description?: string; toolsCount?: number };
-    auth_config_details?: Array<{ mode?: string }>;
   }>) {
     out.set(it.slug, {
       slug: it.slug,
@@ -129,16 +124,7 @@ async function fetchAllToolkitMeta(): Promise<Map<string, ToolkitMeta>> {
       logo: it.meta?.logo,
       description: it.meta?.description,
       toolsCount: it.meta?.toolsCount,
-      authScheme: it.auth_config_details?.[0]?.mode,
     });
-  }
-  // Detect breakage if Composio renames `auth_config_details` (we read it as
-  // an undocumented field on the catalog response). One toolkit having it set
-  // is enough — fire a single warning if the whole catalog lacks it.
-  if (out.size > 0 && ![...out.values()].some((m) => m.authScheme)) {
-    console.warn(
-      "[composio] no toolkit in the catalog reported an authScheme — auth_config_details may have been renamed; API_KEY toolkits will fall back to the OAuth path",
-    );
   }
   // Backfill any curated toolkits the list endpoint omitted (e.g. MCP-only
   // toolkits like granola_mcp that don't appear in the paginated catalog).
@@ -149,7 +135,6 @@ async function fetchAllToolkitMeta(): Promise<Map<string, ToolkitMeta>> {
           slug: string;
           name: string;
           meta?: { logo?: string; description?: string; toolsCount?: number };
-          auth_config_details?: Array<{ mode?: string }>;
         };
         out.set(full.slug, {
           slug: full.slug,
@@ -157,7 +142,6 @@ async function fetchAllToolkitMeta(): Promise<Map<string, ToolkitMeta>> {
           logo: full.meta?.logo,
           description: full.meta?.description,
           toolsCount: full.meta?.toolsCount,
-          authScheme: full.auth_config_details?.[0]?.mode,
         });
       } catch (err) {
         console.warn(`[composio] meta backfill failed for ${t.slug}`, err);
@@ -289,6 +273,11 @@ const WHOAMI_BY_TOOLKIT: Record<string, WhoAmITool> = {
   slack: { tool: "SLACK_FETCH_TEAM_INFO", arguments: {}, parse: genericProfileParse },
 };
 
+// Cap each whoami round-trip — the underlying tools.execute can hang
+// indefinitely (expired creds, slow toolkit endpoint), which previously stalled
+// the whole /toolkits response. On timeout we fall through to seed identity.
+const WHOAMI_TIMEOUT_MS = 5000;
+
 async function fetchToolkitIdentity(
   composio: NonNullable<ReturnType<typeof getComposio>>,
   slug: string,
@@ -297,7 +286,7 @@ async function fetchToolkitIdentity(
   const spec = WHOAMI_BY_TOOLKIT[slug];
   if (!spec) return {};
   try {
-    const result = await composio.tools.execute(spec.tool, {
+    const exec = composio.tools.execute(spec.tool, {
       userId: boopUserId(),
       // Without this, Composio picks the user's *default* connection for the
       // toolkit, so every Gmail row in the UI ends up labeled with the same
@@ -311,6 +300,12 @@ async function fetchToolkitIdentity(
       // flag.
       dangerouslySkipVersionCheck: true,
     });
+    const result = await Promise.race([
+      exec,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("whoami timeout")), WHOAMI_TIMEOUT_MS),
+      ),
+    ]);
     if (!result.successful || !result.data) return {};
     return spec.parse(result.data as Record<string, unknown>);
   } catch (err) {
@@ -362,29 +357,39 @@ export async function listConnectedToolkits(): Promise<ConnectedToolkit[]> {
       items.push(...page.items);
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
-    const enriched = await Promise.all(
-      items.map(async (it) => {
-        const seed = extractAccountIdentity(
-          (it as { state?: unknown }).state,
-          (it as { data?: unknown }).data,
-        );
-        const identity =
-          it.status === "ACTIVE"
-            ? await getIdentityFor(composio, it.id, it.toolkit.slug, seed)
-            : seed;
-        return {
-          slug: it.toolkit.slug,
-          connectionId: it.id,
-          status: it.status,
-          alias: it.alias ?? undefined,
-          accountLabel: identity.label,
-          accountEmail: identity.email,
-          accountName: identity.name,
-          accountAvatarUrl: identity.avatarUrl,
-          createdAt: it.createdAt,
-        };
-      }),
-    );
+    // Each ACTIVE connection may trigger up to two Composio API calls in
+    // getIdentityFor (connectedAccounts.get + a whoami tools.execute). With
+    // many accounts, an unbounded Promise.all stalls the response. Cap
+    // parallelism at 5 — well under the API's rate limit, still fast enough.
+    const enriched: ConnectedToolkit[] = [];
+    const CONCURRENCY = 5;
+    for (let i = 0; i < items.length; i += CONCURRENCY) {
+      const chunk = items.slice(i, i + CONCURRENCY);
+      const part = await Promise.all(
+        chunk.map(async (it) => {
+          const seed = extractAccountIdentity(
+            (it as { state?: unknown }).state,
+            (it as { data?: unknown }).data,
+          );
+          const identity =
+            it.status === "ACTIVE"
+              ? await getIdentityFor(composio, it.id, it.toolkit.slug, seed)
+              : seed;
+          return {
+            slug: it.toolkit.slug,
+            connectionId: it.id,
+            status: it.status,
+            alias: it.alias ?? undefined,
+            accountLabel: identity.label,
+            accountEmail: identity.email,
+            accountName: identity.name,
+            accountAvatarUrl: identity.avatarUrl,
+            createdAt: it.createdAt,
+          };
+        }),
+      );
+      enriched.push(...part);
+    }
     return enriched;
   } catch (err) {
     console.error("[composio] listConnectedToolkits failed", err);
@@ -488,7 +493,7 @@ export class ComposioNeedsAuthConfigError extends Error {
 
 export async function authorizeToolkit(
   slug: string,
-  opts?: { callbackUrl?: string; alias?: string; apiKey?: string },
+  opts?: { callbackUrl?: string; alias?: string },
 ): Promise<{ redirectUrl: string | null; connectionId: string }> {
   const composio = getComposio();
   if (!composio) throw new Error("COMPOSIO_API_KEY not set");
@@ -523,13 +528,10 @@ export async function authorizeToolkit(
 
   // 2. Initiate the connection. allowMultiple is always set so reconnects work
   //    even when stale (non-ACTIVE) prior accounts exist on Composio's side.
-  //    For API_KEY toolkits the caller must pass `apiKey` — there's no OAuth
-  //    redirect to collect it through.
   const conn = await composio.connectedAccounts.initiate(boopUserId(), authConfigId, {
     allowMultiple: true,
     ...(opts?.callbackUrl ? { callbackUrl: opts.callbackUrl } : {}),
     ...(opts?.alias ? { alias: opts.alias } : {}),
-    ...(opts?.apiKey ? { config: AuthScheme.APIKey({ api_key: opts.apiKey }) } : {}),
   });
   return { redirectUrl: conn.redirectUrl ?? null, connectionId: conn.id };
 }

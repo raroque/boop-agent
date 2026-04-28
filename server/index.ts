@@ -15,7 +15,9 @@ import { cancelAgent, retryAgent } from "./execution-agent.js";
 import { createComposioRouter } from "./composio-routes.js";
 
 async function main() {
-  await loadIntegrations();
+  // Kick off integration loading in the background so a slow third-party API
+  // (Composio, etc.) can't block the HTTP/WS listeners from coming up.
+  loadIntegrations().catch((err) => console.error("[integrations] load failed", err));
   startCleanupLoop();
   startAutomationLoop();
   startHeartbeatLoop();
