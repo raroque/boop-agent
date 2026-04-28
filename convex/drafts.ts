@@ -1,5 +1,6 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireUser } from "./auth.js";
 
 const statusV = v.union(
   v.literal("pending"),
@@ -8,7 +9,7 @@ const statusV = v.union(
   v.literal("expired"),
 );
 
-export const create = mutation({
+export const create = internalMutation({
   args: {
     draftId: v.string(),
     conversationId: v.string(),
@@ -28,6 +29,7 @@ export const create = mutation({
 export const get = query({
   args: { draftId: v.string() },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db
       .query("drafts")
       .withIndex("by_draft_id", (q) => q.eq("draftId", args.draftId))
@@ -38,6 +40,7 @@ export const get = query({
 export const pendingByConversation = query({
   args: { conversationId: v.string() },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db
       .query("drafts")
       .withIndex("by_conversation_status", (q) =>
@@ -51,11 +54,12 @@ export const pendingByConversation = query({
 export const recent = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db.query("drafts").order("desc").take(args.limit ?? 50);
   },
 });
 
-export const setStatus = mutation({
+export const setStatus = internalMutation({
   args: { draftId: v.string(), status: statusV },
   handler: async (ctx, args) => {
     const draft = await ctx.db

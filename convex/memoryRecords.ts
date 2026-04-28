@@ -1,7 +1,8 @@
-import { action, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, query } from "./_generated/server";
 import { v } from "convex/values";
-import { api } from "./_generated/api";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { requireUser } from "./auth.js";
 
 const tierV = v.union(v.literal("short"), v.literal("long"), v.literal("permanent"));
 const segmentV = v.union(
@@ -15,7 +16,7 @@ const segmentV = v.union(
 );
 const lifecycleV = v.union(v.literal("active"), v.literal("archived"), v.literal("pruned"));
 
-export const upsert = mutation({
+export const upsert = internalMutation({
   args: {
     memoryId: v.string(),
     content: v.string(),
@@ -77,7 +78,7 @@ export const upsert = mutation({
   },
 });
 
-export const getByIds = query({
+export const getByIds = internalQuery({
   args: { ids: v.array(v.id("memoryRecords")) },
   handler: async (ctx, args) => {
     const out = [];
@@ -89,7 +90,7 @@ export const getByIds = query({
   },
 });
 
-export const vectorSearch = action({
+export const vectorSearch = internalAction({
   args: { embedding: v.array(v.float64()), limit: v.optional(v.number()) },
   handler: async (ctx, args): Promise<Array<{ _id: Id<"memoryRecords">; score: number; record: any }>> => {
     const results = await ctx.vectorSearch("memoryRecords", "by_embedding", {
@@ -97,7 +98,7 @@ export const vectorSearch = action({
       limit: args.limit ?? 20,
       filter: (q) => q.eq("lifecycle", "active"),
     });
-    const records = await ctx.runQuery(api.memoryRecords.getByIds, {
+    const records = await ctx.runQuery(internal.memoryRecords.getByIds, {
       ids: results.map((r) => r._id),
     });
     const byId = new Map(records.map((r: any) => [r._id, r]));
@@ -115,6 +116,7 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const limit = args.limit ?? 100;
     let results;
     if (args.tier) {
@@ -132,6 +134,7 @@ export const list = query({
 export const search = query({
   args: { query: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const limit = args.limit ?? 20;
     const q = args.query.toLowerCase();
     // Filter on the index BEFORE the 500 cap — otherwise archived/pruned
@@ -151,7 +154,7 @@ export const search = query({
   },
 });
 
-export const markAccessed = mutation({
+export const markAccessed = internalMutation({
   args: { memoryId: v.string() },
   handler: async (ctx, args) => {
     const mem = await ctx.db
@@ -167,7 +170,7 @@ export const markAccessed = mutation({
   },
 });
 
-export const setLifecycle = mutation({
+export const setLifecycle = internalMutation({
   args: { memoryId: v.string(), lifecycle: lifecycleV },
   handler: async (ctx, args) => {
     const mem = await ctx.db
@@ -185,6 +188,7 @@ const COUNTS_SCAN_LIMIT = 5000;
 export const countsByTier = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const all = await ctx.db.query("memoryRecords").order("desc").take(COUNTS_SCAN_LIMIT);
     const active = all.filter((m) => m.lifecycle === "active");
     return {

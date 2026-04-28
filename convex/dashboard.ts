@@ -1,4 +1,5 @@
 import { query } from "./_generated/server";
+import { requireUser } from "./auth.js";
 
 // Cap per-table scans so a long-lived install doesn't hit Convex's 16,384
 // .collect() ceiling and break the dashboard. Metrics reflect the most
@@ -8,6 +9,7 @@ const METRICS_SCAN_LIMIT = 5000;
 export const metrics = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const [messages, memories, agents, automationRuns] = await Promise.all([
       ctx.db.query("messages").order("desc").take(METRICS_SCAN_LIMIT),
       ctx.db.query("memoryRecords").order("desc").take(METRICS_SCAN_LIMIT),

@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { api } from "../../convex/_generated/api.js";
+import { internal } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 import { embed } from "../embeddings.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "../usage.js";
@@ -67,7 +67,7 @@ export async function extractAndStore(opts: {
     }
 
     if (usage.costUsd > 0 || usage.inputTokens > 0) {
-      await convex.mutation(api.usageRecords.record, {
+      await convex.mutation(internal.usageRecords.record, {
         source: "extract",
         conversationId: opts.conversationId,
         turnId: opts.turnId,
@@ -101,7 +101,7 @@ export async function extractAndStore(opts: {
         f.segment === "correction" && f.corrects
           ? JSON.stringify({ corrects: f.corrects })
           : undefined;
-      await convex.mutation(api.memoryRecords.upsert, {
+      await convex.mutation(internal.memoryRecords.upsert, {
         memoryId,
         content: f.content,
         tier: defaults.tier,
@@ -114,7 +114,7 @@ export async function extractAndStore(opts: {
       });
     }
 
-    await convex.mutation(api.memoryEvents.emit, {
+    await convex.mutation(internal.memoryEvents.emit, {
       eventType: "memory.extracted",
       conversationId: opts.conversationId,
       data: JSON.stringify({ turnId: opts.turnId, count: facts.length }),

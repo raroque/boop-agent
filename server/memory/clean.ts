@@ -1,4 +1,4 @@
-import { api } from "../../convex/_generated/api.js";
+import { api, internal } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -59,13 +59,13 @@ export async function cleanMemories(): Promise<{
     if (mem.tier === "permanent") continue;
     const score = effectiveScore(mem);
     if (score < PRUNE_THRESHOLD) {
-      await convex.mutation(api.memoryRecords.setLifecycle, {
+      await convex.mutation(internal.memoryRecords.setLifecycle, {
         memoryId: mem.memoryId,
         lifecycle: "pruned",
       });
       pruned++;
     } else if (score < ARCHIVE_THRESHOLD && mem.tier !== "long") {
-      await convex.mutation(api.memoryRecords.setLifecycle, {
+      await convex.mutation(internal.memoryRecords.setLifecycle, {
         memoryId: mem.memoryId,
         lifecycle: "archived",
       });
@@ -73,7 +73,7 @@ export async function cleanMemories(): Promise<{
     }
   }
 
-  await convex.mutation(api.memoryEvents.emit, {
+  await convex.mutation(internal.memoryEvents.emit, {
     eventType: "memory.cleaned",
     data: JSON.stringify({ scanned: active.length, archived, pruned }),
   });

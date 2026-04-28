@@ -1,6 +1,6 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { api } from "../convex/_generated/api.js";
+import { api, internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { spawnExecutionAgent } from "./execution-agent.js";
 
@@ -32,7 +32,7 @@ ALWAYS call this instead of sending or creating something directly. The user wil
         },
         async (args) => {
           const draftId = randomId("draft");
-          await convex.mutation(api.drafts.create, {
+          await convex.mutation(internal.drafts.create, {
             draftId,
             conversationId,
             kind: args.kind,
@@ -95,7 +95,7 @@ export function createDraftDecisionMcp(conversationId: string) {
               ],
             };
           }
-          await convex.mutation(api.drafts.setStatus, {
+          await convex.mutation(internal.drafts.setStatus, {
             draftId: args.draftId,
             status: "sent",
           });
@@ -125,7 +125,7 @@ payload JSON: ${draft.payload}`;
         "Cancel a pending draft when the user says 'no', 'cancel', or revises the request.",
         { draftId: z.string() },
         async (args) => {
-          await convex.mutation(api.drafts.setStatus, {
+          await convex.mutation(internal.drafts.setStatus, {
             draftId: args.draftId,
             status: "rejected",
           });

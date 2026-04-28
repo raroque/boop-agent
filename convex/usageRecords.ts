@@ -1,5 +1,6 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireUser } from "./auth.js";
 
 const sourceV = v.union(
   v.literal("dispatcher"),
@@ -10,7 +11,7 @@ const sourceV = v.union(
   v.literal("consolidation-judge"),
 );
 
-export const record = mutation({
+export const record = internalMutation({
   args: {
     source: sourceV,
     conversationId: v.optional(v.string()),
@@ -33,6 +34,7 @@ export const record = mutation({
 export const byConversation = query({
   args: { conversationId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db
       .query("usageRecords")
       .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))
@@ -44,6 +46,7 @@ export const byConversation = query({
 export const recent = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db.query("usageRecords").order("desc").take(args.limit ?? 100);
   },
 });
@@ -51,6 +54,7 @@ export const recent = query({
 export const summary = query({
   args: { conversationId: v.optional(v.string()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     // Cap the scan. Convex's hard .collect() ceiling is 16,384 docs; this
     // keeps the summary query from silently breaking once the append-only
     // log grows past that. Conversation-scoped queries use the index.

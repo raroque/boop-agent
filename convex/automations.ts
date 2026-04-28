@@ -1,7 +1,8 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireUser } from "./auth.js";
 
-export const create = mutation({
+export const create = internalMutation({
   args: {
     automationId: v.string(),
     name: v.string(),
@@ -29,6 +30,7 @@ export const create = mutation({
 export const list = query({
   args: { enabledOnly: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     let results;
     if (args.enabledOnly) {
       results = await ctx.db
@@ -45,6 +47,7 @@ export const list = query({
 export const get = query({
   args: { automationId: v.string() },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db
       .query("automations")
       .withIndex("by_automation_id", (q) => q.eq("automationId", args.automationId))
@@ -55,6 +58,7 @@ export const get = query({
 export const setEnabled = mutation({
   args: { automationId: v.string(), enabled: v.boolean() },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const auto = await ctx.db
       .query("automations")
       .withIndex("by_automation_id", (q) => q.eq("automationId", args.automationId))
@@ -68,6 +72,7 @@ export const setEnabled = mutation({
 export const remove = mutation({
   args: { automationId: v.string() },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const auto = await ctx.db
       .query("automations")
       .withIndex("by_automation_id", (q) => q.eq("automationId", args.automationId))
@@ -78,7 +83,7 @@ export const remove = mutation({
   },
 });
 
-export const markRan = mutation({
+export const markRan = internalMutation({
   args: {
     automationId: v.string(),
     lastRunAt: v.number(),
@@ -98,7 +103,7 @@ export const markRan = mutation({
   },
 });
 
-export const createRun = mutation({
+export const createRun = internalMutation({
   args: {
     runId: v.string(),
     automationId: v.string(),
@@ -112,7 +117,7 @@ export const createRun = mutation({
   },
 });
 
-export const updateRun = mutation({
+export const updateRun = internalMutation({
   args: {
     runId: v.string(),
     status: v.union(v.literal("running"), v.literal("completed"), v.literal("failed")),
@@ -139,6 +144,7 @@ export const updateRun = mutation({
 export const recentRuns = query({
   args: { automationId: v.optional(v.string()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const limit = args.limit ?? 50;
     if (args.automationId) {
       return await ctx.db

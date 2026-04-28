@@ -1,6 +1,6 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { api } from "../convex/_generated/api.js";
+import { api, internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { availableIntegrations } from "./execution-agent.js";
 import { nextRunFor, validateSchedule } from "./automations.js";
@@ -61,7 +61,7 @@ Integrations available: ${integrationHint}`,
           }
           const automationId = randomId("auto");
           const nextRunAt = nextRunFor(args.schedule) ?? undefined;
-          await convex.mutation(api.automations.create, {
+          await convex.mutation(internal.automations.create, {
             automationId,
             name: args.name,
             task: args.task,

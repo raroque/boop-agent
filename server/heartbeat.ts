@@ -1,4 +1,4 @@
-import { api } from "../convex/_generated/api.js";
+import { api, internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { cancelAgent, runningAgentIds } from "./execution-agent.js";
 import { broadcast } from "./broadcast.js";
@@ -17,7 +17,7 @@ export async function sweepStaleAgents(): Promise<void> {
     if (live.has(a.agentId)) {
       cancelAgent(a.agentId);
     }
-    await convex.mutation(api.agents.update, {
+    await convex.mutation(internal.agents.update, {
       agentId: a.agentId,
       status: "failed",
       error: `Marked failed after ${Math.round(age / 1000)}s (stale heartbeat).`,

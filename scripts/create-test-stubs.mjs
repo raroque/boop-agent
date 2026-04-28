@@ -18,21 +18,25 @@ if (!existsSync(apiStub)) {
   writeFileSync(
     apiStub,
     `// Minimal stub for test environments where Convex codegen has not run.
-export const api = new Proxy(
-  {},
-  {
-    get(_target, ns) {
-      return new Proxy(
-        {},
-        {
-          get(_t, fn) {
-            return String(ns) + ":" + String(fn);
+const makeProxy = () =>
+  new Proxy(
+    {},
+    {
+      get(_target, ns) {
+        return new Proxy(
+          {},
+          {
+            get(_t, fn) {
+              return String(ns) + ":" + String(fn);
+            },
           },
-        },
-      );
+        );
+      },
     },
-  },
-);
+  );
+
+export const api = makeProxy();
+export const internal = makeProxy();
 `,
   );
   console.log("[test-stubs] created convex/_generated/api.js stub");

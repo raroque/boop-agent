@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { api } from "../convex/_generated/api.js";
+import { api, internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { broadcast } from "./broadcast.js";
 import { buildMcpServersForIntegrations, listIntegrations } from "./integrations/registry.js";
@@ -74,7 +74,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   );
   const agentStart = Date.now();
 
-  await convex.mutation(api.agents.create, {
+  await convex.mutation(internal.agents.create, {
     agentId,
     conversationId: opts.conversationId,
     name,
@@ -83,7 +83,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   });
   broadcast("agent_spawned", { agentId, name, task: opts.task });
 
-  await convex.mutation(api.agents.update, { agentId, status: "running" });
+  await convex.mutation(internal.agents.update, { agentId, status: "running" });
 
   const integrationServers = await buildMcpServersForIntegrations(
     opts.integrations,
@@ -128,7 +128,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
         for (const block of msg.message.content) {
           if (block.type === "text") {
             buffer += block.text;
-            await convex.mutation(api.agents.addLog, {
+            await convex.mutation(internal.agents.addLog, {
               agentId,
               logType: "text",
               content: block.text,
@@ -136,7 +136,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
           } else if (block.type === "tool_use") {
             const toolShort = block.name.replace(/^mcp__[a-z-]+__/, "");
             logAgent(`tool: ${toolShort}`);
-            await convex.mutation(api.agents.addLog, {
+            await convex.mutation(internal.agents.addLog, {
               agentId,
               logType: "tool_use",
               toolName: block.name,
@@ -153,7 +153,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
                   .map((c: { type: string; text?: string }) => (c.type === "text" ? (c.text ?? "") : ""))
                   .join("")
               : String(block.content ?? "");
-            await convex.mutation(api.agents.addLog, {
+            await convex.mutation(internal.agents.addLog, {
               agentId,
               logType: "tool_result",
               content: text.slice(0, 2000),
@@ -169,7 +169,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   } catch (err) {
     status = abort.signal.aborted ? "cancelled" : "failed";
     errorMsg = String(err);
-    await convex.mutation(api.agents.addLog, {
+    await convex.mutation(internal.agents.addLog, {
       agentId,
       logType: "error",
       content: errorMsg,
@@ -183,7 +183,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
     `done (${status}, ${elapsed}s, in/out tokens ${usage.inputTokens}/${usage.outputTokens}, cache r/w ${usage.cacheReadTokens}/${usage.cacheCreationTokens}, $${usage.costUsd.toFixed(4)})`,
   );
 
-  await convex.mutation(api.agents.update, {
+  await convex.mutation(internal.agents.update, {
     agentId,
     status,
     result: buffer,
@@ -196,7 +196,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   });
   // Also append to the usage log so total-cost queries cover every layer.
   if (usage.costUsd > 0 || usage.inputTokens > 0) {
-    await convex.mutation(api.usageRecords.record, {
+    await convex.mutation(internal.usageRecords.record, {
       source: "execution",
       conversationId: opts.conversationId,
       agentId,

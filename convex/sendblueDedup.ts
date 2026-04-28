@@ -1,7 +1,7 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 
-export const claim = mutation({
+export const claim = internalMutation({
   args: { handle: v.string() },
   handler: async (ctx, args) => {
     const existing = await ctx.db

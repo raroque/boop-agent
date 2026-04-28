@@ -1,5 +1,6 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireUser } from "./auth.js";
 
 const statusV = v.union(
   v.literal("spawned"),
@@ -9,7 +10,7 @@ const statusV = v.union(
   v.literal("cancelled"),
 );
 
-export const create = mutation({
+export const create = internalMutation({
   args: {
     agentId: v.string(),
     conversationId: v.optional(v.string()),
@@ -29,7 +30,7 @@ export const create = mutation({
   },
 });
 
-export const update = mutation({
+export const update = internalMutation({
   args: {
     agentId: v.string(),
     status: v.optional(statusV),
@@ -54,7 +55,7 @@ export const update = mutation({
   },
 });
 
-export const addLog = mutation({
+export const addLog = internalMutation({
   args: {
     agentId: v.string(),
     logType: v.union(
@@ -75,6 +76,7 @@ export const addLog = mutation({
 export const list = query({
   args: { status: v.optional(statusV), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const limit = args.limit ?? 50;
     if (args.status) {
       return await ctx.db
@@ -90,6 +92,7 @@ export const list = query({
 export const get = query({
   args: { agentId: v.string() },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db
       .query("executionAgents")
       .withIndex("by_agent_id", (q) => q.eq("agentId", args.agentId))
@@ -100,6 +103,7 @@ export const get = query({
 export const getLogs = query({
   args: { agentId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db
       .query("agentLogs")
       .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))

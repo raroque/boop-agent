@@ -1,6 +1,6 @@
 import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { api } from "../convex/_generated/api.js";
+import { api, internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { createMemoryMcp } from "./memory/tools.js";
 import { extractAndStore } from "./memory/extract.js";
@@ -104,7 +104,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const turnId = randomId("turn");
   const integrations = availableIntegrations();
 
-  await convex.mutation(api.messages.send, {
+  await convex.mutation(internal.messages.send, {
     conversationId: opts.conversationId,
     role: "user",
     content: opts.content,
@@ -137,7 +137,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
             const number = opts.conversationId.slice(4);
             await sendImessage(number, text);
           }
-          await convex.mutation(api.messages.send, {
+          await convex.mutation(internal.messages.send, {
             conversationId: opts.conversationId,
             role: "assistant",
             content: text,
@@ -289,7 +289,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     log(
       `cost: in/out ${usage.inputTokens}/${usage.outputTokens}, cache r/w ${usage.cacheReadTokens}/${usage.cacheCreationTokens}, $${usage.costUsd.toFixed(4)}`,
     );
-    await convex.mutation(api.usageRecords.record, {
+    await convex.mutation(internal.usageRecords.record, {
       source: "dispatcher",
       conversationId: opts.conversationId,
       turnId,

@@ -1,5 +1,6 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireUser } from "./auth.js";
 
 const statusV = v.union(
   v.literal("running"),
@@ -7,7 +8,7 @@ const statusV = v.union(
   v.literal("failed"),
 );
 
-export const createRun = mutation({
+export const createRun = internalMutation({
   args: { runId: v.string(), trigger: v.string() },
   handler: async (ctx, args) => {
     return await ctx.db.insert("consolidationRuns", {
@@ -21,7 +22,7 @@ export const createRun = mutation({
   },
 });
 
-export const updateRun = mutation({
+export const updateRun = internalMutation({
   args: {
     runId: v.string(),
     status: v.optional(statusV),
@@ -47,6 +48,7 @@ export const updateRun = mutation({
 export const listRuns = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db.query("consolidationRuns").order("desc").take(args.limit ?? 25);
   },
 });

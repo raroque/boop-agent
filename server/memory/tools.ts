@@ -1,6 +1,6 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { api } from "../../convex/_generated/api.js";
+import { api, internal } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 import { embed, embeddingsAvailable } from "../embeddings.js";
 import { DEFAULT_DECAY, SEGMENT_PREFERRED_TIER, makeMemoryId } from "./types.js";
@@ -39,7 +39,7 @@ export function createMemoryMcp(conversationId: string) {
           const tier = args.tier ?? SEGMENT_PREFERRED_TIER[args.segment];
           const memoryId = makeMemoryId();
           const embedding = (await embed(args.content)) ?? undefined;
-          await convex.mutation(api.memoryRecords.upsert, {
+          await convex.mutation(internal.memoryRecords.upsert, {
             memoryId,
             content: args.content,
             tier,
@@ -49,7 +49,7 @@ export function createMemoryMcp(conversationId: string) {
             supersedes: args.supersedes,
             embedding,
           });
-          await convex.mutation(api.memoryEvents.emit, {
+          await convex.mutation(internal.memoryEvents.emit, {
             eventType: "memory.written",
             conversationId,
             memoryId,
@@ -80,7 +80,7 @@ export function createMemoryMcp(conversationId: string) {
           if (embeddingsAvailable()) {
             const queryVec = await embed(args.query);
             if (queryVec) {
-              const hits = await convex.action(api.memoryRecords.vectorSearch, {
+              const hits = await convex.action(internal.memoryRecords.vectorSearch, {
                 embedding: queryVec,
                 limit: args.limit,
               });
@@ -96,9 +96,9 @@ export function createMemoryMcp(conversationId: string) {
           }
 
           for (const r of results) {
-            await convex.mutation(api.memoryRecords.markAccessed, { memoryId: r.memoryId });
+            await convex.mutation(internal.memoryRecords.markAccessed, { memoryId: r.memoryId });
           }
-          await convex.mutation(api.memoryEvents.emit, {
+          await convex.mutation(internal.memoryEvents.emit, {
             eventType: "memory.recalled",
             conversationId,
             data: JSON.stringify({ query: args.query, hits: results.length, mode }),

@@ -1,5 +1,5 @@
 import express from "express";
-import { api } from "../convex/_generated/api.js";
+import { internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { handleUserMessage } from "./interaction-agent.js";
 import { broadcast } from "./broadcast.js";
@@ -167,7 +167,7 @@ export function createSendblueRouter(): express.Router {
     }
 
     if (message_handle) {
-      const { claimed } = await convex.mutation(api.sendblueDedup.claim, {
+      const { claimed } = await convex.mutation(internal.sendblueDedup.claim, {
         handle: message_handle,
       });
       if (!claimed) {
@@ -200,7 +200,7 @@ export function createSendblueRouter(): express.Router {
           `[turn ${turnTag}] → reply (${elapsed}s, ${reply.length} chars): ${JSON.stringify(replyPreview)}`,
         );
         await sendImessage(from_number, reply);
-        await convex.mutation(api.messages.send, {
+        await convex.mutation(internal.messages.send, {
           conversationId,
           role: "assistant",
           content: reply,

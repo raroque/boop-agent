@@ -1,5 +1,5 @@
 import { Cron } from "croner";
-import { api } from "../convex/_generated/api.js";
+import { api, internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { spawnExecutionAgent } from "./execution-agent.js";
 import { sendImessage } from "./sendblue.js";
@@ -38,7 +38,7 @@ async function runAutomation(a: {
   notifyConversationId?: string;
 }): Promise<void> {
   const runId = randomId("run");
-  await convex.mutation(api.automations.createRun, {
+  await convex.mutation(internal.automations.createRun, {
     runId,
     automationId: a.automationId,
   });
@@ -51,7 +51,7 @@ async function runAutomation(a: {
       conversationId: a.conversationId,
       name: `auto:${a.name}`,
     });
-    await convex.mutation(api.automations.updateRun, {
+    await convex.mutation(internal.automations.updateRun, {
       runId,
       status: res.status === "completed" ? "completed" : "failed",
       result: res.result,
@@ -64,7 +64,7 @@ async function runAutomation(a: {
         const preamble = `[${a.name}]\n\n`;
         await sendImessage(number, preamble + res.result);
       }
-      await convex.mutation(api.messages.send, {
+      await convex.mutation(internal.messages.send, {
         conversationId: a.notifyConversationId,
         role: "assistant",
         content: `[${a.name}]\n\n${res.result}`,
@@ -73,7 +73,7 @@ async function runAutomation(a: {
 
     broadcast("automation_completed", { automationId: a.automationId, runId });
   } catch (err) {
-    await convex.mutation(api.automations.updateRun, {
+    await convex.mutation(internal.automations.updateRun, {
       runId,
       status: "failed",
       error: String(err),
@@ -82,7 +82,7 @@ async function runAutomation(a: {
   }
 
   const next = nextRunFor(a.schedule);
-  await convex.mutation(api.automations.markRan, {
+  await convex.mutation(internal.automations.markRan, {
     automationId: a.automationId,
     lastRunAt: Date.now(),
     nextRunAt: next ?? undefined,

@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { api } from "../convex/_generated/api.js";
+import { api, internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { broadcast } from "./broadcast.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
@@ -146,7 +146,7 @@ async function recordConsolidationUsage(
   durationMs: number,
 ): Promise<void> {
   if (usage.costUsd <= 0 && usage.inputTokens <= 0) return;
-  await convex.mutation(api.usageRecords.record, {
+  await convex.mutation(internal.usageRecords.record, {
     source,
     runId,
     model: usage.model,
@@ -176,7 +176,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
   pruned: number;
 }> {
   const runId = randomId("cons");
-  await convex.mutation(api.consolidation.createRun, { runId, trigger });
+  await convex.mutation(internal.consolidation.createRun, { runId, trigger });
   broadcast("consolidation_started", { runId, trigger });
 
   let merged = 0;
@@ -189,7 +189,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
     });
     broadcast("consolidation_phase", { runId, phase: "loaded", memoriesCount: memories.length });
     if (memories.length < 6) {
-      await convex.mutation(api.consolidation.updateRun, {
+      await convex.mutation(internal.consolidation.updateRun, {
         runId,
         status: "completed",
         notes: "not enough memories to consolidate",
@@ -244,13 +244,13 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
       proposals,
     });
 
-    await convex.mutation(api.consolidation.updateRun, {
+    await convex.mutation(internal.consolidation.updateRun, {
       runId,
       proposalsCount: proposals.length,
     });
 
     if (proposals.length === 0) {
-      await convex.mutation(api.consolidation.updateRun, {
+      await convex.mutation(internal.consolidation.updateRun, {
         runId,
         status: "completed",
         notes: "no proposals",
@@ -323,7 +323,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
         if (p.type === "merge" && p.keep && p.absorb?.length && p.rewriteContent) {
           const keep = memories.find((m) => m.memoryId === p.keep);
           if (!keep) continue;
-          await convex.mutation(api.memoryRecords.upsert, {
+          await convex.mutation(internal.memoryRecords.upsert, {
             memoryId: keep.memoryId,
             content: p.rewriteContent,
             tier: keep.tier,
@@ -341,7 +341,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
         } else if (p.type === "supersede" && p.newer && p.older?.length) {
           const newer = memories.find((m) => m.memoryId === p.newer);
           if (!newer) continue;
-          await convex.mutation(api.memoryRecords.upsert, {
+          await convex.mutation(internal.memoryRecords.upsert, {
             memoryId: newer.memoryId,
             content: newer.content,
             tier: newer.tier,
@@ -357,7 +357,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
             summary: `${p.newer} supersedes ${p.older.length} older`,
           });
         } else if (p.type === "prune" && p.memoryId) {
-          await convex.mutation(api.memoryRecords.setLifecycle, {
+          await convex.mutation(internal.memoryRecords.setLifecycle, {
             memoryId: p.memoryId,
             lifecycle: "pruned",
           });
@@ -373,7 +373,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
       }
     }
 
-    await convex.mutation(api.consolidation.updateRun, {
+    await convex.mutation(internal.consolidation.updateRun, {
       runId,
       status: "completed",
       mergedCount: merged,
@@ -386,14 +386,14 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
         applied,
       }),
     });
-    await convex.mutation(api.memoryEvents.emit, {
+    await convex.mutation(internal.memoryEvents.emit, {
       eventType: "memory.consolidated",
       data: JSON.stringify({ runId, proposals: proposals.length, merged, pruned }),
     });
     broadcast("consolidation_completed", { runId, merged, pruned });
     return { runId, proposals: proposals.length, merged, pruned };
   } catch (err) {
-    await convex.mutation(api.consolidation.updateRun, {
+    await convex.mutation(internal.consolidation.updateRun, {
       runId,
       status: "failed",
       notes: String(err),
