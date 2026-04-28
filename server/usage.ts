@@ -1,4 +1,4 @@
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKMessage } from "./llm/index.js";
 
 export interface UsageTotals {
   /** Name of the model that consumed the most tokens. */

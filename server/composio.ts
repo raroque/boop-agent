@@ -1,6 +1,6 @@
 import { Composio } from "@composio/core";
 import { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
-import { createSdkMcpServer, type McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, type McpSdkServerConfigWithInstance } from "./llm/index.js";
 import type { IntegrationModule } from "./integrations/registry.js";
 
 export type ToolkitAuthMode = "managed" | "byo";
