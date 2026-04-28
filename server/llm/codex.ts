@@ -97,9 +97,27 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
       };
     }
 
+    const disallowed = options?.disallowedTools || [];
+    const allowed = options?.allowedTools || [];
+
+    // Map high-level tool names to Codex CLI config features
+    const features: Record<string, boolean> = {};
+    if (disallowed.includes("Bash")) features["shell_tool"] = false;
+    if (disallowed.includes("WebSearch")) features["web_search"] = false;
+    if (disallowed.includes("WebFetch")) features["web_fetch"] = false;
+    if (disallowed.includes("Agent") || disallowed.includes("Skill")) features["multi_agent"] = false;
+
+    // Decide sandbox mode based on disallowed write/edit tools
+    let sandboxMode = "workspace-write";
+    if (disallowed.includes("Write") || disallowed.includes("Edit") || disallowed.includes("Read")) {
+      sandboxMode = "read-only";
+    }
+
     const codex = new Codex({
       config: {
         mcp: { servers: mcpConfig },
+        features,
+        sandbox: { mode: sandboxMode },
         ...(options?.model ? { model: options.model } : {}),
       },
     });
