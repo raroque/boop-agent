@@ -292,9 +292,15 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
       if (msg.type === "assistant") {
         for (const block of msg.message.content) {
           if (block.type === "text") {
-            reply += block.text;
+            // Multiple text blocks after the last tool call get joined with a
+            // paragraph break so they don't run together visually.
+            reply = reply ? `${reply}\n\n${block.text}` : block.text;
             opts.onThinking?.(block.text);
           } else if (block.type === "tool_use") {
+            // Discard any narration emitted *before* this tool call — the
+            // system prompt's order is send_ack → spawn_agent → final reply,
+            // so only text after the last tool_use is meant for the user.
+            reply = "";
             const name = block.name.replace(/^mcp__boop-[a-z-]+__/, "");
             const inputPreview = JSON.stringify(block.input);
             log(
