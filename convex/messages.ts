@@ -1,4 +1,4 @@
-import { internalMutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireUser } from "./auth.js";
 
@@ -50,6 +50,18 @@ export const recent = query({
   args: { conversationId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     await requireUser(ctx);
+    const msgs = await ctx.db
+      .query("messages")
+      .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))
+      .order("desc")
+      .take(args.limit ?? 20);
+    return msgs.reverse();
+  },
+});
+
+export const recentInternal = internalQuery({
+  args: { conversationId: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
     const msgs = await ctx.db
       .query("messages")
       .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))

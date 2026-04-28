@@ -1,4 +1,4 @@
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireUser } from "./auth.js";
 
@@ -73,6 +73,45 @@ export const remove = mutation({
   args: { automationId: v.string() },
   handler: async (ctx, args) => {
     await requireUser(ctx);
+    const auto = await ctx.db
+      .query("automations")
+      .withIndex("by_automation_id", (q) => q.eq("automationId", args.automationId))
+      .unique();
+    if (!auto) return null;
+    await ctx.db.delete(auto._id);
+    return auto._id;
+  },
+});
+
+export const listInternal = internalQuery({
+  args: { enabledOnly: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    if (args.enabledOnly) {
+      return await ctx.db
+        .query("automations")
+        .withIndex("by_enabled", (q) => q.eq("enabled", true))
+        .collect();
+    }
+    return await ctx.db.query("automations").order("desc").collect();
+  },
+});
+
+export const setEnabledInternal = internalMutation({
+  args: { automationId: v.string(), enabled: v.boolean() },
+  handler: async (ctx, args) => {
+    const auto = await ctx.db
+      .query("automations")
+      .withIndex("by_automation_id", (q) => q.eq("automationId", args.automationId))
+      .unique();
+    if (!auto) return null;
+    await ctx.db.patch(auto._id, { enabled: args.enabled });
+    return auto._id;
+  },
+});
+
+export const removeInternal = internalMutation({
+  args: { automationId: v.string() },
+  handler: async (ctx, args) => {
     const auto = await ctx.db
       .query("automations")
       .withIndex("by_automation_id", (q) => q.eq("automationId", args.automationId))

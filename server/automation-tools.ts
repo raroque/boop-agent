@@ -1,6 +1,6 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { api, internal } from "../convex/_generated/api.js";
+import { internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { availableIntegrations } from "./execution-agent.js";
 import { nextRunFor, validateSchedule } from "./automations.js";
@@ -88,7 +88,7 @@ Integrations available: ${integrationHint}`,
         "List all automations for this conversation.",
         { enabledOnly: z.boolean().optional().default(false) },
         async (args) => {
-          const all = await convex.query(api.automations.list, {
+          const all = await convex.query(internal.automations.listInternal, {
             enabledOnly: args.enabledOnly,
           });
           const mine = all.filter((a) => a.conversationId === conversationId);
@@ -108,7 +108,7 @@ Integrations available: ${integrationHint}`,
         "Enable or disable an automation by id.",
         { automationId: z.string(), enabled: z.boolean() },
         async (args) => {
-          const id = await convex.mutation(api.automations.setEnabled, args);
+          const id = await convex.mutation(internal.automations.setEnabledInternal, args);
           return {
             content: [
               {
@@ -125,7 +125,7 @@ Integrations available: ${integrationHint}`,
         "Permanently remove an automation.",
         { automationId: z.string() },
         async (args) => {
-          const id = await convex.mutation(api.automations.remove, args);
+          const id = await convex.mutation(internal.automations.removeInternal, args);
           return {
             content: [
               {

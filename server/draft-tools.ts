@@ -1,6 +1,6 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { api, internal } from "../convex/_generated/api.js";
+import { internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { spawnExecutionAgent } from "./execution-agent.js";
 
@@ -66,7 +66,7 @@ export function createDraftDecisionMcp(conversationId: string) {
         "List pending drafts in this conversation. Call this when the user says 'send it', 'yes', 'go ahead', etc. without a specific id.",
         {},
         async () => {
-          const drafts = await convex.query(api.drafts.pendingByConversation, {
+          const drafts = await convex.query(internal.drafts.pendingByConversationInternal, {
             conversationId,
           });
           if (drafts.length === 0) {
@@ -84,7 +84,7 @@ export function createDraftDecisionMcp(conversationId: string) {
         "Approve and execute a draft. Spawns an execution agent to actually perform the action based on the stored payload.",
         { draftId: z.string(), integrations: z.array(z.string()) },
         async (args) => {
-          const draft = await convex.query(api.drafts.get, { draftId: args.draftId });
+          const draft = await convex.query(internal.drafts.getInternal, { draftId: args.draftId });
           if (!draft || draft.status !== "pending") {
             return {
               content: [

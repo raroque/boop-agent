@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { api, internal } from "../convex/_generated/api.js";
+import { internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { broadcast } from "./broadcast.js";
 import { buildMcpServersForIntegrations, listIntegrations } from "./integrations/registry.js";
@@ -226,7 +226,7 @@ export function runningAgentIds(): string[] {
 }
 
 export async function retryAgent(agentId: string): Promise<SpawnResult | null> {
-  const existing = await convex.query(api.agents.get, { agentId });
+  const existing = await convex.query(internal.agents.getInternal, { agentId });
   if (!existing) return null;
   return await spawnExecutionAgent({
     task: existing.task,

@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { api, internal } from "../convex/_generated/api.js";
+import { internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { broadcast } from "./broadcast.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
@@ -183,7 +183,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
   let pruned = 0;
 
   try {
-    const memories = await convex.query(api.memoryRecords.list, {
+    const memories = await convex.query(internal.memoryRecords.listInternal, {
       lifecycle: "active",
       limit: 150,
     });

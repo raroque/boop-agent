@@ -1,6 +1,6 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { api, internal } from "../../convex/_generated/api.js";
+import { internal } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 import { embed, embeddingsAvailable } from "../embeddings.js";
 import { DEFAULT_DECAY, SEGMENT_PREFERRED_TIER, makeMemoryId } from "./types.js";
@@ -89,7 +89,7 @@ export function createMemoryMcp(conversationId: string) {
             }
           }
           if (results.length === 0) {
-            results = await convex.query(api.memoryRecords.search, {
+            results = await convex.query(internal.memoryRecords.searchInternal, {
               query: args.query,
               limit: args.limit,
             });

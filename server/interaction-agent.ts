@@ -1,6 +1,6 @@
 import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { api, internal } from "../convex/_generated/api.js";
+import { internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { createMemoryMcp } from "./memory/tools.js";
 import { extractAndStore } from "./memory/extract.js";
@@ -192,7 +192,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     ],
   });
 
-  const history = await convex.query(api.messages.recent, {
+  const history = await convex.query(internal.messages.recentInternal, {
     conversationId: opts.conversationId,
     limit: 10,
   });

@@ -1,5 +1,5 @@
 import { Cron } from "croner";
-import { api, internal } from "../convex/_generated/api.js";
+import { internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { spawnExecutionAgent } from "./execution-agent.js";
 import { sendImessage } from "./sendblue.js";
@@ -90,7 +90,7 @@ async function runAutomation(a: {
 }
 
 export async function tickAutomations(): Promise<void> {
-  const all = await convex.query(api.automations.list, { enabledOnly: true });
+  const all = await convex.query(internal.automations.listInternal, { enabledOnly: true });
   const now = Date.now();
   const due = all.filter((a) => a.nextRunAt !== undefined && a.nextRunAt <= now);
   for (const a of due) {

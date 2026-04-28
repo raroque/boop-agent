@@ -1,4 +1,4 @@
-import { api, internal } from "../../convex/_generated/api.js";
+import { internal } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -51,7 +51,7 @@ export async function cleanMemories(): Promise<{
   archived: number;
   pruned: number;
 }> {
-  const active = await convex.query(api.memoryRecords.list, { lifecycle: "active", limit: 500 });
+  const active = await convex.query(internal.memoryRecords.listInternal, { lifecycle: "active", limit: 500 });
   let archived = 0;
   let pruned = 0;
 

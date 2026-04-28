@@ -154,6 +154,45 @@ export const search = query({
   },
 });
 
+export const listInternal = internalQuery({
+  args: {
+    tier: v.optional(tierV),
+    segment: v.optional(segmentV),
+    lifecycle: v.optional(lifecycleV),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 100;
+    let results;
+    if (args.tier) {
+      results = await ctx.db.query("memoryRecords").withIndex("by_tier", (q) => q.eq("tier", args.tier!)).order("desc").take(limit * 2);
+    } else if (args.segment) {
+      results = await ctx.db.query("memoryRecords").withIndex("by_segment", (q) => q.eq("segment", args.segment!)).order("desc").take(limit * 2);
+    } else {
+      results = await ctx.db.query("memoryRecords").order("desc").take(limit * 2);
+    }
+    const lifecycle = args.lifecycle ?? "active";
+    return results.filter((r) => r.lifecycle === lifecycle).slice(0, limit);
+  },
+});
+
+export const searchInternal = internalQuery({
+  args: { query: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 20;
+    const q = args.query.toLowerCase();
+    const active = await ctx.db
+      .query("memoryRecords")
+      .withIndex("by_lifecycle", (idx) => idx.eq("lifecycle", "active"))
+      .order("desc")
+      .take(500);
+    return active
+      .filter((m) => m.content.toLowerCase().includes(q))
+      .sort((a, b) => b.importance - a.importance)
+      .slice(0, limit);
+  },
+});
+
 export const markAccessed = internalMutation({
   args: { memoryId: v.string() },
   handler: async (ctx, args) => {

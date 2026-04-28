@@ -1,4 +1,4 @@
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireUser } from "./auth.js";
 
@@ -93,6 +93,31 @@ export const get = query({
   args: { agentId: v.string() },
   handler: async (ctx, args) => {
     await requireUser(ctx);
+    return await ctx.db
+      .query("executionAgents")
+      .withIndex("by_agent_id", (q) => q.eq("agentId", args.agentId))
+      .unique();
+  },
+});
+
+export const listInternal = internalQuery({
+  args: { status: v.optional(statusV), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 50;
+    if (args.status) {
+      return await ctx.db
+        .query("executionAgents")
+        .withIndex("by_status", (q) => q.eq("status", args.status!))
+        .order("desc")
+        .take(limit);
+    }
+    return await ctx.db.query("executionAgents").order("desc").take(limit);
+  },
+});
+
+export const getInternal = internalQuery({
+  args: { agentId: v.string() },
+  handler: async (ctx, args) => {
     return await ctx.db
       .query("executionAgents")
       .withIndex("by_agent_id", (q) => q.eq("agentId", args.agentId))

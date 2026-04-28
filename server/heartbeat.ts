@@ -1,4 +1,4 @@
-import { api, internal } from "../convex/_generated/api.js";
+import { internal } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { cancelAgent, runningAgentIds } from "./execution-agent.js";
 import { broadcast } from "./broadcast.js";
@@ -6,7 +6,7 @@ import { broadcast } from "./broadcast.js";
 const STALE_MS = 15 * 60 * 1000;
 
 export async function sweepStaleAgents(): Promise<void> {
-  const runningInDb = await convex.query(api.agents.list, { status: "running", limit: 100 });
+  const runningInDb = await convex.query(internal.agents.listInternal, { status: "running", limit: 100 });
   const now = Date.now();
   const live = new Set(runningAgentIds());
 

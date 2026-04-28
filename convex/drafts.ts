@@ -1,4 +1,4 @@
-import { internalMutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireUser } from "./auth.js";
 
@@ -56,6 +56,29 @@ export const recent = query({
   handler: async (ctx, args) => {
     await requireUser(ctx);
     return await ctx.db.query("drafts").order("desc").take(args.limit ?? 50);
+  },
+});
+
+export const getInternal = internalQuery({
+  args: { draftId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("drafts")
+      .withIndex("by_draft_id", (q) => q.eq("draftId", args.draftId))
+      .unique();
+  },
+});
+
+export const pendingByConversationInternal = internalQuery({
+  args: { conversationId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("drafts")
+      .withIndex("by_conversation_status", (q) =>
+        q.eq("conversationId", args.conversationId).eq("status", "pending"),
+      )
+      .order("desc")
+      .take(25);
   },
 });
 
