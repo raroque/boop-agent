@@ -10,7 +10,7 @@ import * as os from "os";
 import * as fs from "fs";
 import { randomBytes } from "crypto";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { SdkMcpToolDefinition, McpSdkServerConfigWithInstance } from "./index.js";
+import { SdkMcpToolDefinition, McpSdkServerConfigWithInstance } from "./types.js";
 import { z } from "zod";
 
 import { fileURLToPath } from "url";
