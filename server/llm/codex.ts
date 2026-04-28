@@ -100,19 +100,25 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
 
     // Map high-level tool names to Codex CLI config features
     const features: Record<string, boolean> = {};
-    let networkAccess = true;
 
     if (allowed.length > 0) {
       // If a whitelist is provided, start by disabling common built-ins
       features["shell_tool"] = allowed.includes("Bash");
-      features["web_search"] = allowed.includes("WebSearch");
-      networkAccess = allowed.includes("WebFetch");
-      // Note: multi-agent restriction is currently not exposed via SDK config features
+      // Map WebSearch/WebFetch to available browsing features
+      const browsingAllowed = allowed.includes("WebSearch") || allowed.includes("WebFetch");
+      features["browser_use"] = browsingAllowed;
+      features["in_app_browser"] = browsingAllowed;
+      features["multi_agent"] = allowed.includes("Agent") || allowed.includes("Skill");
     } else {
       // Fallback to blacklist logic if no whitelist is present
       if (disallowed.includes("Bash")) features["shell_tool"] = false;
-      if (disallowed.includes("WebSearch")) features["web_search"] = false;
-      if (disallowed.includes("WebFetch")) networkAccess = false;
+      if (disallowed.includes("WebSearch") || disallowed.includes("WebFetch")) {
+        features["browser_use"] = false;
+        features["in_app_browser"] = false;
+      }
+      if (disallowed.includes("Agent") || disallowed.includes("Skill")) {
+        features["multi_agent"] = false;
+      }
     }
 
     // Decide sandbox mode based on disallowed write/edit tools
@@ -131,7 +137,6 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
         features,
         sandbox: { 
           mode: sandboxMode,
-          network_access: networkAccess,
         },
         ...(options?.model ? { model: options.model } : {}),
       },
