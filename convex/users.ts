@@ -27,7 +27,10 @@ export const deleteAllUsersAndAccounts = internalMutation({
   },
 });
 
-// Idempotent: safe to run on every deploy.
+// Idempotent: safe to run on every deploy. The countUsers/createAccount
+// pair isn't transactional (actions don't span mutations), so we also catch
+// the duplicate-account error from createAccount in case a concurrent
+// invocation wins the race after we've checked.
 export const bootstrap = internalAction({
   args: {},
   handler: async (ctx) => {
@@ -41,13 +44,21 @@ export const bootstrap = internalAction({
       );
     }
 
-    await createAccount(ctx, {
-      provider: "password",
-      account: { id: ADMIN_EMAIL, secret: password },
-      profile: { email: ADMIN_EMAIL },
-    });
-
-    return { created: true };
+    try {
+      await createAccount(ctx, {
+        provider: "password",
+        account: { id: ADMIN_EMAIL, secret: password },
+        profile: { email: ADMIN_EMAIL },
+      });
+      return { created: true };
+    } catch (err) {
+      // @convex-dev/auth throws `Account ${id} already exists` from
+      // createAccountFromCredentials when the credential row already exists.
+      if (err instanceof Error && err.message.includes("already exists")) {
+        return { created: false, reason: "user already exists (concurrent bootstrap)" };
+      }
+      throw err;
+    }
   },
 });
 
