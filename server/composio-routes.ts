@@ -114,7 +114,7 @@ export function createComposioRouter(): express.Router {
         ? req.body.apiKey.trim()
         : undefined;
     try {
-      const opts = alias || apiKey ? { ...(alias ? { alias } : {}), ...(apiKey ? { apiKey } : {}) } : undefined;
+      const opts = alias || apiKey ? { alias, apiKey } : undefined;
       const result = await authorizeToolkit(slug, opts);
       res.json(result);
     } catch (err) {
