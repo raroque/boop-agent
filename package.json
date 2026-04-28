@@ -8,7 +8,8 @@
   "scripts": {
     "setup": "tsx scripts/setup.ts",
     "deploy": "tsx scripts/deploy.ts",
-    "test": "tsx --test 'server/**/*.test.ts' 'convex/**/*.test.ts'",
+    "pretest": "node scripts/create-test-stubs.mjs",
+    "test": "CONVEX_URL=http://localhost:0 tsx --test 'server/**/*.test.ts' 'convex/**/*.test.ts'",
     "sendblue:sync": "node scripts/sendblue-sync.mjs",
     "sendblue:webhook": "node scripts/sendblue-webhook.mjs",
     "preflight": "node scripts/preflight.mjs",
