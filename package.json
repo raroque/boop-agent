@@ -18,7 +18,8 @@
     "build:debug": "vite build --config debug/vite.config.ts",
     "start": "npm run preflight && tsx server/index.ts",
     "deploy:convex": "convex deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "proxy": "sh scripts/start-proxy.sh"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",

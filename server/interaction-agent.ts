@@ -10,7 +10,6 @@ import { createDraftDecisionMcp } from "./draft-tools.js";
 import { createSelfMcp } from "./self-tools.js";
 import { getRuntimeModel } from "./runtime-config.js";
 import { broadcast } from "./broadcast.js";
-import { sendImessage } from "./sendblue.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
 
 const INTERACTION_SYSTEM = `You are Boop, a personal agent the user texts from iMessage.
@@ -62,6 +61,7 @@ Safe to answer directly (no spawn needed):
 - Greetings, acknowledgments, short conversational turns ("thanks", "lol", "ok got it").
 - Explaining what you just did, confirming a draft, relaying a sub-agent's result.
 - Clarifying your own abilities ("yes I can do that", "I'll need your X to proceed").
+- Questions about yourself: what model you are, what you can do, how you work. Answer honestly.
 - Anything that's purely about the user (using recall).
 
 Everything else — SPAWN.
@@ -115,6 +115,7 @@ interface HandleOpts {
   content: string;
   turnTag?: string;
   onThinking?: (chunk: string) => void;
+  onSendAck?: (text: string) => Promise<void>;
 }
 
 function randomId(prefix: string): string {
@@ -155,9 +156,9 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
               content: [{ type: "text" as const, text: "Empty ack skipped." }],
             };
           }
-          if (opts.conversationId.startsWith("sms:")) {
-            const number = opts.conversationId.slice(4);
-            await sendImessage(number, text);
+          if (opts.onSendAck) {
+            await opts.onSendAck(text);
+            return { content: [{ type: "text" as const, text: "Ack sent to user." }] };
           }
           await convex.mutation(api.messages.send, {
             conversationId: opts.conversationId,
@@ -304,6 +305,8 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
         }
       } else if (msg.type === "result") {
         usage = aggregateUsageFromResult(msg, requestedModel);
+      } else {
+        log(`sdk-msg: type=${(msg as { type: string }).type}`);
       }
     }
   } catch (err) {
@@ -311,7 +314,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     reply = "Sorry — I hit an error processing that. Try again in a moment.";
   }
 
-  reply = reply.trim() || "(no reply)";
+  reply = reply.trim();
 
   if (usage.costUsd > 0 || usage.inputTokens > 0) {
     log(
