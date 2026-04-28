@@ -161,11 +161,22 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
           };
         }
       } else if (event.type === "turn.completed") {
+        const u = event.usage;
+        const model = options?.model || "codex";
         yield {
           type: "result",
-          usage: event.usage,
+          modelUsage: {
+            [model]: {
+              inputTokens: u?.input_tokens ?? 0,
+              outputTokens: u?.output_tokens ?? 0,
+              cacheReadInputTokens: u?.cached_input_tokens ?? 0,
+              cacheCreationInputTokens: 0, // Codex doesn't report cache creation separately
+            },
+          },
+          total_cost_usd: 0, // Codex is subscription-based, no per-token cost
         };
-      } else if (event.type === "item.started" && event.item.type === "mcp_tool_call") {
+      }
+ else if (event.type === "item.started" && event.item.type === "mcp_tool_call") {
         yield {
           type: "assistant",
           message: {
