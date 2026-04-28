@@ -1,4 +1,4 @@
-import { Composio } from "@composio/core";
+import { AuthScheme, Composio } from "@composio/core";
 import { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
 import { createSdkMcpServer, type McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { IntegrationModule } from "./integrations/registry.js";
@@ -43,6 +43,7 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
   { slug: "salesforce", displayName: "Salesforce", authMode: "managed" },
   { slug: "twitter", displayName: "Twitter / X", authMode: "byo" },
   { slug: "linkedin", displayName: "LinkedIn", authMode: "managed" },
+  { slug: "fireflies", displayName: "Fireflies", authMode: "byo" },
 ];
 
 const DISPLAY_NAME_BY_SLUG = new Map(CURATED_TOOLKITS.map((t) => [t.slug, t.displayName]));
@@ -94,6 +95,9 @@ export interface ToolkitMeta {
   logo?: string;
   description?: string;
   toolsCount?: number;
+  // Auth mode used to initiate a connection — "API_KEY", "OAUTH2", "BASIC", etc.
+  // Only set when the toolkit's catalog entry exposes it; absent → assume OAuth-style flow.
+  authScheme?: string;
 }
 
 export interface ToolSummary {
@@ -117,6 +121,7 @@ async function fetchAllToolkitMeta(): Promise<Map<string, ToolkitMeta>> {
     slug: string;
     name: string;
     meta?: { logo?: string; description?: string; toolsCount?: number };
+    auth_config_details?: Array<{ mode?: string }>;
   }>) {
     out.set(it.slug, {
       slug: it.slug,
@@ -124,6 +129,7 @@ async function fetchAllToolkitMeta(): Promise<Map<string, ToolkitMeta>> {
       logo: it.meta?.logo,
       description: it.meta?.description,
       toolsCount: it.meta?.toolsCount,
+      authScheme: it.auth_config_details?.[0]?.mode,
     });
   }
   // Backfill any curated toolkits the list endpoint omitted (e.g. MCP-only
@@ -135,6 +141,7 @@ async function fetchAllToolkitMeta(): Promise<Map<string, ToolkitMeta>> {
           slug: string;
           name: string;
           meta?: { logo?: string; description?: string; toolsCount?: number };
+          auth_config_details?: Array<{ mode?: string }>;
         };
         out.set(full.slug, {
           slug: full.slug,
@@ -142,6 +149,7 @@ async function fetchAllToolkitMeta(): Promise<Map<string, ToolkitMeta>> {
           logo: full.meta?.logo,
           description: full.meta?.description,
           toolsCount: full.meta?.toolsCount,
+          authScheme: full.auth_config_details?.[0]?.mode,
         });
       } catch (err) {
         console.warn(`[composio] meta backfill failed for ${t.slug}`, err);
@@ -334,9 +342,20 @@ export async function listConnectedToolkits(): Promise<ConnectedToolkit[]> {
   const composio = getComposio();
   if (!composio) return [];
   try {
-    const resp = await composio.connectedAccounts.list({ userIds: [boopUserId()] });
+    // Composio paginates with a small default page size, so walk all pages.
+    const items: Awaited<ReturnType<typeof composio.connectedAccounts.list>>["items"] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await composio.connectedAccounts.list({
+        userIds: [boopUserId()],
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      });
+      items.push(...page.items);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
     const enriched = await Promise.all(
-      resp.items.map(async (it) => {
+      items.map(async (it) => {
         const seed = extractAccountIdentity(
           (it as { state?: unknown }).state,
           (it as { data?: unknown }).data,
@@ -461,7 +480,7 @@ export class ComposioNeedsAuthConfigError extends Error {
 
 export async function authorizeToolkit(
   slug: string,
-  opts?: { callbackUrl?: string; alias?: string },
+  opts?: { callbackUrl?: string; alias?: string; apiKey?: string },
 ): Promise<{ redirectUrl: string | null; connectionId: string }> {
   const composio = getComposio();
   if (!composio) throw new Error("COMPOSIO_API_KEY not set");
@@ -494,15 +513,15 @@ export async function authorizeToolkit(
     }
   }
 
-  // 2. Initiate the connection. allowMultiple if there's already an active connection
-  //    so we add another account instead of replacing.
-  const existing = (await listConnectedToolkits()).filter(
-    (c) => c.slug === slug && c.status === "ACTIVE",
-  );
+  // 2. Initiate the connection. allowMultiple is always set so reconnects work
+  //    even when stale (non-ACTIVE) prior accounts exist on Composio's side.
+  //    For API_KEY toolkits the caller must pass `apiKey` — there's no OAuth
+  //    redirect to collect it through.
   const conn = await composio.connectedAccounts.initiate(boopUserId(), authConfigId, {
-    ...(existing.length > 0 ? { allowMultiple: true } : {}),
+    allowMultiple: true,
     ...(opts?.callbackUrl ? { callbackUrl: opts.callbackUrl } : {}),
     ...(opts?.alias ? { alias: opts.alias } : {}),
+    ...(opts?.apiKey ? { config: AuthScheme.APIKey({ api_key: opts.apiKey }) } : {}),
   });
   return { redirectUrl: conn.redirectUrl ?? null, connectionId: conn.id };
 }

@@ -58,6 +58,7 @@ export function createComposioRouter(): express.Router {
           slug: t.slug,
           displayName: t.displayName,
           authMode: t.authMode,
+          authScheme: m?.authScheme ?? null,
           hasAuthConfig: configured.has(t.slug),
           logoUrl: m?.logo ?? null,
           description: m?.description ?? null,
@@ -79,6 +80,7 @@ export function createComposioRouter(): express.Router {
             slug,
             displayName: m?.name ?? displayNameFor(slug),
             authMode,
+            authScheme: m?.authScheme ?? null,
             hasAuthConfig: configured.has(slug),
             logoUrl: m?.logo ?? null,
             description: m?.description ?? null,
@@ -107,8 +109,13 @@ export function createComposioRouter(): express.Router {
   router.post("/toolkits/:slug/authorize", async (req, res) => {
     const slug = req.params.slug;
     const alias = typeof req.body?.alias === "string" ? req.body.alias : undefined;
+    const apiKey =
+      typeof req.body?.apiKey === "string" && req.body.apiKey.trim()
+        ? req.body.apiKey.trim()
+        : undefined;
     try {
-      const result = await authorizeToolkit(slug, alias ? { alias } : undefined);
+      const opts = alias || apiKey ? { ...(alias ? { alias } : {}), ...(apiKey ? { apiKey } : {}) } : undefined;
+      const result = await authorizeToolkit(slug, opts);
       res.json(result);
     } catch (err) {
       if (err instanceof ComposioNeedsAuthConfigError) {

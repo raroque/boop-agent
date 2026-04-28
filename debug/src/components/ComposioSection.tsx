@@ -18,6 +18,7 @@ interface Toolkit {
   slug: string;
   displayName: string;
   authMode: AuthMode;
+  authScheme: string | null;
   hasAuthConfig: boolean;
   logoUrl: string | null;
   description: string | null;
@@ -206,6 +207,10 @@ function IntroCard({ isDark, onDismiss }: { isDark: boolean; onDismiss: () => vo
 
 export function ComposioSection({ isDark }: { isDark: boolean }) {
   const [data, setData] = useState<ToolkitsResponse | null>(null);
+  const dataRef = useRef<ToolkitsResponse | null>(null);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [needsAuthConfig, setNeedsAuthConfig] = useState<NeedsAuthConfigInfo | null>(null);
@@ -276,10 +281,25 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
 
   const connect = useCallback(
     async (slug: string) => {
+      const toolkit = dataRef.current?.toolkits.find((t) => t.slug === slug);
+      // API_KEY toolkits (e.g. Fireflies) don't have an OAuth redirect — collect
+      // the key from the user and pass it straight to the authorize endpoint.
+      let apiKey: string | undefined;
+      if (toolkit?.authScheme === "API_KEY") {
+        const entered = window.prompt(`Paste your ${toolkit.displayName} API key:`);
+        if (!entered?.trim()) {
+          return;
+        }
+        apiKey = entered.trim();
+      }
       setBusy(slug);
       setNeedsAuthConfig(null);
       try {
-        const r = await fetch(`/api/composio/toolkits/${slug}/authorize`, { method: "POST" });
+        const r = await fetch(`/api/composio/toolkits/${slug}/authorize`, {
+          method: "POST",
+          headers: apiKey ? { "Content-Type": "application/json" } : undefined,
+          body: apiKey ? JSON.stringify({ apiKey }) : undefined,
+        });
         if (!r.ok) {
           const err = await r.json().catch(() => ({}));
           if (err?.needsAuthConfig) {
@@ -297,7 +317,13 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         }
         const { redirectUrl } = await r.json();
         if (!redirectUrl) {
-          showToast("Composio did not return a redirect URL.");
+          // API_KEY (and any other no-redirect) flow — connection is active now.
+          try {
+            await fetch("/api/composio/refresh", { method: "POST" });
+          } catch {
+            /* ignore */
+          }
+          await fetchToolkits();
           setBusy(null);
           return;
         }
