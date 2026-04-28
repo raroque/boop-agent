@@ -13,12 +13,6 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { SdkMcpToolDefinition, McpSdkServerConfigWithInstance } from "./types.js";
 import { z } from "zod";
 
-import { fileURLToPath } from "url";
-import { dirname } from "path";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
 export function tool(name: string, description: string, inputSchema: any, handler: any): SdkMcpToolDefinition<any> {
   return { name, description, inputSchema, handler };
 }
@@ -92,8 +86,12 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
       await serverConfig.instance.connect(transport);
 
       mcpConfig[name] = {
-        command: "node",
-        args: [path.join(__dirname, "mcp-bridge.js"), socketPath],
+        command: process.execPath,
+        args: [
+          "-e",
+          "const { createConnection } = require('net'); const c = createConnection(process.argv[1], () => { process.stdin.pipe(c); c.pipe(process.stdout); }); c.on('error', () => process.exit(1)); c.on('close', () => process.exit(0));",
+          socketPath
+        ],
       };
     }
 
