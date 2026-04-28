@@ -3,6 +3,7 @@ import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { handleUserMessage } from "./interaction-agent.js";
 import { broadcast } from "./broadcast.js";
+import { verifyHmac } from "./auth.js";
 
 const API_BASE = "https://api.sendblue.com/api";
 const MAX_CHUNK = 2900;
@@ -122,10 +123,46 @@ export function startTypingLoop(toNumber: string): () => void {
 export function createSendblueRouter(): express.Router {
   const router = express.Router();
 
-  router.post("/webhook", async (req, res) => {
+  // Capture the raw body for HMAC verification. Stored as a Buffer on the
+  // request via the `verify` hook on a route-scoped JSON parser. We must
+  // NOT use the globally-installed express.json() parser — we need the raw
+  // bytes BEFORE JSON parsing happens.
+  const jsonWithRaw = express.json({
+    limit: "2mb",
+    verify: (req, _res, buf) => {
+      (req as any).rawBody = buf;
+    },
+  });
+
+  router.post("/webhook", jsonWithRaw, async (req, res) => {
+    const signingSecret = process.env.SENDBLUE_SIGNING_SECRET;
+    const expectedFrom = process.env.SENDBLUE_FROM_NUMBER;
+
+    // Perimeter A check 1: HMAC signature.
+    if (signingSecret) {
+      const sig = req.header("x-sendblue-signature") ?? undefined;
+      const raw = (req as any).rawBody as Buffer | undefined;
+      const ok = raw && verifyHmac(raw.toString("utf8"), sig, signingSecret);
+      if (!ok) {
+        res.status(401).json({ error: "invalid signature" });
+        return;
+      }
+    } else {
+      console.warn(
+        "[sendblue] SENDBLUE_SIGNING_SECRET not set — webhook accepts unsigned requests. " +
+          "Required for any non-localhost deployment.",
+      );
+    }
+
     const { content, from_number, is_outbound, message_handle } = req.body ?? {};
     if (is_outbound || !content || !from_number) {
       res.json({ ok: true, skipped: true });
+      return;
+    }
+
+    // Perimeter A check 2: phone whitelist.
+    if (expectedFrom && from_number !== expectedFrom) {
+      res.status(403).json({ error: "phone not allowed" });
       return;
     }
 
