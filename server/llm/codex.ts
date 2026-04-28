@@ -100,11 +100,13 @@ export async function* query(params: { prompt: any; options?: any }): AsyncGener
     const codex = new Codex({
       config: {
         mcp: { servers: mcpConfig },
+        ...(options?.model ? { model: options.model } : {}),
       },
     });
 
     const thread = codex.startThread({
       skipGitRepoCheck: true,
+      ...(options?.systemPrompt ? { instructions: options.systemPrompt } : {}),
     });
 
     const input = typeof prompt === "string" ? prompt : "Continue conversation";
