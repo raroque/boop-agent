@@ -117,7 +117,7 @@ export function createComposioRouter(): express.Router {
           error: err.message,
           needsAuthConfig: true,
           toolkit: slug,
-          setupUrl: `https://platform.composio.dev/auth-configs`,
+          setupUrl: `https://dashboard.composio.dev`,
         });
         return;
       }

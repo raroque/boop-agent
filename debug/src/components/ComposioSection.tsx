@@ -79,15 +79,175 @@ interface NeedsAuthConfigInfo {
   setupUrl: string;
 }
 
+// Per-toolkit guidance for BYO OAuth setup. Composio doesn't host a shared OAuth
+// app for these — the user has to register one on the toolkit's developer portal,
+// then paste the credentials into Composio's auth-configs page. Adding entries
+// here makes the setup flow self-explanatory; missing entries fall back to a
+// generic message and the Composio link.
+const BYO_PORTALS: Record<string, { label: string; url: string; note?: string }> = {
+  twitter: {
+    label: "X (Twitter) Developer Portal",
+    url: "https://developer.x.com/en/portal/dashboard",
+    note: "Create a Project → App, then grab the OAuth 2.0 Client ID + Secret.",
+  },
+  linkedin: {
+    label: "LinkedIn Developer Portal",
+    url: "https://www.linkedin.com/developers/apps",
+    note: "Create an App, request the scopes you need, copy the Client ID + Secret.",
+  },
+  salesforce: {
+    label: "Salesforce — Connected Apps",
+    url: "https://help.salesforce.com/s/articleView?id=connected_app_create.htm",
+    note: "Create a Connected App in your org's Setup, copy the Consumer Key + Secret.",
+  },
+};
+
+const COMPOSIO_DASHBOARD_URL = "https://dashboard.composio.dev";
+
+const INTRO_DISMISSED_KEY = "boop:connections:intro-dismissed";
+const TOAST_TIMEOUT_MS = 6000;
+
+interface ToastState {
+  id: number;
+  message: string;
+  tone: "error" | "info";
+}
+
+function Toast({
+  toast,
+  onDismiss,
+  isDark,
+}: {
+  toast: ToastState;
+  onDismiss: () => void;
+  isDark: boolean;
+}) {
+  const tone = toast.tone === "error"
+    ? isDark
+      ? "bg-rose-500/10 border-rose-500/30 text-rose-200"
+      : "bg-rose-50 border-rose-200 text-rose-900"
+    : isDark
+      ? "bg-slate-800/80 border-slate-700 text-slate-200"
+      : "bg-white border-slate-200 text-slate-700";
+  return (
+    <div
+      role="status"
+      className={`fixed bottom-4 right-4 z-50 max-w-sm rounded-lg border px-3 py-2 text-xs shadow-lg fade-in ${tone}`}
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex-1 leading-snug">{toast.message}</span>
+        <button
+          onClick={onDismiss}
+          className="text-[11px] underline opacity-70 hover:opacity-100 shrink-0"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function IntroCard({ isDark, onDismiss }: { isDark: boolean; onDismiss: () => void }) {
+  return (
+    <div
+      className={`rounded-xl border px-4 py-4 mb-4 ${
+        isDark
+          ? "bg-sky-500/5 border-sky-500/20 text-slate-300"
+          : "bg-sky-50/60 border-sky-200 text-slate-700"
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex-1 text-xs leading-relaxed">
+          <div className={`font-semibold mb-1 ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+            Connect your accounts
+          </div>
+          <p className="mb-2">
+            Each connected toolkit becomes a tool the agent can use when you ask it for things —
+            "what's on my calendar?" needs Google Calendar, "summarize my last 5 emails" needs
+            Gmail. The agent only loads the toolkits a given task needs, so connecting more here
+            doesn't slow down anything.
+          </p>
+          <ul className="space-y-1">
+            <li>
+              <span
+                className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded mr-2 ${
+                  isDark ? "bg-emerald-400/10 text-emerald-400" : "bg-emerald-50 text-emerald-700"
+                }`}
+              >
+                Ready to connect
+              </span>
+              Click Connect, log into your account in the popup, you're done.
+            </li>
+            <li>
+              <span
+                className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded mr-2 ${
+                  isDark ? "bg-amber-400/10 text-amber-400" : "bg-amber-50 text-amber-700"
+                }`}
+              >
+                Needs auth config
+              </span>
+              Toolkit's terms don't allow a shared OAuth app, so you have to register your own
+              once. The card shows the steps.
+            </li>
+          </ul>
+        </div>
+        <button
+          onClick={onDismiss}
+          className={`text-[11px] underline shrink-0 ${
+            isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"
+          }`}
+        >
+          Hide
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ComposioSection({ isDark }: { isDark: boolean }) {
   const [data, setData] = useState<ToolkitsResponse | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [needsAuthConfig, setNeedsAuthConfig] = useState<NeedsAuthConfigInfo | null>(null);
+  const [showIntro, setShowIntro] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem(INTRO_DISMISSED_KEY) !== "1";
+  });
+  const dismissIntro = useCallback(() => {
+    setShowIntro(false);
+    try {
+      window.localStorage.setItem(INTRO_DISMISSED_KEY, "1");
+    } catch {
+      /* ignore — private mode etc. */
+    }
+  }, []);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [toolsBySlug, setToolsBySlug] = useState<
     Record<string, ToolSummary[] | "loading" | "error">
   >({});
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dismissToast = useCallback(() => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    setToast(null);
+  }, []);
+  const showToast = useCallback((message: string, tone: ToastState["tone"] = "error") => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ id: Date.now(), message, tone });
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      setToast(null);
+    }, TOAST_TIMEOUT_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    },
+    [],
+  );
   // OAuth popup polling interval — kept in a ref so we can clear it on unmount
   // (prevents an orphan interval firing fetches after the panel closes).
   const authPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -126,16 +286,19 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
             setNeedsAuthConfig({
               slug,
               message: err.error,
-              setupUrl: err.setupUrl ?? "https://platform.composio.dev/auth-configs",
+              setupUrl: err.setupUrl ?? COMPOSIO_DASHBOARD_URL,
             });
+            setBusy(null);
             return;
           }
-          alert(`Authorize failed: ${err?.error ?? r.statusText}`);
+          showToast(`Authorize failed: ${err?.error ?? r.statusText}`);
+          setBusy(null);
           return;
         }
         const { redirectUrl } = await r.json();
         if (!redirectUrl) {
-          alert("Composio did not return a redirect URL.");
+          showToast("Composio did not return a redirect URL.");
+          setBusy(null);
           return;
         }
         const w = 600;
@@ -165,11 +328,11 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
           }
         }, 800);
       } catch (err) {
-        alert(`Authorize failed: ${String(err)}`);
+        showToast(`Authorize failed: ${String(err)}`);
         setBusy(null);
       }
     },
-    [fetchToolkits],
+    [fetchToolkits, showToast],
   );
 
   const disconnect = useCallback(
@@ -183,25 +346,21 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         });
         if (!r.ok) {
           const err = await r.json().catch(() => ({}));
-          alert(`Disconnect failed: ${err?.error ?? r.statusText}`);
+          showToast(`Disconnect failed: ${err?.error ?? r.statusText}`);
           return;
         }
         await fetchToolkits();
       } catch (err) {
-        alert(`Disconnect failed: ${String(err)}`);
+        showToast(`Disconnect failed: ${String(err)}`);
       } finally {
         setBusy(null);
       }
     },
-    [fetchToolkits],
+    [fetchToolkits, showToast],
   );
 
   const rename = useCallback(
-    async (connectionId: string, current: string | null) => {
-      const next = window.prompt("Label for this account (e.g., work, personal):", current ?? "");
-      if (next == null) return;
-      const alias = next.trim();
-      if (!alias || alias === current) return;
+    async (connectionId: string, alias: string): Promise<boolean> => {
       try {
         const r = await fetch(`/api/composio/connections/${connectionId}/rename`, {
           method: "POST",
@@ -210,15 +369,17 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         });
         if (!r.ok) {
           const err = await r.json().catch(() => ({}));
-          alert(`Rename failed: ${err?.error ?? r.statusText}`);
-          return;
+          showToast(`Rename failed: ${err?.error ?? r.statusText}`);
+          return false;
         }
         await fetchToolkits();
+        return true;
       } catch (err) {
-        alert(`Rename failed: ${String(err)}`);
+        showToast(`Rename failed: ${String(err)}`);
+        return false;
       }
     },
-    [fetchToolkits],
+    [fetchToolkits, showToast],
   );
 
   const toggleTools = useCallback(
@@ -254,6 +415,8 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         isDark={isDark}
         hint={data?.enabled === false ? "Disabled — set COMPOSIO_API_KEY in .env.local" : undefined}
       />
+
+      {showIntro && data?.enabled !== false && <IntroCard isDark={isDark} onDismiss={dismissIntro} />}
 
       {needsAuthConfig && (
         <div
@@ -347,7 +510,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
               {needsSetup.length > 0 && (
                 <SubsectionGrid
                   label="Needs one-time auth config"
-                  hint="BYO OAuth app — register at platform.composio.dev/auth-configs first"
+                  hint="Toolkit doesn't allow a shared OAuth app — bring your own"
                   isDark={isDark}
                 >
                   {needsSetup.map((t) => (
@@ -372,6 +535,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
           );
         })()
       )}
+      {toast && <Toast toast={toast} onDismiss={dismissToast} isDark={isDark} />}
     </section>
   );
 }
@@ -398,7 +562,7 @@ function ToolkitCard({
   tools: ToolSummary[] | "loading" | "error" | undefined;
   onConnect: (slug: string) => void;
   onDisconnect: (slug: string, connectionId: string) => void;
-  onRename: (connectionId: string, current: string | null) => void;
+  onRename: (connectionId: string, alias: string) => Promise<boolean>;
   onToggleTools: (slug: string) => void;
 }) {
   const hasConnections = t.connections.length > 0;
@@ -437,6 +601,11 @@ function ToolkitCard({
               </button>
             )}
           </div>
+          {t.description && (
+            <p className={`text-xs ${muted} leading-snug mt-0.5 line-clamp-2`}>
+              {t.description}
+            </p>
+          )}
           {!hasConnections && (
             <span className={`text-xs ${muted}`}>
               {needsSetup ? "Auth config required" : "Not connected"}
@@ -455,20 +624,17 @@ function ToolkitCard({
           </button>
         )}
         {needsSetup && (
-          <a
-            href="https://platform.composio.dev/auth-configs"
-            target="_blank"
-            rel="noreferrer"
-            className={`px-3 py-1.5 text-xs rounded-md transition-colors shrink-0 ${
-              isDark
-                ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                : "bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200"
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${
+              isDark ? "bg-amber-400/10 text-amber-400" : "bg-amber-50 text-amber-700"
             }`}
           >
-            Set up →
-          </a>
+            Setup needed
+          </span>
         )}
       </div>
+
+      {needsSetup && <ByoSetupSteps slug={t.slug} isDark={isDark} muted={muted} onConnect={onConnect} />}
 
       {hasConnections && (
         <div className="mt-3 space-y-1.5">
@@ -521,7 +687,7 @@ function ConnectionRow({
   isDark: boolean;
   muted: string;
   onDisconnect: (slug: string, connectionId: string) => void;
-  onRename: (connectionId: string, current: string | null) => void;
+  onRename: (connectionId: string, alias: string) => Promise<boolean>;
 }) {
   const status = STATUS_COLORS[(conn.status ?? "").toUpperCase()] ?? STATUS_COLORS.INACTIVE;
   const primary = conn.alias || conn.accountLabel || conn.accountEmail || conn.accountName || `Account ${index + 1}`;
@@ -531,6 +697,38 @@ function ConnectionRow({
       : conn.accountName && conn.accountEmail && primary !== conn.accountEmail
         ? conn.accountEmail
         : null;
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(conn.alias ?? "");
+  const [saving, setSaving] = useState(false);
+  const submittingRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const startEdit = () => {
+    setDraft(conn.alias ?? "");
+    setEditing(true);
+  };
+  const cancelEdit = () => {
+    setEditing(false);
+    setDraft(conn.alias ?? "");
+  };
+  const submit = async () => {
+    if (submittingRef.current) return;
+    const alias = draft.trim();
+    if (!alias || alias === (conn.alias ?? "")) {
+      cancelEdit();
+      return;
+    }
+    submittingRef.current = true;
+    setSaving(true);
+    const ok = await onRename(conn.id, alias);
+    setSaving(false);
+    submittingRef.current = false;
+    if (ok) setEditing(false);
+  };
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
   return (
     <div
       className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 ${
@@ -550,10 +748,32 @@ function ConnectionRow({
           loading="lazy"
         />
       )}
-      <span className={`text-xs font-medium ${isDark ? "text-slate-200" : "text-slate-700"} truncate max-w-[18rem]`}>
-        {primary}
-      </span>
-      {secondary && (
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void submit();
+            if (e.key === "Escape") cancelEdit();
+          }}
+          onBlur={() => void submit()}
+          placeholder="work, personal, …"
+          maxLength={50}
+          disabled={saving}
+          aria-label="Account label"
+          className={`text-xs font-medium px-1.5 py-0.5 rounded border outline-none w-40 ${
+            isDark
+              ? "bg-slate-950 border-sky-500/40 text-slate-100 focus:border-sky-400"
+              : "bg-white border-sky-300 text-slate-800 focus:border-sky-500"
+          }`}
+        />
+      ) : (
+        <span className={`text-xs font-medium ${isDark ? "text-slate-200" : "text-slate-700"} truncate max-w-[18rem]`}>
+          {primary}
+        </span>
+      )}
+      {secondary && !editing && (
         <span className={`text-[11px] ${muted} truncate max-w-[14rem]`}>{secondary}</span>
       )}
       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${status.badge}`}>
@@ -561,15 +781,38 @@ function ConnectionRow({
       </span>
       <span className={`text-[10px] mono ${muted} truncate`}>{conn.id}</span>
       <div className="flex-1" />
-      <button
-        onClick={() => onRename(conn.id, conn.alias)}
-        className={`text-[11px] underline ${muted} hover:text-sky-500`}
-      >
-        Rename
-      </button>
+      {editing ? (
+        <>
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void submit()}
+            disabled={saving}
+            className={`text-[11px] underline ${
+              isDark ? "text-sky-400 hover:text-sky-300" : "text-sky-600 hover:text-sky-700"
+            } disabled:opacity-50`}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={cancelEdit}
+            disabled={saving}
+            className={`text-[11px] underline ${muted} hover:text-rose-500 disabled:opacity-50`}
+          >
+            Cancel
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={startEdit}
+          className={`text-[11px] underline ${muted} hover:text-sky-500`}
+        >
+          Rename
+        </button>
+      )}
       <button
         onClick={() => onDisconnect(slug, conn.id)}
-        disabled={busy}
+        disabled={busy || editing}
         className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
           isDark
             ? "bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-50"
@@ -578,6 +821,75 @@ function ConnectionRow({
       >
         {busy ? "…" : "Disconnect"}
       </button>
+    </div>
+  );
+}
+
+function ByoSetupSteps({
+  slug,
+  isDark,
+  muted,
+  onConnect,
+}: {
+  slug: string;
+  isDark: boolean;
+  muted: string;
+  onConnect: (slug: string) => void;
+}) {
+  const portal = BYO_PORTALS[slug];
+  const wrapClass = `mt-3 pt-3 border-t ${isDark ? "border-slate-800" : "border-slate-200"}`;
+  const linkClass = isDark
+    ? "text-sky-400 hover:text-sky-300 underline"
+    : "text-sky-600 hover:text-sky-700 underline";
+  const stepNumberClass = `inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-semibold mr-2 shrink-0 ${
+    isDark ? "bg-amber-400/15 text-amber-300" : "bg-amber-100 text-amber-800"
+  }`;
+  return (
+    <div className={wrapClass}>
+      <div className={`text-[11px] font-medium mb-2 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+        One-time setup (~5 min):
+      </div>
+      <ol className="space-y-1.5">
+        <li className={`text-xs flex items-start ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+          <span className={stepNumberClass}>1</span>
+          <span className="leading-snug">
+            {portal ? (
+              <>
+                Register an OAuth app at{" "}
+                <a href={portal.url} target="_blank" rel="noreferrer" className={linkClass}>
+                  {portal.label} ↗
+                </a>
+                {portal.note && <span className={`block text-[11px] mt-0.5 ${muted}`}>{portal.note}</span>}
+              </>
+            ) : (
+              <>Register an OAuth app on this toolkit's developer portal — copy the Client ID + Secret.</>
+            )}
+          </span>
+        </li>
+        <li className={`text-xs flex items-start ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+          <span className={stepNumberClass}>2</span>
+          <span className="leading-snug">
+            In{" "}
+            <a href={COMPOSIO_DASHBOARD_URL} target="_blank" rel="noreferrer" className={linkClass}>
+              Composio Dashboard ↗
+            </a>
+            : Toolkits → search <span className="mono">{slug}</span> → Add to project → paste those credentials.
+          </span>
+        </li>
+        <li className={`text-xs flex items-start ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+          <span className={stepNumberClass}>3</span>
+          <span className="leading-snug">
+            Come back here and{" "}
+            <button
+              onClick={() => onConnect(slug)}
+              className={`${linkClass} bg-transparent p-0 border-0 cursor-pointer`}
+            >
+              click Connect
+            </button>{" "}
+            to run OAuth.
+          </span>
+        </li>
+      </ol>
     </div>
   );
 }

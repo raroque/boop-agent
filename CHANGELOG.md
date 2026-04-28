@@ -19,3 +19,4 @@ Format:
 - Added: env vars `COMPOSIO_API_KEY`, `COMPOSIO_USER_ID` (optional, defaults to `boop-default`).
 - Added: `/upgrade-boop` Claude Code skill for bringing upstream changes into a customized fork.
 - Added: `CHANGELOG.md` and `CONTRIBUTING.md`.
+- Fixed: Sendblue links updated from `sendblue.co` to `sendblue.com` (the `.co` host 301-redirects; API base aligned with Sendblue's own docs).

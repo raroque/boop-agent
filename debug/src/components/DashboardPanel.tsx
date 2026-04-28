@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useCallback } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback, type ReactNode } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
 
@@ -164,6 +164,25 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
           value={`$${filtered.cost.total.toFixed(2)}`}
           color={isDark ? "text-emerald-400" : "text-emerald-600"}
           c={c}
+          isDark={isDark}
+          info={{
+            title: "API-equivalent cost",
+            body: (
+              <>
+                <p className="mb-1.5">
+                  This number is what your token usage <em>would</em> cost at Anthropic API rates.
+                </p>
+                <p className="mb-1.5">
+                  If you're using your <strong>Claude Code subscription</strong> (the default), you're
+                  paying a flat monthly rate — not these dollar amounts.
+                </p>
+                <p>
+                  Watch this as a usage-burn proxy (against subscription rate limits) or as a
+                  forecast for what API auth would cost.
+                </p>
+              </>
+            ),
+          }}
         />
         <StatCard
           label="Tokens"
@@ -187,38 +206,37 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
       </div>
 
       {filtered.days.length > 1 && (
-        <div className={`rounded-xl border p-4 ${c.chart}`}>
-          <h3
-            className={`text-xs font-semibold uppercase tracking-wider mb-3 ${c.label}`}
-          >
-            Cost Over Time
-          </h3>
-          <StackedAreaChart
-            data={filtered.days}
-            keys={["agentCost"]}
-            colors={isDark ? ["#38bdf8"] : ["#0284c7"]}
-            labels={["Agents"]}
-            format={(v) => `$${v.toFixed(2)}`}
-            isDark={isDark}
-          />
-        </div>
-      )}
-
-      {filtered.days.length > 1 && (
-        <div className={`rounded-xl border p-4 ${c.chart}`}>
-          <h3
-            className={`text-xs font-semibold uppercase tracking-wider mb-3 ${c.label}`}
-          >
-            Token Usage Over Time
-          </h3>
-          <StackedAreaChart
-            data={filtered.days}
-            keys={["inputTokens", "outputTokens"]}
-            colors={isDark ? ["#38bdf8", "#34d399"] : ["#0284c7", "#059669"]}
-            labels={["Input", "Output"]}
-            format={fmtTokens}
-            isDark={isDark}
-          />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className={`rounded-xl border p-4 ${c.chart}`}>
+            <h3
+              className={`text-xs font-semibold uppercase tracking-wider mb-3 ${c.label}`}
+            >
+              Cost Over Time
+            </h3>
+            <StackedAreaChart
+              data={filtered.days}
+              keys={["agentCost"]}
+              colors={isDark ? ["#38bdf8"] : ["#0284c7"]}
+              labels={["Agents"]}
+              format={(v) => `$${v.toFixed(2)}`}
+              isDark={isDark}
+            />
+          </div>
+          <div className={`rounded-xl border p-4 ${c.chart}`}>
+            <h3
+              className={`text-xs font-semibold uppercase tracking-wider mb-3 ${c.label}`}
+            >
+              Token Usage Over Time
+            </h3>
+            <StackedAreaChart
+              data={filtered.days}
+              keys={["inputTokens", "outputTokens"]}
+              colors={isDark ? ["#38bdf8", "#34d399"] : ["#0284c7", "#059669"]}
+              labels={["Input", "Output"]}
+              format={fmtTokens}
+              isDark={isDark}
+            />
+          </div>
         </div>
       )}
 
@@ -292,20 +310,76 @@ function StatCard({
   value,
   sub,
   color,
+  info,
   c,
+  isDark,
 }: {
   label: string;
   value: string;
   sub?: string;
   color?: string;
+  info?: { title: string; body: ReactNode };
   c: { card: string; label: string; value: string; sub: string };
+  isDark?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
+  const popRef = useRef<HTMLDivElement | null>(null);
+
+  // Close on outside click — keeps the popover from sticking when the user
+  // clicks elsewhere.
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (popRef.current && !popRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
   return (
-    <div className={`rounded-xl border p-3.5 ${c.card}`}>
-      <div
-        className={`text-[11px] font-medium uppercase tracking-wider ${c.label}`}
-      >
-        {label}
+    <div className={`rounded-xl border p-3.5 ${c.card} relative`}>
+      <div className={`text-[11px] font-medium uppercase tracking-wider ${c.label} flex items-center gap-1.5`}>
+        <span>{label}</span>
+        {info && (
+          <div className="relative" ref={popRef}>
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              aria-label={`What does ${label} mean?`}
+              aria-expanded={open}
+              className={`w-3.5 h-3.5 inline-flex items-center justify-center rounded-full border text-[9px] font-bold normal-case tracking-normal transition-colors ${
+                isDark
+                  ? "border-slate-600 text-slate-500 hover:border-sky-400 hover:text-sky-400"
+                  : "border-slate-400 text-slate-500 hover:border-sky-500 hover:text-sky-600"
+              }`}
+            >
+              i
+            </button>
+            {open && (
+              <div
+                role="dialog"
+                aria-label={info.title}
+                className={`absolute z-30 left-0 top-full mt-1.5 w-64 rounded-lg border px-3 py-2.5 shadow-lg text-[11px] leading-snug normal-case tracking-normal ${
+                  isDark
+                    ? "bg-slate-900 border-slate-700 text-slate-200"
+                    : "bg-white border-slate-200 text-slate-700"
+                }`}
+              >
+                <div className={`font-semibold mb-1 ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                  {info.title}
+                </div>
+                <div className="font-normal">{info.body}</div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <div className={`text-xl font-bold mono mt-1 ${color ?? c.value}`}>
         {value}
