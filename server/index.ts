@@ -15,7 +15,7 @@ import { startHeartbeatLoop } from "./heartbeat.js";
 import { startConsolidationLoop } from "./consolidation.js";
 import { cancelAgent, retryAgent } from "./execution-agent.js";
 import { createComposioRouter } from "./composio-routes.js";
-import { requireAdmin } from "./auth.js";
+import { requireAdmin, defaultVerifier } from "./auth.js";
 
 async function main() {
   await loadIntegrations();
@@ -45,9 +45,14 @@ async function main() {
     });
   }
 
+  // Single JWT verifier shared between HTTP middleware and the WS upgrade
+  // handler — `createRemoteJWKSet` keeps an in-memory JWKS cache per
+  // instance, so reusing one verifier avoids a fresh HTTP fetch per request.
+  const verifyJwt = defaultVerifier();
+
   // AUTH GATE: every route below requires a valid Convex Auth JWT, except
   // the explicit allowlist inside requireAdmin() (/sendblue/webhook + /health).
-  app.use(requireAdmin());
+  app.use(requireAdmin({ verifyJwt }));
 
   app.use("/sendblue", createSendblueRouter());
   app.use("/composio", createComposioRouter());
@@ -114,10 +119,7 @@ async function main() {
       return;
     }
     try {
-      const { jwtVerify, createRemoteJWKSet } = await import("jose");
-      const convexUrl = process.env.CONVEX_URL!;
-      const jwks = createRemoteJWKSet(new URL("/.well-known/jwks.json", convexUrl));
-      await jwtVerify(token, jwks, { issuer: convexUrl });
+      await verifyJwt(token);
     } catch {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
