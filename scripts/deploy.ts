@@ -186,6 +186,15 @@ async function main() {
   // ── Step 4: Push secrets to Fly ─────────────────────────────────────────────
   banner("4. Pushing secrets to Fly");
 
+  // CONVEX_SITE_URL hosts /.well-known/jwks.json (the .convex.site domain).
+  // The Express auth middleware needs it to verify Convex Auth JWTs. Convex
+  // sets it automatically in .env.local; fall back to deriving it from
+  // CONVEX_URL by swapping .convex.cloud → .convex.site if it's missing.
+  const convexSiteUrl =
+    env.CONVEX_SITE_URL ??
+    env.CONVEX_URL?.replace(".convex.cloud", ".convex.site") ??
+    "";
+
   const flySecrets: Record<string, string> = {
     [llmAuth.name]: llmAuth.value,
     SENDBLUE_API_KEY: env.SENDBLUE_API_KEY ?? "",
@@ -194,6 +203,7 @@ async function main() {
     SENDBLUE_SIGNING_SECRET: signingSecret,
     CONVEX_DEPLOYMENT: env.CONVEX_DEPLOYMENT ?? "",
     CONVEX_URL: env.CONVEX_URL ?? "",
+    CONVEX_SITE_URL: convexSiteUrl,
     COMPOSIO_API_KEY: env.COMPOSIO_API_KEY ?? "",
     BOOP_ADMIN_PASSWORD: adminPassword,
     PUBLIC_URL,
