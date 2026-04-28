@@ -175,7 +175,12 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
               content: [{ type: "text" as const, text: "Empty ack skipped." }],
             };
           }
-          if (opts.conversationId.startsWith("sms:")) {
+          // Skip the iMessage send for proactive turns — those go out as a
+          // single self-contained notice from dispatchProactiveNotice. If the
+          // IA calls send_ack here on a proactive turn, the user would get
+          // two iMessages (the ack + the final reply). Still persist + log
+          // so the debug UI sees it.
+          if (opts.conversationId.startsWith("sms:") && opts.kind !== "proactive") {
             const number = opts.conversationId.slice(4);
             await sendImessage(number, text);
           }
@@ -361,12 +366,20 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   broadcast("assistant_message", { conversationId: opts.conversationId, content: reply });
 
   // Background extraction — fire-and-forget; don't block the reply.
-  extractAndStore({
-    conversationId: opts.conversationId,
-    userMessage: opts.content,
-    assistantReply: reply,
-    turnId,
-  }).catch((err) => console.error("[interaction] extraction error", err));
+  // Skip on proactive turns: the "user message" is a synthetic
+  // [proactive notice] derived from email content, not something the user
+  // said. Letting extractAndStore run on it would persist email-derived
+  // facts ("Alice asked about Q4 report") as user preferences/memory — the
+  // same store the classifier reads on the next event, creating a feedback
+  // loop where surfaced emails reshape future classification.
+  if (opts.kind !== "proactive") {
+    extractAndStore({
+      conversationId: opts.conversationId,
+      userMessage: opts.content,
+      assistantReply: reply,
+      turnId,
+    }).catch((err) => console.error("[interaction] extraction error", err));
+  }
 
   return reply;
 }

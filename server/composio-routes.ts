@@ -214,8 +214,17 @@ export function createComposioRouter(): express.Router {
       }
       // Ack immediately; dispatch is fire-and-forget.
       res.json({ ok: true });
+      // Defensive null-guard: verifyWebhook normally throws on bad
+      // signature, but if a future SDK version resolves with a falsy /
+      // payload-less result instead, accessing verified.payload would crash
+      // post-ack and surface as an unhandled rejection.
+      const payload = verified?.payload;
+      if (!payload) {
+        console.warn("[composio-webhook] verified result had no payload; skipping dispatch");
+        return;
+      }
       Promise.resolve()
-        .then(() => handleEmailEvent(verified.payload))
+        .then(() => handleEmailEvent(payload))
         .catch((err) => console.error("[composio-webhook] dispatch failed", err));
     },
   );

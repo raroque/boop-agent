@@ -254,10 +254,31 @@ async function recallPreferenceLines(): Promise<string[]> {
   }
 }
 
+// Bring whatever the user put in BOOP_USER_PHONE to E.164 (+1XXXXXXXXXX).
+// Without this, a bare 10-digit number in env produces an `sms:NNNNNNNNNN`
+// conversation that doesn't match the `sms:+1NNNNNNNNNN` ID Sendblue uses
+// for inbound messages from the same person — proactive notices end up in
+// a parallel Convex conversation invisible to the user-driven thread.
+function normalizeProactivePhone(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("+")) return trimmed;
+  if (/^\d{10}$/.test(trimmed)) return `+1${trimmed}`;
+  if (/^\d{11,15}$/.test(trimmed)) return `+${trimmed}`;
+  return null;
+}
+
 async function dispatchProactiveNotice(summary: string): Promise<void> {
-  const phone = process.env.BOOP_USER_PHONE;
-  if (!phone) {
+  const raw = process.env.BOOP_USER_PHONE;
+  if (!raw) {
     console.warn("[proactive] BOOP_USER_PHONE not set; skipping dispatch");
+    return;
+  }
+  const phone = normalizeProactivePhone(raw);
+  if (!phone) {
+    console.warn(
+      `[proactive] BOOP_USER_PHONE=${JSON.stringify(raw)} doesn't look like a valid phone number; skipping dispatch`,
+    );
     return;
   }
   const conversationId = `sms:${phone}`;

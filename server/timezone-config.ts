@@ -76,7 +76,9 @@ const TIMEZONE_ALIASES: Record<string, string> = {
   // International
   london: "Europe/London",
   uk: "Europe/London",
-  gmt: "Europe/London",
+  // GMT means year-round UTC+0; mapping it to Europe/London would silently
+  // shift to BST (UTC+1) from late March through late October.
+  gmt: "UTC",
   bst: "Europe/London",
   paris: "Europe/Paris",
   berlin: "Europe/Berlin",
