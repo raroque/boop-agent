@@ -117,7 +117,11 @@ function openInBrowser(url: string): void {
         ? "start"
         : "xdg-open";
   try {
-    spawn(cmd, [url], { stdio: "ignore", detached: true }).unref();
+    const child = spawn(cmd, [url], { stdio: "ignore", detached: true });
+    child.on("error", () => {
+      /* ignore — fall back to the printed URL */
+    });
+    child.unref();
   } catch {
     /* ignore — fall back to the printed URL */
   }
