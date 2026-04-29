@@ -165,7 +165,7 @@ export async function runOpenAIResponsesAgent(
 
     const responseText = extractText(response);
     if (responseText) {
-      finalText = finalText ? `${finalText}\n${responseText}` : responseText;
+      finalText = responseText;
       request.onText?.(responseText);
     }
 

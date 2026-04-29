@@ -15,26 +15,21 @@ export async function buildRuntimeToolsForIntegrations(
 ): Promise<RuntimeTool[]> {
   const ctx = makeContext(conversationId);
   const out: RuntimeTool[] = [];
-  const failures: string[] = [];
   for (const name of names) {
     const mod = registry.get(name);
     if (!mod) {
-      failures.push(`${name}: unknown integration`);
+      console.warn(`[integrations] unknown integration ${name}`);
       continue;
     }
     if (!mod.createTools) {
-      failures.push(`${name}: does not expose runtime-neutral tools`);
+      console.warn(`[integrations] ${name} does not expose runtime-neutral tools`);
       continue;
     }
     try {
       out.push(...(await mod.createTools(ctx)));
     } catch (err) {
       console.error(`[integrations] failed to build runtime tools for ${name}`, err);
-      failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }
-  if (failures.length > 0) {
-    throw new Error(`Failed to load integration tools: ${failures.join("; ")}`);
   }
   return out;
 }
@@ -81,22 +76,17 @@ export async function buildMcpServersForIntegrations(
 ): Promise<Record<string, McpSdkServerConfigWithInstance>> {
   const ctx = makeContext(conversationId);
   const out: Record<string, McpSdkServerConfigWithInstance> = {};
-  const failures: string[] = [];
   for (const name of names) {
     const mod = registry.get(name);
     if (!mod) {
-      failures.push(`${name}: unknown integration`);
+      console.warn(`[integrations] unknown integration ${name}`);
       continue;
     }
     try {
       out[name] = await mod.createServer(ctx);
     } catch (err) {
       console.error(`[integrations] failed to build ${name}`, err);
-      failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }
-  if (failures.length > 0) {
-    throw new Error(`Failed to load integration servers: ${failures.join("; ")}`);
   }
   return out;
 }
