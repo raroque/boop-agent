@@ -1,12 +1,57 @@
 #!/usr/bin/env tsx
 import prompts from "prompts";
+import kleur from "kleur";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const ENV_PATH = resolve(ROOT, ".env.local");
 const EXAMPLE_PATH = resolve(ROOT, ".env.example");
+const DRY_RUN = process.argv.includes("--dry-run") || process.argv.includes("--demo");
+const PLAIN_OUTPUT = process.argv.includes("--no-color") || process.env.BOOP_NO_COLOR === "1";
+
+if (!PLAIN_OUTPUT) {
+  process.env.FORCE_COLOR ??= "1";
+  delete process.env.NO_COLOR;
+  kleur.enabled = true;
+}
+
+const colors = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  dim: "\x1b[2m",
+  cyan: "\x1b[36m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  red: "\x1b[31m",
+};
+
+function c(color: keyof typeof colors, value: string): string {
+  if (PLAIN_OUTPUT) return value;
+  return `${colors[color]}${value}${colors.reset}`;
+}
+
+function label(value: string): string {
+  return c("cyan", c("bold", value));
+}
+
+function ok(value: string): string {
+  return `${c("green", "✓")} ${value}`;
+}
+
+function warn(value: string): string {
+  return `${c("yellow", "⚠")} ${value}`;
+}
+
+function muted(value: string): string {
+  return c("dim", value);
+}
+
+function notice(value: string): string {
+  return `${c("yellow", "[preview]")} ${value}`;
+}
 
 function readEnv(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
@@ -20,6 +65,30 @@ function readEnv(path: string): Record<string, string> {
 }
 
 function writeEnv(path: string, env: Record<string, string>): void {
+  if (DRY_RUN) {
+    console.log(notice(`Would write ${path}`));
+    const interesting = [
+      "BOOP_RUNTIME",
+      "BOOP_MODEL",
+      "BOOP_CODEX_MODEL",
+      "BOOP_CODEX_REASONING_EFFORT",
+      "BOOP_OPENAI_MODEL",
+      "BOOP_OPENAI_REASONING_EFFORT",
+      "PORT",
+      "BOOP_TUNNEL",
+      "PUBLIC_URL",
+      "COMPOSIO_API_KEY",
+      "SENDBLUE_FROM_NUMBER",
+    ];
+    for (const key of interesting) {
+      if (env[key]) {
+        const safe = key.includes("KEY") || key.includes("SECRET") ? "(set)" : env[key];
+        console.log(`  ${muted(key)}=${safe}`);
+      }
+    }
+    return;
+  }
+
   const example = existsSync(EXAMPLE_PATH) ? readFileSync(EXAMPLE_PATH, "utf8") : "";
 
   let out = "";
@@ -59,18 +128,59 @@ function writeEnv(path: string, env: Record<string, string>): void {
 }
 
 function cleanConvexUrlEnv(path: string): void {
+  if (DRY_RUN) {
+    console.log(notice(`Would let Convex refresh VITE_CONVEX_URL in ${path}`));
+    return;
+  }
   const envContent = readFileSync(path, "utf8");
   const updated = envContent.replace(/^VITE_CONVEX_URL=.*(\r?\n)?/gm, "");
   writeFileSync(path, updated);
 }
 
 function banner(s: string) {
-  console.log("\n" + "━".repeat(60));
-  console.log("  " + s);
-  console.log("━".repeat(60));
+  const line = "═".repeat(62);
+  console.log("\n" + c("cyan", line));
+  console.log(`  ${label(s)}`);
+  console.log(c("cyan", line));
+}
+
+function callout(title: string, lines: string[]): void {
+  console.log(`\n${label(title)}`);
+  for (const line of lines) console.log(`  ${line}`);
+}
+
+function stepList(title: string, steps: string[]): void {
+  callout(
+    title,
+    steps.map((step, index) => `${c("green", `${index + 1}.`)} ${step}`),
+  );
+}
+
+const SELECT_HINT = `${c("dim", "↑/↓ move")}  ${c("cyan", "Enter")} select  ${c("dim", "Tab cycles")}`;
+
+function option<T extends string>(title: string, value: T, description: string) {
+  return { title, value, description };
+}
+
+function sectionRule(labelText: string): void {
+  console.log(`\n${c("cyan", "──")} ${label(labelText)} ${c("cyan", "─".repeat(42))}`);
+}
+
+function spawnCli(
+  command: string,
+  args: string[],
+  options: Parameters<typeof spawn>[2] = {},
+) {
+  if (process.platform !== "win32") return spawn(command, args, options);
+  return spawn("cmd", ["/d", "/s", "/c", command, ...args], options);
 }
 
 async function runConvexDev(): Promise<void> {
+  if (DRY_RUN) {
+    console.log(notice("Would run Convex setup, but no project or env file will be changed."));
+    return;
+  }
+
   // If CONVEX_DEPLOYMENT is already set, `convex dev` reuses that deployment.
   // Only pass --configure new if this is a first-time setup — otherwise re-running
   // setup would silently create a new project and abandon all existing data.
@@ -93,10 +203,11 @@ async function runConvexDev(): Promise<void> {
   }
 
   await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn("npx", args, { stdio: "inherit", cwd: ROOT });
+    const child = spawnCli("npx", args, { stdio: "inherit", cwd: ROOT });
     child.on("exit", (code) =>
       code === 0 ? resolvePromise() : reject(new Error(`convex dev exited ${code}`)),
     );
+    child.on("error", reject);
   });
 }
 
@@ -110,22 +221,32 @@ function hasBinary(name: string): Promise<boolean> {
 }
 
 function openInBrowser(url: string): void {
+  if (DRY_RUN) {
+    console.log(notice(`Would open ${url}`));
+    return;
+  }
+
   const cmd =
     process.platform === "darwin"
       ? "open"
       : process.platform === "win32"
-        ? "start"
+        ? "cmd"
         : "xdg-open";
+  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
   try {
-    spawn(cmd, [url], { stdio: "ignore", detached: true }).unref();
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {
+      /* ignore - fall back to the printed URL */
+    });
+    child.unref();
   } catch {
-    /* ignore — fall back to the printed URL */
+    /* ignore - fall back to the printed URL */
   }
 }
 
 function runInherit(cmd: string, args: string[]): Promise<void> {
   return new Promise((ok, fail) => {
-    const child = spawn(cmd, args, { stdio: "inherit", cwd: ROOT });
+    const child = spawnCli(cmd, args, { stdio: "inherit", cwd: ROOT });
     child.on("exit", (code) =>
       code === 0 ? ok() : fail(new Error(`${cmd} ${args.join(" ")} exited ${code}`)),
     );
@@ -135,7 +256,11 @@ function runInherit(cmd: string, args: string[]): Promise<void> {
 
 function runCapture(cmd: string, args: string[]): Promise<string> {
   return new Promise((ok, fail) => {
-    const child = spawn(cmd, args, { stdio: ["inherit", "pipe", "pipe"], cwd: ROOT });
+    const child = spawnCli(cmd, args, { stdio: ["inherit", "pipe", "pipe"], cwd: ROOT });
+    if (!child.stdout || !child.stderr) {
+      fail(new Error(`${cmd} did not expose stdout/stderr`));
+      return;
+    }
     let out = "";
     child.stdout.on("data", (d) => {
       const s = d.toString();
@@ -159,6 +284,12 @@ interface SendblueKeys {
   apiKey?: string;
   apiSecret?: string;
   fromNumber?: string;
+}
+
+type RuntimeChoice = "claude" | "codex" | "openai";
+
+function runtimeChoice(value: string | undefined): RuntimeChoice {
+  return value === "codex" || value === "openai" ? value : "claude";
 }
 
 function parseSendblueKeys(output: string): SendblueKeys {
@@ -232,16 +363,18 @@ function parseSendbluePhones(output: string): string[] {
 }
 
 async function importSendblueFromCli(): Promise<SendblueKeys | null> {
+  sectionRule("Sendblue");
   const { method } = await prompts(
     {
       type: "select",
       name: "method",
       message: "How do you want to configure Sendblue?",
       choices: [
-        { title: "Use the Sendblue CLI (I'll run it — fastest)", value: "cli" },
-        { title: "Paste my API keys manually", value: "manual" },
-        { title: "Skip for now", value: "skip" },
+        option("[1] Use Sendblue CLI", "cli", "Fastest path. In demo mode this uses fake values."),
+        option("[2] Paste API keys manually", "manual", "Use this if you already have key id + secret."),
+        option("[3] Skip for now", "skip", "Best for dashboard-only testing; no texting yet."),
       ],
+      hint: SELECT_HINT,
       initial: 0,
     },
     {
@@ -254,15 +387,24 @@ async function importSendblueFromCli(): Promise<SendblueKeys | null> {
 
   if (method === "manual") return null;
   if (method === "skip") return { apiKey: "", apiSecret: "", fromNumber: "" };
+  if (DRY_RUN) {
+    console.log(notice("Would run Sendblue CLI login/show-keys/lines."));
+    return {
+      apiKey: "dry-run-sendblue-key-id",
+      apiSecret: "dry-run-sendblue-secret",
+      fromNumber: "+15555550123",
+    };
+  }
 
   const { account } = await prompts({
     type: "select",
     name: "account",
     message: "Do you already have a Sendblue account?",
     choices: [
-      { title: "Yes — log in", value: "login" },
-      { title: "No — create one with `sendblue setup`", value: "setup" },
+      option("[1] Yes, log in", "login", "Runs Sendblue login and imports your existing keys."),
+      option("[2] No, create one", "setup", "Runs `sendblue setup`, then imports the keys."),
     ],
+    hint: SELECT_HINT,
     initial: 0,
   });
 
@@ -320,21 +462,35 @@ async function importSendblueFromCli(): Promise<SendblueKeys | null> {
 async function main() {
   banner("boop-agent setup");
 
-  console.log(`
-What this does:
-  1. Pulls your Sendblue keys (via their CLI, or you paste them)
-  2. Asks about your Claude model preference
-  3. Runs \`npx convex dev\` to create a Convex project
-  4. Writes .env.local
+  if (DRY_RUN) {
+    callout("Preview mode", [
+      notice("No files will be written."),
+      notice("No browser will open."),
+      notice("Convex and Sendblue will not be changed."),
+    ]);
+  }
 
-Before you start:
-  • A Claude Code subscription:    https://claude.com/code
-  • Convex account (free tier):    https://convex.dev
-  • Sendblue (free on agent plan): https://sendblue.com
-`);
+  stepList("Setup flow", [
+    "Choose Sendblue now, skip it, or preview fake values",
+    "Choose the AI runtime: Claude, Codex, or OpenAI API",
+    "Pick the model and reasoning effort for that runtime",
+    "Configure Composio integrations if you want connected tools",
+    "Choose tunnel mode for real inbound iMessage/SMS",
+    "Optionally configure Convex and write .env.local",
+  ]);
+
+  callout("Before you start", [
+    "Claude runtime: Claude Code subscription and CLI sign-in",
+    "Codex runtime: `npm install -g @openai/codex`, then run `codex` once",
+    "OpenAI API runtime: an OPENAI_API_KEY from https://platform.openai.com/api-keys",
+    "Convex: free account at https://convex.dev",
+    "Sendblue: only needed for real inbound iMessage/SMS",
+  ]);
 
   const existing = readEnv(ENV_PATH);
   const cli = await importSendblueFromCli();
+  const skippedSendblue =
+    cli?.apiKey === "" && cli?.apiSecret === "" && cli?.fromNumber === "";
 
   const sendblueDefaults = {
     SENDBLUE_API_KEY: cli?.apiKey ?? existing.SENDBLUE_API_KEY ?? "",
@@ -343,7 +499,7 @@ Before you start:
   };
 
   const sendbluePrompts = [] as any[];
-  if (!sendblueDefaults.SENDBLUE_API_KEY) {
+  if (!skippedSendblue && !sendblueDefaults.SENDBLUE_API_KEY) {
     sendbluePrompts.push({
       type: "text",
       name: "SENDBLUE_API_KEY",
@@ -351,7 +507,7 @@ Before you start:
       initial: "",
     });
   }
-  if (!sendblueDefaults.SENDBLUE_API_SECRET) {
+  if (!skippedSendblue && !sendblueDefaults.SENDBLUE_API_SECRET) {
     sendbluePrompts.push({
       type: "password",
       name: "SENDBLUE_API_SECRET",
@@ -359,7 +515,7 @@ Before you start:
       initial: "",
     });
   }
-  if (!sendblueDefaults.SENDBLUE_FROM_NUMBER) {
+  if (!skippedSendblue && !sendblueDefaults.SENDBLUE_FROM_NUMBER) {
     sendbluePrompts.push({
       type: "text",
       name: "SENDBLUE_FROM_NUMBER",
@@ -369,20 +525,205 @@ Before you start:
     });
   }
 
-  const answers = await prompts(
+  sectionRule("Runtime");
+  const setupAnswers = await prompts(
     [
       ...sendbluePrompts,
       {
         type: "select",
-        name: "BOOP_MODEL",
-        message: "Which Claude model should the agent use?",
+        name: "BOOP_RUNTIME",
+        message: "Which AI runtime should Boop use by default?",
         choices: [
-          { title: "claude-sonnet-4-6 (recommended)", value: "claude-sonnet-4-6" },
-          { title: "claude-opus-4-6 (slowest, most capable)", value: "claude-opus-4-6" },
-          { title: "claude-haiku-4-5 (fastest, cheapest)", value: "claude-haiku-4-5" },
+          option("[default] Claude", "claude", "Claude Code subscription. Existing behavior."),
+          option("[local] Codex", "codex", "Uses local `codex app-server` and your signed-in Codex session."),
+          option("[api] OpenAI API", "openai", "Uses OPENAI_API_KEY and OpenAI Responses API."),
         ],
-        initial: 0,
+        hint: SELECT_HINT,
+        initial: ["claude", "codex", "openai"].indexOf(runtimeChoice(existing.BOOP_RUNTIME)),
       },
+    ],
+    {
+      onCancel: () => {
+        console.log("Setup cancelled.");
+        process.exit(1);
+      },
+    },
+  );
+
+  const selectedRuntime = runtimeChoice(setupAnswers.BOOP_RUNTIME);
+  if (selectedRuntime === "codex" && !(await hasBinary("codex"))) {
+    console.log(
+      "\n⚠ Codex CLI was not found on PATH. Install it and sign in before using the Codex runtime.",
+    );
+  }
+
+  const providerAnswers: Record<string, any> = {};
+  if (selectedRuntime === "openai") {
+    sectionRule("OpenAI API key");
+    const existingOpenAIKey = existing.OPENAI_API_KEY ?? "";
+    if (existingOpenAIKey) {
+      const { openaiKeyMode } = await prompts(
+        {
+          type: "select",
+          name: "openaiKeyMode",
+          message: "OPENAI_API_KEY detected. Keep it or replace?",
+          choices: [
+            option("[safe] Keep existing key", "keep", "Do not touch the saved key."),
+            option("[update] Replace key", "replace", "Paste a new OpenAI key."),
+          ],
+          hint: SELECT_HINT,
+          initial: 0,
+        },
+        {
+          onCancel: () => {
+            console.log("Setup cancelled.");
+            process.exit(1);
+          },
+        },
+      );
+      if (openaiKeyMode === "replace") {
+        const { OPENAI_API_KEY } = await prompts({
+          type: "password",
+          name: "OPENAI_API_KEY",
+          message: "Paste your OpenAI API key:",
+          initial: "",
+        });
+        providerAnswers.OPENAI_API_KEY =
+          OPENAI_API_KEY || existingOpenAIKey || (DRY_RUN ? "dry-run-openai-key" : "");
+      } else {
+        providerAnswers.OPENAI_API_KEY = existingOpenAIKey;
+      }
+    } else {
+      const { OPENAI_API_KEY } = await prompts({
+        type: "password",
+        name: "OPENAI_API_KEY",
+        message: "Paste your OpenAI API key:",
+        initial: "",
+      });
+      providerAnswers.OPENAI_API_KEY =
+        OPENAI_API_KEY || (DRY_RUN ? "dry-run-openai-key" : "");
+    }
+  }
+  const runtimePrompts: any[] = [];
+  if (selectedRuntime === "claude") {
+    runtimePrompts.push({
+      type: "select",
+      name: "BOOP_MODEL",
+      message: "Which Claude model should Boop use?",
+      choices: [
+        option("[balanced] claude-sonnet-4-6", "claude-sonnet-4-6", "Recommended default."),
+        option("[deep] claude-opus-4-7", "claude-opus-4-7", "Most capable, slower."),
+        option("[fast] claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001", "Fastest/cheapest Claude path."),
+      ],
+      hint: SELECT_HINT,
+      initial: Math.max(
+        0,
+        ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5-20251001"].indexOf(
+          existing.BOOP_MODEL ?? "claude-sonnet-4-6",
+        ),
+      ),
+    });
+  } else if (selectedRuntime === "codex") {
+    runtimePrompts.push({
+      type: "select",
+      name: "BOOP_CODEX_MODEL",
+      message: "Which Codex model should Boop use?",
+      choices: [
+        option("[recommended] gpt-5.5", "gpt-5.5", "Best quality default for agent work."),
+        option("[stable] gpt-5.4", "gpt-5.4", "Strong general-purpose model."),
+        option("[fast] gpt-5.4-mini", "gpt-5.4-mini", "Lower latency and lighter cost."),
+        option("[code] gpt-5.3-codex", "gpt-5.3-codex", "Coding-focused Codex model."),
+        option("[spark] gpt-5.3-codex-spark", "gpt-5.3-codex-spark", "Fast Codex coding model."),
+        option("[legacy] gpt-5.2", "gpt-5.2", "Older fallback if needed."),
+      ],
+      hint: SELECT_HINT,
+      initial: Math.max(
+        0,
+        [
+          "gpt-5.5",
+          "gpt-5.4",
+          "gpt-5.4-mini",
+          "gpt-5.3-codex",
+          "gpt-5.3-codex-spark",
+          "gpt-5.2",
+        ].indexOf(
+          existing.BOOP_CODEX_MODEL ?? "gpt-5.5",
+        ),
+      ),
+    });
+    runtimePrompts.push({
+      type: "select",
+      name: "BOOP_CODEX_REASONING_EFFORT",
+      message: "How much thinking effort should Codex use?",
+      choices: [
+        option("[balanced] medium", "medium", "Recommended. Good depth without dragging."),
+        option("[quick] low", "low", "Faster responses, less reasoning."),
+        option("[deep] high", "high", "More reasoning for complex tasks."),
+        option("[max] xhigh", "xhigh", "Deepest, slowest path."),
+        option("[tiny] minimal", "minimal", "Fastest, least reasoning."),
+      ],
+      hint: SELECT_HINT,
+      initial: Math.max(
+        0,
+        ["medium", "low", "high", "xhigh", "minimal"].indexOf(
+          existing.BOOP_CODEX_REASONING_EFFORT ?? "medium",
+        ),
+      ),
+    });
+  } else {
+    runtimePrompts.push({
+      type: "select",
+      name: "BOOP_OPENAI_MODEL",
+      message: "Which OpenAI API model should Boop use?",
+      choices: [
+        option("[recommended] gpt-5.5", "gpt-5.5", "Best quality default for OpenAI API users."),
+        option("[stable] gpt-5.4", "gpt-5.4", "Strong general-purpose model."),
+        option("[fast] gpt-5.4-mini", "gpt-5.4-mini", "Lower latency and lighter cost."),
+        option("[fallback] gpt-5.2", "gpt-5.2", "Older fallback if needed."),
+        option("[code] gpt-5.2-codex", "gpt-5.2-codex", "Coding-focused API option."),
+        option("[code] gpt-5.3-codex", "gpt-5.3-codex", "Newer coding-focused API option."),
+        option("[mini] gpt-4.1-mini", "gpt-4.1-mini", "Small, cheap fallback."),
+      ],
+      hint: SELECT_HINT,
+      initial: Math.max(
+        0,
+        [
+          "gpt-5.5",
+          "gpt-5.4",
+          "gpt-5.4-mini",
+          "gpt-5.2",
+          "gpt-5.2-codex",
+          "gpt-5.3-codex",
+          "gpt-4.1-mini",
+        ].indexOf(
+          existing.BOOP_OPENAI_MODEL ?? "gpt-5.5",
+        ),
+      ),
+    });
+    runtimePrompts.push({
+      type: "select",
+      name: "BOOP_OPENAI_REASONING_EFFORT",
+      message: "How much thinking effort should OpenAI use?",
+      choices: [
+        option("[balanced] medium", "medium", "Recommended. Good depth without dragging."),
+        option("[quick] low", "low", "Faster responses, less reasoning."),
+        option("[deep] high", "high", "More reasoning for complex tasks."),
+        option("[max] xhigh", "xhigh", "Deepest, slowest path."),
+        option("[tiny] minimal", "minimal", "Fastest, least reasoning."),
+      ],
+      hint: SELECT_HINT,
+      initial: Math.max(
+        0,
+        ["medium", "low", "high", "xhigh", "minimal"].indexOf(
+          existing.BOOP_OPENAI_REASONING_EFFORT ?? "medium",
+        ),
+      ),
+    });
+  }
+
+  const runtimeAnswers = await prompts(
+    [
+      ...runtimePrompts,
       {
         type: "text",
         name: "PORT",
@@ -404,6 +745,8 @@ Before you start:
     },
   );
 
+  const answers = { ...setupAnswers, ...providerAnswers, ...runtimeAnswers } as Record<string, any>;
+
   // Merge CLI-sourced defaults with what the user answered (answer wins).
   Object.assign(answers, {
     SENDBLUE_API_KEY: answers.SENDBLUE_API_KEY ?? sendblueDefaults.SENDBLUE_API_KEY,
@@ -412,7 +755,7 @@ Before you start:
   });
 
   // ---- Composio API key ---------------------------------------------------
-  banner("Composio — integrations (Gmail, Slack, GitHub, Linear, 1000+ more)");
+  banner("Composio - integrations");
   const composioSettingsUrl = "https://platform.composio.dev/settings";
   const existingComposio = existing.COMPOSIO_API_KEY ?? "";
   const { composioMode } = await prompts(
@@ -424,14 +767,15 @@ Before you start:
         : "Configure Composio now? (needed to connect any integration)",
       choices: existingComposio
         ? [
-            { title: "Keep existing key", value: "keep" },
-            { title: "Replace (opens the Composio dashboard)", value: "replace" },
-            { title: "Skip", value: "skip" },
+            option("[safe] Keep existing key", "keep", "Use the key already in .env.local."),
+            option("[update] Replace key", "replace", "Open the dashboard and paste a fresh key."),
+            option("[later] Skip", "skip", "Leave integrations disconnected for now."),
           ]
         : [
-            { title: "Yes — open the Composio dashboard and paste my key", value: "replace" },
-            { title: "Skip for now", value: "skip" },
+            option("[connect] Open dashboard + paste key", "replace", "Needed for Gmail, Slack, GitHub, Linear, Notion, and more."),
+            option("[later] Skip for now", "skip", "You can connect integrations from the dashboard later."),
           ],
+      hint: SELECT_HINT,
       initial: 0,
     },
     {
@@ -460,7 +804,8 @@ Before you start:
         },
       },
     );
-    (answers as any).COMPOSIO_API_KEY = COMPOSIO_API_KEY || existingComposio;
+    (answers as any).COMPOSIO_API_KEY =
+      COMPOSIO_API_KEY || existingComposio || (DRY_RUN ? "dry-run-composio-key" : "");
   } else if (composioMode === "keep") {
     (answers as any).COMPOSIO_API_KEY = existingComposio;
   } else {
@@ -471,14 +816,13 @@ Before you start:
   }
 
   // ---- Tunnel configuration ------------------------------------------------
-  banner("Tunnel — public URL for Sendblue to reach your server");
+  banner("Tunnel - public URL");
   console.log(`
-ngrok's FREE plan gives you a NEW public URL every restart, which means
-re-pasting into Sendblue every time. For a stable URL, pick one of:
+This only matters for real inbound iMessage/SMS. The local dashboard works
+without any tunnel.
 
-  1. Free ngrok             (fine for testing / demos — re-paste each restart)
-  2. ngrok RESERVED domain  (paid — stays the same across restarts)
-  3. Cloudflare Tunnel / other static tunnel you set up yourself
+For easiest local testing, pick free ngrok. Boop will auto-register the
+rotating webhook with Sendblue when \`npm run dev\` starts.
 `);
 
   const { tunnelChoice } = await prompts(
@@ -487,10 +831,12 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
       name: "tunnelChoice",
       message: "Which option are you using?",
       choices: [
-        { title: "Free ngrok — I'll paste a new URL each restart", value: "free" },
-        { title: "ngrok reserved domain (paid)", value: "ngrok-domain" },
-        { title: "Cloudflare Tunnel or another stable URL", value: "static" },
+        option("[easy] Free ngrok", "free", "Auto-registers Sendblue webhook on each dev start."),
+        option("[local] No tunnel yet", "none", "Use only the local dashboard chat for now."),
+        option("[paid] ngrok reserved domain", "ngrok-domain", "Stable URL that survives restarts."),
+        option("[custom] Cloudflare/other URL", "static", "Use a stable tunnel you already manage."),
       ],
+      hint: SELECT_HINT,
       initial: 0,
     },
     {
@@ -502,6 +848,7 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
   );
 
   if (tunnelChoice === "ngrok-domain") {
+    (answers as any).BOOP_TUNNEL = "ngrok-domain";
     const { NGROK_DOMAIN } = await prompts({
       type: "text",
       name: "NGROK_DOMAIN",
@@ -514,6 +861,7 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
       (answers as any).PUBLIC_URL = `https://${clean}`;
     }
   } else if (tunnelChoice === "static") {
+    (answers as any).BOOP_TUNNEL = "static";
     const { PUBLIC_URL } = await prompts({
       type: "text",
       name: "PUBLIC_URL",
@@ -524,9 +872,17 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
       (answers as any).PUBLIC_URL = PUBLIC_URL.replace(/\/$/, "");
       (answers as any).NGROK_DOMAIN = "";
     }
+  } else if (tunnelChoice === "none") {
+    (answers as any).BOOP_TUNNEL = "none";
+    (answers as any).NGROK_DOMAIN = "";
+    (answers as any).SENDBLUE_AUTO_WEBHOOK = "false";
+    (answers as any).PUBLIC_URL = `http://localhost:${answers.PORT ?? existing.PORT ?? "3456"}`;
   } else {
     // free ngrok — clear any stale domain and keep PUBLIC_URL at the localhost default
+    (answers as any).BOOP_TUNNEL = "free";
     (answers as any).NGROK_DOMAIN = "";
+    (answers as any).SENDBLUE_AUTO_WEBHOOK = "true";
+    (answers as any).PUBLIC_URL = `http://localhost:${answers.PORT ?? existing.PORT ?? "3456"}`;
   }
 
   const env: Record<string, string> = { ...existing, ...answers };
@@ -538,8 +894,9 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
   if (env.VITE_CONVEX_URL?.includes("example.convex.cloud")) delete env.VITE_CONVEX_URL;
   writeEnv(ENV_PATH, env);
 
-  banner("Claude authentication");
-  console.log(`This project uses your Claude Code subscription — no Anthropic API key needed.
+  banner("Runtime authentication");
+  if (selectedRuntime === "claude") {
+    console.log(`Boop is set to Claude.
 
 If you haven't already:
   • Install Claude Code:  npm install -g @anthropic-ai/claude-code
@@ -549,7 +906,27 @@ If you haven't already:
 The Claude Agent SDK reads the credentials Claude Code saves on disk.
 You can override with ANTHROPIC_API_KEY in .env.local if you'd rather use an API key.
 `);
+  } else if (selectedRuntime === "codex") {
+    console.log(`Boop is set to Codex.
 
+If you haven't already:
+  • Install Codex CLI:  npm install -g @openai/codex
+  • Run once:           codex
+  • Sign in when prompted
+
+Boop talks to Codex through \`codex app-server\`, so your local Codex session is used instead of Claude.
+`);
+  } else {
+    console.log(`Boop is set to OpenAI API.
+
+Required:
+  • OPENAI_API_KEY in .env.local
+  • BOOP_OPENAI_MODEL=${answers.BOOP_OPENAI_MODEL ?? "gpt-5.5"}
+  • BOOP_OPENAI_REASONING_EFFORT=${answers.BOOP_OPENAI_REASONING_EFFORT ?? "medium"}
+
+Tools, memory, drafts, and connected integrations stay on Boop's side; only the model provider changes.
+`);
+  }
   if (answers.runConvex) {
     await runConvexDev();
     const after = readEnv(ENV_PATH);
@@ -577,40 +954,43 @@ You can override with ANTHROPIC_API_KEY in .env.local if you'd rather use an API
     console.log("\nSkipped Convex. Run `npx convex dev` yourself when ready.");
   }
 
-  const port = answers.PORT ?? "3456";
+  if (DRY_RUN) {
+    banner("Dry run complete. Nothing changed.");
+    console.log(`
+This was a full setup rehearsal.
+
+Apply it for real:
+
+  npm run setup
+
+Preview it again:
+
+  npm run setup:demo
+
+Dashboard after real setup:
+  http://localhost:5173
+`);
+    return;
+  }
+
   banner("You're set up. Here's how to actually run it.");
   console.log(`
-Before you start: install ngrok (one-time).
-
-  brew install ngrok                           # macOS
-  # or download:  https://ngrok.com/download
-  ngrok config add-authtoken <your-token>      # free at https://dashboard.ngrok.com
-
-⚠ ngrok's FREE plan gives you a NEW URL every restart. That means
-  re-pasting into Sendblue every time.  For anything beyond a demo,
-  use a stable URL:
-    • ngrok paid plan (reserved domain), or
-    • Cloudflare Tunnel: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
-
-Then run ONE command:
+Run ONE command:
 
   npm run dev
 
-That starts the server, Convex watcher, debug dashboard, AND ngrok all
-together — color-prefixed output so you can tell who's saying what. Once
-the tunnel is live, you'll see a banner with your public URL.
+That starts the server, Convex watcher, debug dashboard, and tunnel if enabled.
 
-Wire up Sendblue (one-time, takes ~30 seconds):
+Dashboard:
+  http://localhost:5173
 
-  1. Copy the "Sendblue webhook" URL printed by ngrok.
-  2. Sendblue dashboard → API Settings → Webhook Configuration
-  3. Add it as an INBOUND MESSAGE webhook.
-  4. Paste the URL. Save.
+Inbound iMessage/SMS:
+  • If BOOP_TUNNEL=free, install/auth ngrok once and Boop auto-registers
+    the Sendblue webhook each dev start.
+  • If BOOP_TUNNEL=none, skip Sendblue for now and use the dashboard chat.
 
-Test it:
-  • Open http://localhost:5173 for the debug dashboard (Chat tab works
-    without Sendblue).
-  • Or text your Sendblue number from a different phone. The agent replies.
+ngrok one-time setup, only if using the free tunnel:
+  ngrok config add-authtoken <your-token>      # https://dashboard.ngrok.com
 
 Gotcha to double-check:
   SENDBLUE_FROM_NUMBER in .env.local must be your Sendblue-provisioned
@@ -619,7 +999,7 @@ Gotcha to double-check:
   parameter: from_number" otherwise.
 
 Integrations (via Composio):
-  1. Set COMPOSIO_API_KEY in .env.local (get one at https://app.composio.dev/developers?utm_source=chris&utm_medium=youtube&utm_campaign=collab).
+  1. Set COMPOSIO_API_KEY in .env.local.
   2. Open the debug dashboard → Connections tab.
   3. Click Connect on any toolkit (Gmail, Slack, GitHub, Linear, Notion, …).
   4. Composio handles OAuth; the toolkit becomes available to the agent.

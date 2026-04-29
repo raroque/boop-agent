@@ -159,6 +159,16 @@ On free ngrok, **the webhook auto-registers with Sendblue every boot** — no ma
 
 Text your Sendblue-provisioned number from a **different** phone. The agent replies.
 
+### Runtime selection
+
+Claude remains the default runtime, but setup can also configure Codex or OpenAI API:
+
+- `BOOP_RUNTIME=claude | codex | openai`
+- `BOOP_CODEX_MODEL` / `BOOP_OPENAI_MODEL` select the model for those runtimes.
+- `BOOP_CODEX_REASONING_EFFORT` / `BOOP_OPENAI_REASONING_EFFORT` set reasoning effort.
+
+Tools, memory, drafts, and connected integrations stay on Boop's side; only the model provider changes.
+
 > **⚠ ngrok free plan gives you a new URL every time.** That means every time you restart `npm run dev`, your Sendblue webhook URL is dead until you paste the new one in.
 >
 > If you're going to run this for more than a quick demo, **strongly recommend one of:**
@@ -427,9 +437,11 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
 
 ### Cost tracking
 
-Every execution agent's `total_cost_usd` comes straight from the Claude Agent SDK's `result` message (authoritative, matches Anthropic's billing). You'll see real dollar amounts in the Dashboard tab's Cost tile and per-agent cards.
+Claude costs come from the Claude Agent SDK's `result` message when available. OpenAI API and Codex app-server runs use Boop's OpenAI pricing table to record an API-equivalent estimate from input, cached-input, and output tokens.
 
 Every LLM call — dispatcher turn, execution-agent run, memory extraction, consolidation (proposer / adversary / judge) — also writes a row to the `usageRecords` table with per-layer tokens (including cache read/write) and cost. `usageRecords:summary` gives you totals by source so you can see which layer is actually burning the bill. Each row reports the model the caller requested, not the model-routing the SDK did internally.
+
+If a selected OpenAI/Codex model is not in `server/model-pricing.ts`, Boop records the tokens but treats the dollar estimate as unpriced instead of showing fake cost numbers.
 
 ### A note on runaway cost
 

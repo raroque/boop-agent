@@ -4,11 +4,12 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
+const localCli = (pkgPath) => resolve(root, "node_modules", ...pkgPath.split("/"));
 
 // --- preflight: Convex types must exist ----------------------------------
 if (!existsSync(resolve(root, "convex/_generated/api.js"))) {
@@ -37,11 +38,17 @@ function readEnv() {
 }
 const envVars = readEnv();
 const port = envVars.PORT || "3456";
+const tunnelMode = envVars.BOOP_TUNNEL || "";
 const ngrokDomain = envVars.NGROK_DOMAIN || "";
 const publicUrl = envVars.PUBLIC_URL || "";
 const hasStaticUrl =
   publicUrl && !publicUrl.includes("localhost") && !publicUrl.includes("127.0.0.1");
-const useNgrok = !hasStaticUrl || Boolean(ngrokDomain);
+const useNgrok =
+  tunnelMode === "none"
+    ? false
+    : tunnelMode === "free" || tunnelMode === "ngrok-domain"
+      ? true
+      : !hasStaticUrl || Boolean(ngrokDomain);
 
 // --- binary detection ---------------------------------------------------
 function hasBinary(name) {
@@ -51,6 +58,11 @@ function hasBinary(name) {
     child.on("exit", (code) => ok(code === 0));
     child.on("error", () => ok(false));
   });
+}
+
+function spawnCli(cmd, args, options = {}) {
+  if (process.platform !== "win32" || isAbsolute(cmd)) return spawn(cmd, args, options);
+  return spawn("cmd", ["/d", "/s", "/c", cmd, ...args], options);
 }
 
 // --- color-prefixed child runner ----------------------------------------
@@ -66,21 +78,25 @@ const C = {
 };
 
 // Vite's http-proxy attaches its own socket error logger that can't be removed
-// via configure(). EPIPE on WS reconnects is harmless — filter it at the
+// via configure(). Socket resets on WS reconnects are harmless — filter them at the
 // stream level so the logs stay readable.
 const NOISE_TRIGGERS = [
   /\[vite\] ws proxy socket error/,
   /\[vite\] ws proxy error/,
   /Error: write EPIPE/,
+  /Error: write ECONNABORTED/,
   /Error: read ECONNRESET/,
+  /Error: read ECONNABORTED/,
   /AggregateError \[ECONNREFUSED\]/,
+  /Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set\./,
+  /\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)/,
 ];
 const STACK_LINE = /^\s+at\s/;
 
 function run(name, cmd, args, readyPattern) {
-  const child = spawn(cmd, args, {
+  const child = spawnCli(cmd, args, {
     cwd: root,
-    env: { ...process.env, FORCE_COLOR: "1" },
+    env: { ...process.env, FORCE_COLOR: "1", NO_COLOR: undefined },
   });
   const prefix = `${C[name]}${name.padEnd(6)}${C.reset} │ `;
   let buf = "";
@@ -110,8 +126,12 @@ function run(name, cmd, args, readyPattern) {
       if (readyPattern && readyPattern.test(plain)) resolveReady();
     }
   };
-  child.stdout.on("data", feed);
-  child.stderr.on("data", feed);
+  child.stdout?.on("data", feed);
+  child.stderr?.on("data", feed);
+  child.on("error", (err) => {
+    process.stderr.write(`${prefix}failed to start ${cmd}: ${err.message}\n`);
+    resolveReady();
+  });
   child.ready = ready;
   return child;
 }
@@ -195,20 +215,22 @@ run("upstream", "node", ["scripts/check-upstream.mjs"]);
 
 const serverChild = run(
   "server",
-  "npx",
-  ["tsx", "watch", "server/index.ts"],
+  process.execPath,
+  process.platform === "win32"
+    ? [localCli("tsx/dist/cli.mjs"), "server/index.ts"]
+    : [localCli("tsx/dist/cli.mjs"), "watch", "server/index.ts"],
   /listening on :/,
 );
 const convexChild = run(
   "convex",
-  "npx",
-  ["convex", "dev"],
+  process.execPath,
+  [localCli("convex/bin/main.js"), "dev"],
   /Convex functions ready/,
 );
 const debugChild = run(
   "debug",
-  "npx",
-  ["vite", "--config", "debug/vite.config.ts"],
+  process.execPath,
+  [localCli("vite/bin/vite.js"), "--config", "debug/vite.config.ts"],
   /Local:\s+http/,
 );
 const children = [serverChild, convexChild, debugChild];

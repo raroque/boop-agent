@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "setup": "tsx scripts/setup.ts",
+    "setup:demo": "tsx scripts/setup.ts --dry-run",
     "sendblue:sync": "node scripts/sendblue-sync.mjs",
     "sendblue:webhook": "node scripts/sendblue-webhook.mjs",
     "preflight": "node scripts/preflight.mjs",

@@ -5,6 +5,7 @@ build/
 .env.local
 .env.*.local
 *.log
+*.local.md
 .DS_Store
 .convex/
 convex/_generated/
