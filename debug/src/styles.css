@@ -71,13 +71,13 @@ html, body, #root {
 
 /* ── Shimmer loading ── */
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
 }
 .shimmer {
-  background: linear-gradient(90deg, transparent 25%, rgba(148,163,184,0.08) 50%, transparent 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent 30%, rgba(148,163,184,0.06) 50%, transparent 70%);
+  background-size: 180% 100%;
+  animation: shimmer 4.5s linear infinite;
 }
 
 /* ── Monospace ── */

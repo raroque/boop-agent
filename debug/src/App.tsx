@@ -9,7 +9,8 @@ import {
   Link04Icon,
   DashboardSquare01Icon,
   ArrowShrink02Icon,
-  Settings01Icon,
+  Chat01Icon,
+  Settings02Icon,
 } from "@hugeicons/core-free-icons";
 import { api } from "../../convex/_generated/api.js";
 import { useSocket } from "./lib/useSocket.js";
@@ -20,10 +21,12 @@ import { MemoryPanel } from "./components/MemoryPanel.js";
 import { EventsPanel } from "./components/EventsPanel.js";
 import { ConnectionsPanel } from "./components/ConnectionsPanel.js";
 import { ConsolidationPanel } from "./components/ConsolidationPanel.js";
+import { ChatPanel } from "./components/ChatPanel.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 
 type View =
   | "dashboard"
+  | "chat"
   | "agents"
   | "automations"
   | "memory"
@@ -36,17 +39,19 @@ type Theme = "dark" | "light";
 
 const NAV_ICONS: Record<View, any> = {
   dashboard: DashboardSquare01Icon,
+  chat: Chat01Icon,
   agents: MachineRobotIcon,
   automations: WorkflowCircle03Icon,
   memory: AiBrain02Icon,
   events: Activity01Icon,
   consolidation: ArrowShrink02Icon,
   connections: Link04Icon,
-  settings: Settings01Icon,
+  settings: Settings02Icon,
 };
 
 const NAV: { id: View; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
+  { id: "chat", label: "Chat" },
   { id: "agents", label: "Agents" },
   { id: "automations", label: "Automations" },
   { id: "memory", label: "Memory" },
@@ -55,6 +60,28 @@ const NAV: { id: View; label: string }[] = [
   { id: "connections", label: "Connections" },
   { id: "settings", label: "Settings" },
 ];
+
+const VIEW_IDS = new Set<View>([...NAV.map((item) => item.id), "settings"]);
+
+interface DebugRoute {
+  view: View;
+  agentId?: string;
+}
+
+function parseRoute(): DebugRoute {
+  const raw = window.location.hash.replace(/^#\/?/, "");
+  const [viewPart, detailPart] = raw.split("/");
+  const view = VIEW_IDS.has(viewPart as View) ? (viewPart as View) : "dashboard";
+  return {
+    view,
+    agentId: view === "agents" && detailPart ? decodeURIComponent(detailPart) : undefined,
+  };
+}
+
+function writeRoute(view: View, detail?: string | null): void {
+  const next = detail ? `#/${view}/${encodeURIComponent(detail)}` : `#/${view}`;
+  if (window.location.hash !== next) window.location.hash = next;
+}
 
 function getStoredTheme(): Theme {
   try {
@@ -65,15 +92,23 @@ function getStoredTheme(): Theme {
 }
 
 export function App() {
-  const [view, setView] = useState<View>("dashboard");
+  const [route, setRoute] = useState<DebugRoute>(parseRoute);
   const [theme, setTheme] = useState<Theme>(getStoredTheme);
-  const { connected } = useSocket();
+  const { status: socketStatus } = useSocket();
+  const view = route.view;
 
   const counts = useQuery(api.memoryRecords.countsByTier, {});
   const agents = useQuery(api.agents.list, {});
   const activeAgentCount = (agents ?? []).filter(
     (a) => a.status === "running" || a.status === "spawned",
   ).length;
+
+  useEffect(() => {
+    const onHashChange = () => setRoute(parseRoute());
+    window.addEventListener("hashchange", onHashChange);
+    if (!window.location.hash) writeRoute("dashboard");
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -84,6 +119,27 @@ export function App() {
   }, [theme]);
 
   const isDark = theme === "dark";
+  const socketConfig =
+    socketStatus === "live"
+      ? {
+          label: "Live",
+          text: "text-emerald-500",
+          dot: "bg-emerald-400",
+          pulse: true,
+        }
+      : socketStatus === "connecting"
+        ? {
+            label: "Connecting",
+            text: isDark ? "text-amber-300" : "text-amber-600",
+            dot: isDark ? "bg-amber-300" : "bg-amber-500",
+            pulse: true,
+          }
+        : {
+            label: "Disconnected",
+            text: "text-rose-400",
+            dot: "bg-rose-400",
+            pulse: false,
+          };
 
   return (
     <div
@@ -105,21 +161,17 @@ export function App() {
             Boop Debug
           </h1>
           <div
-            className={`flex items-center gap-1.5 text-xs ${
-              connected ? "text-emerald-500" : "text-rose-400"
-            }`}
+            className={`flex items-center gap-1.5 text-xs ${socketConfig.text}`}
           >
             <span className="relative flex h-2 w-2">
-              {connected && (
-                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 pulse-ring" />
+              {socketConfig.pulse && (
+                <span className={`absolute inline-flex h-full w-full rounded-full ${socketConfig.dot} pulse-ring`} />
               )}
               <span
-                className={`relative inline-flex rounded-full h-2 w-2 ${
-                  connected ? "bg-emerald-400" : "bg-rose-400"
-                }`}
+                className={`relative inline-flex rounded-full h-2 w-2 ${socketConfig.dot}`}
               />
             </span>
-            {connected ? "Live" : "Disconnected"}
+            {socketConfig.label}
           </div>
         </div>
 
@@ -181,15 +233,15 @@ export function App() {
       <div className="flex flex-1 min-h-0">
         {/* Sidebar */}
         <nav
-          className={`w-[168px] shrink-0 border-r flex flex-col py-1.5 ${
+          className={`w-[216px] shrink-0 border-r flex flex-col py-2 ${
             isDark ? "border-slate-800 bg-slate-950/50" : "border-slate-200 bg-white/50"
           }`}
         >
           {NAV.map((item) => (
             <button
               key={item.id}
-              onClick={() => setView(item.id)}
-              className={`flex items-center gap-3 px-4 py-2.5 text-left text-[13px] transition-all duration-150 ${
+              onClick={() => writeRoute(item.id)}
+              className={`flex items-center gap-3 px-5 py-3 text-left text-[13px] transition-all duration-150 ${
                 view === item.id
                   ? isDark
                     ? "bg-slate-800/70 text-white font-medium"
@@ -209,13 +261,32 @@ export function App() {
             </button>
           ))}
 
-          <div className="mt-auto px-4 py-3 flex items-center gap-2">
-            <img src="/appicon.png" alt="" className="w-5 h-5 rounded" />
-            <span
-              className={`text-[10px] ${isDark ? "text-slate-600" : "text-slate-400"} mono`}
+          <div className="mt-auto px-4 py-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <img src="/appicon.png" alt="" className="w-5 h-5 rounded" />
+              <span
+                className={`text-[10px] ${isDark ? "text-slate-600" : "text-slate-400"} mono`}
+              >
+                v0.1
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => writeRoute("settings")}
+              className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] transition-colors ${
+                view === "settings"
+                  ? isDark
+                    ? "bg-slate-800 text-slate-100"
+                    : "bg-slate-100 text-slate-900"
+                  : isDark
+                    ? "text-slate-500 hover:bg-slate-800/60 hover:text-slate-200"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              }`}
+              title="Settings"
             >
-              v0.1
-            </span>
+              <HugeiconsIcon icon={Settings02Icon} size={15} />
+              Settings
+            </button>
           </div>
         </nav>
 
@@ -223,7 +294,14 @@ export function App() {
         <main className="flex-1 min-w-0 overflow-hidden debug-scroll">
           <div className="h-full overflow-auto debug-scroll p-5 fade-in">
             {view === "dashboard" && <DashboardPanel isDark={isDark} />}
-            {view === "agents" && <AgentsPanel isDark={isDark} />}
+            <ChatPanel isDark={isDark} hidden={view !== "chat"} />
+            {view === "agents" && (
+              <AgentsPanel
+                isDark={isDark}
+                routeAgentId={route.agentId}
+                onRouteAgent={(agentId) => writeRoute("agents", agentId)}
+              />
+            )}
             {view === "automations" && <AutomationsPanel isDark={isDark} />}
             {view === "memory" && <MemoryPanel isDark={isDark} />}
             {view === "events" && <EventsPanel isDark={isDark} />}

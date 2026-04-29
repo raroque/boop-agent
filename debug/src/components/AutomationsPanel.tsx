@@ -46,7 +46,7 @@ export function AutomationsPanel({ isDark }: { isDark: boolean }) {
   }
 
   return (
-    <div className="flex flex-col h-full -m-5">
+    <div className="flex flex-col h-[calc(100%+2.5rem)] -m-5">
       <div
         className={`shrink-0 border-b px-5 py-3 flex items-center gap-3 ${
           isDark ? "border-slate-800" : "border-slate-200"
@@ -197,7 +197,7 @@ function AutomationDetail({
   }
 
   return (
-    <div className="flex flex-col h-full -m-5 fade-in">
+    <div className="flex flex-col h-[calc(100%+2.5rem)] -m-5 fade-in">
       <div
         className={`shrink-0 border-b px-5 py-3 flex items-center gap-3 ${
           isDark ? "border-slate-800" : "border-slate-200"

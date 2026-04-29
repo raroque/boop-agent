@@ -6,8 +6,10 @@ export interface SocketEvent {
   at: number;
 }
 
+export type SocketStatus = "connecting" | "live" | "disconnected";
+
 export function useSocket(onEvent?: (e: SocketEvent) => void) {
-  const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<SocketStatus>("connecting");
   const handlerRef = useRef(onEvent);
   handlerRef.current = onEvent;
 
@@ -18,12 +20,13 @@ export function useSocket(onEvent?: (e: SocketEvent) => void) {
 
     function connect() {
       if (cancelled) return;
+      setStatus("connecting");
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       const url = `${proto}//${location.host}/ws`;
       ws = new WebSocket(url);
-      ws.onopen = () => setConnected(true);
+      ws.onopen = () => setStatus("live");
       ws.onclose = () => {
-        setConnected(false);
+        setStatus("disconnected");
         reconnectTimer = setTimeout(connect, 1500);
       };
       ws.onerror = () => ws?.close();
@@ -46,5 +49,5 @@ export function useSocket(onEvent?: (e: SocketEvent) => void) {
     };
   }, []);
 
-  return { connected };
+  return { connected: status === "live", status };
 }

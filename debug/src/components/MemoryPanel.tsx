@@ -83,7 +83,7 @@ export function MemoryPanel({ isDark }: { isDark: boolean }) {
     : "text-slate-400 hover:text-slate-600 hover:bg-slate-100";
 
   return (
-    <div className="flex flex-col h-full -m-5">
+    <div className="flex flex-col h-[calc(100%+2.5rem)] -m-5">
       {/* Toolbar */}
       <div
         className={`shrink-0 border-b px-5 py-3 flex flex-wrap items-center gap-3 ${

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useRef, useCallback, type ReactNode } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
+import { RuntimePanel } from "./RuntimePanel.js";
 
 type TimeRange = "all" | "7d" | "30d" | "90d";
 
@@ -10,6 +11,19 @@ const RANGES: { id: TimeRange; label: string }[] = [
   { id: "90d", label: "90 days" },
   { id: "all", label: "All time" },
 ];
+
+interface RuntimePricingStatus {
+  mode: "api" | "api-equivalent" | "provider-reported";
+  priced: boolean;
+  label: string;
+  note: string;
+}
+
+interface RuntimePayload {
+  pricing?: {
+    current: RuntimePricingStatus;
+  };
+}
 
 function cutoffDate(range: TimeRange): string | null {
   if (range === "all") return null;
@@ -32,6 +46,27 @@ function fmtTokens(n: number): string {
 export function DashboardPanel({ isDark }: { isDark: boolean }) {
   const data = useQuery(api.dashboard.metrics, {});
   const [range, setRange] = useState<TimeRange>("all");
+  const [runtimePricing, setRuntimePricing] = useState<RuntimePricingStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshPricing = () => {
+      fetch("/api/runtime")
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload: RuntimePayload | null) => {
+          if (!cancelled) setRuntimePricing(payload?.pricing?.current ?? null);
+        })
+        .catch(() => {
+          if (!cancelled) setRuntimePricing(null);
+        });
+    };
+    refreshPricing();
+    window.addEventListener("boop-runtime-updated", refreshPricing);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("boop-runtime-updated", refreshPricing);
+    };
+  }, []);
 
   const filtered = useMemo(() => {
     if (!data) return null;
@@ -105,6 +140,19 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
       };
 
   const failPct = (filtered.agents.failureRate * 100).toFixed(1);
+  const selectedModelUnpriced =
+    runtimePricing?.mode !== "provider-reported" && runtimePricing?.priced === false;
+  const costValue =
+    selectedModelUnpriced && filtered.cost.total <= 0
+      ? "Unpriced"
+      : `$${filtered.cost.total.toFixed(2)}`;
+  const costSub = selectedModelUnpriced
+    ? "Selected model not priced"
+    : runtimePricing?.mode === "api-equivalent"
+      ? "API-equivalent estimate"
+      : runtimePricing?.mode === "api"
+        ? "OpenAI API estimate"
+        : undefined;
 
   return (
     <div className="h-full overflow-y-auto debug-scroll -m-5 p-5 space-y-5">
@@ -145,6 +193,8 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
         </div>
       </div>
 
+      <RuntimePanel isDark={isDark} />
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard label="Messages" value={fmt(data.messages)} c={c} />
         <StatCard
@@ -161,7 +211,8 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
         />
         <StatCard
           label="Total Cost"
-          value={`$${filtered.cost.total.toFixed(2)}`}
+          value={costValue}
+          sub={costSub}
           color={isDark ? "text-emerald-400" : "text-emerald-600"}
           c={c}
           isDark={isDark}
@@ -170,16 +221,12 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
             body: (
               <>
                 <p className="mb-1.5">
-                  This number is what your token usage <em>would</em> cost at Anthropic API rates.
+                  OpenAI and Codex usage use standard OpenAI API token pricing for estimates.
                 </p>
                 <p className="mb-1.5">
-                  If you're using your <strong>Claude Code subscription</strong> (the default), you're
-                  paying a flat monthly rate — not these dollar amounts.
+                  Codex subscription runs are still shown as API-equivalent burn-rate.
                 </p>
-                <p>
-                  Watch this as a usage-burn proxy (against subscription rate limits) or as a
-                  forecast for what API auth would cost.
-                </p>
+                <p>If the selected model is not priced, Boop logs tokens without fake dollars.</p>
               </>
             ),
           }}
