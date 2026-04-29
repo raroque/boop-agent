@@ -389,8 +389,8 @@ Before you start:
         skip: (_prev: unknown, values: any) => values.AI_PROVIDER === "codex",
         choices: [
           { title: "claude-sonnet-4-6 (recommended)", value: "claude-sonnet-4-6" },
-          { title: "claude-opus-4-6 (slowest, most capable)", value: "claude-opus-4-6" },
-          { title: "claude-haiku-4-5 (fastest, cheapest)", value: "claude-haiku-4-5" },
+          { title: "claude-opus-4-7 (slowest, most capable)", value: "claude-opus-4-7" },
+          { title: "claude-haiku-4-5-20251001 (fastest, cheapest)", value: "claude-haiku-4-5-20251001" },
         ],
         initial: 0,
       },
