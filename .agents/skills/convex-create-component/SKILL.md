@@ -1,6 +1,6 @@
 ---
 name: convex-create-component
-description: Designs and builds Convex components with isolated tables, clear boundaries, and app-facing wrappers. Use this skill when creating a new Convex component, extracting reusable backend logic into a component, building a third-party integration that owns its own tables, packaging Convex functionality for reuse, or when the user mentions defineComponent, app.use, ComponentApi, ctx.runQuery/runMutation across component boundaries, or wants to separate concerns into isolated Convex modules.
+description: Builds reusable Convex components with isolated tables and app-facing APIs. Use for new components, reusable backend modules, integrations, or component boundary work.
 ---
 
 # Convex Create Component

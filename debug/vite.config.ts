@@ -16,6 +16,7 @@ export default defineConfig(({ mode }) => {
     envDir: PROJECT_ROOT,
     plugins: [react(), tailwindcss()],
     server: {
+      host: true,
       port: 5173,
       proxy: {
         "/api": {
