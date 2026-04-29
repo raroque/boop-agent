@@ -65,6 +65,19 @@ export const setEnabled = mutation({
   },
 });
 
+export const setTask = mutation({
+  args: { automationId: v.string(), task: v.string() },
+  handler: async (ctx, args) => {
+    const auto = await ctx.db
+      .query("automations")
+      .withIndex("by_automation_id", (q) => q.eq("automationId", args.automationId))
+      .unique();
+    if (!auto) return null;
+    await ctx.db.patch(auto._id, { task: args.task });
+    return auto._id;
+  },
+});
+
 export const remove = mutation({
   args: { automationId: v.string() },
   handler: async (ctx, args) => {

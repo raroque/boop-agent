@@ -317,7 +317,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     reply = "Sorry — I hit an error processing that. Try again in a moment.";
   }
 
-  reply = reply.trim() || "(no reply)";
+  reply = reply.trim();
 
   if (usage.costUsd > 0 || usage.inputTokens > 0) {
     log(

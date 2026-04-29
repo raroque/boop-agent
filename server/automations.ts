@@ -37,6 +37,17 @@ async function runAutomation(a: {
   conversationId?: string;
   notifyConversationId?: string;
 }): Promise<void> {
+  // Advance nextRunAt BEFORE spawning the (potentially long-running) execution
+  // agent. Otherwise the 30-second tick will re-fire any automation whose
+  // agent runs longer than 30 seconds — observed in the wild as "Daily work
+  // triage" landing 3× because the agent took ~90s.
+  const next = nextRunFor(a.schedule);
+  await convex.mutation(api.automations.markRan, {
+    automationId: a.automationId,
+    lastRunAt: Date.now(),
+    nextRunAt: next ?? undefined,
+  });
+
   const runId = randomId("run");
   await convex.mutation(api.automations.createRun, {
     runId,
@@ -50,6 +61,11 @@ async function runAutomation(a: {
       integrations: a.integrations,
       conversationId: a.conversationId,
       name: `auto:${a.name}`,
+      // Scheduled results should land in the conversation as messages, not as
+      // pending drafts the user has to approve. Without this, an automation's
+      // execution agent dutifully calls save_draft (per its system prompt) and
+      // the user sees "Reply send to fire it off" instead of the actual digest.
+      attachDraftStaging: false,
     });
     await convex.mutation(api.automations.updateRun, {
       runId,
@@ -80,13 +96,6 @@ async function runAutomation(a: {
     });
     broadcast("automation_failed", { automationId: a.automationId, runId, error: String(err) });
   }
-
-  const next = nextRunFor(a.schedule);
-  await convex.mutation(api.automations.markRan, {
-    automationId: a.automationId,
-    lastRunAt: Date.now(),
-    nextRunAt: next ?? undefined,
-  });
 }
 
 export async function tickAutomations(): Promise<void> {

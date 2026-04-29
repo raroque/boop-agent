@@ -81,6 +81,10 @@ export interface SpawnOptions {
   integrations: string[];
   conversationId?: string;
   name?: string;
+  // When false, skip mounting the draft-staging MCP even if conversationId is
+  // set. Used by automations so scheduled results get delivered directly
+  // instead of staged as drafts the user has to approve.
+  attachDraftStaging?: boolean;
 }
 
 export interface SpawnResult {
@@ -119,9 +123,10 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
     opts.integrations,
     opts.conversationId,
   );
-  const draftServer = opts.conversationId
-    ? createDraftStagingMcp(opts.conversationId)
-    : undefined;
+  const draftServer =
+    opts.conversationId && opts.attachDraftStaging !== false
+      ? createDraftStagingMcp(opts.conversationId)
+      : undefined;
   const mcpServers = {
     ...integrationServers,
     ...(draftServer ? { "boop-drafts": draftServer } : {}),
