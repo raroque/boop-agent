@@ -383,10 +383,10 @@ Before you start:
         initial: existing.AI_PROVIDER === "codex" ? 1 : 0,
       },
       {
-        type: "select",
+        type: (_prev: unknown, values: any) =>
+          values.AI_PROVIDER === "codex" ? false : "select",
         name: "BOOP_MODEL",
         message: "Which Claude model should the agent use?",
-        skip: (_prev: unknown, values: any) => values.AI_PROVIDER === "codex",
         choices: [
           { title: "claude-sonnet-4-6 (recommended)", value: "claude-sonnet-4-6" },
           { title: "claude-opus-4-7 (slowest, most capable)", value: "claude-opus-4-7" },
@@ -395,10 +395,10 @@ Before you start:
         initial: 0,
       },
       {
-        type: "text",
+        type: (_prev: unknown, values: any) =>
+          values.AI_PROVIDER === "codex" ? "text" : false,
         name: "CODEX_MODEL",
         message: "Which Codex model should the agent use?",
-        skip: (_prev: unknown, values: any) => values.AI_PROVIDER !== "codex",
         initial: existing.CODEX_MODEL ?? "gpt-5.3-codex",
       },
       {
