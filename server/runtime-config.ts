@@ -224,12 +224,11 @@ export async function getRuntimeModel(runtime?: RuntimeName): Promise<string> {
   } catch (err) {
     console.warn("[runtime-config] settings:get model failed", err);
   }
-  const known =
-    selectedRuntime === "openai"
-      ? OPENAI_KNOWN_MODELS
-      : selectedRuntime === "codex"
-        ? CODEX_KNOWN_MODELS
-        : CLAUDE_KNOWN_MODELS;
+  if (stored && selectedRuntime === "codex") {
+    cachedModel = { at: Date.now(), runtime: selectedRuntime, value: stored };
+    return stored;
+  }
+  const known = selectedRuntime === "openai" ? OPENAI_KNOWN_MODELS : CLAUDE_KNOWN_MODELS;
   const final = stored && known.has(stored) ? stored : envModelFallback(selectedRuntime);
   cachedModel = { at: Date.now(), runtime: selectedRuntime, value: final };
   return final;

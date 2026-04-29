@@ -146,7 +146,17 @@ class CodexAppServerClient {
     while (newline >= 0) {
       const rawLine = this.lineBuffer.slice(0, newline).trim();
       this.lineBuffer = this.lineBuffer.slice(newline + 1);
-      if (rawLine) this.onMessage(JSON.parse(rawLine) as JsonRpcMessage);
+      if (rawLine) {
+        let message: JsonRpcMessage;
+        try {
+          message = JSON.parse(rawLine) as JsonRpcMessage;
+        } catch (err) {
+          console.warn("[codex-app-server] ignored malformed stdout line", err);
+          newline = this.lineBuffer.indexOf("\n");
+          continue;
+        }
+        this.onMessage(message);
+      }
       newline = this.lineBuffer.indexOf("\n");
     }
   }

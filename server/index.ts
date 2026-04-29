@@ -145,6 +145,9 @@ function localControlOriginGuard(
   }
   const origin = typeof req.headers.origin === "string" ? req.headers.origin : "";
   const referer = typeof req.headers.referer === "string" ? req.headers.referer : "";
+  // This guard is scoped to browser CSRF and tunnel exposure, not local process auth.
+  // Requests with no Origin/Referer, like same-machine curl calls, are allowed after
+  // publicTunnelGuard has already rejected non-local hosts.
   if ((origin && !isLocalOrigin(origin)) || (!origin && referer && !isLocalOrigin(referer))) {
     res.status(403).json({ error: "Local dashboard origin required" });
     return;

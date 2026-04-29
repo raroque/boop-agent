@@ -153,10 +153,14 @@ export async function runOpenAIResponsesAgent(
     usage = addUsage(usage, usageFrom(response, request.model));
     await request.onUsage?.(usage);
 
+    const responseText = extractText(response);
+    if (responseText) {
+      finalText = finalText ? `${finalText}\n${responseText}` : responseText;
+      request.onText?.(responseText);
+    }
+
     const functionCalls = (response.output ?? []).filter((item) => item?.type === "function_call");
     if (functionCalls.length === 0) {
-      finalText = extractText(response);
-      request.onText?.(finalText);
       return { text: finalText, usage };
     }
 
