@@ -1,5 +1,5 @@
 const ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6";
-const ANTHROPIC_DEFAULT_ADVERSARY_MODEL = "claude-haiku-4-5";
+const ANTHROPIC_DEFAULT_ADVERSARY_MODEL = "claude-haiku-4-5-20251001";
 
 export function aiProvider(): "anthropic" | "codex" {
   return process.env.AI_PROVIDER === "codex" ? "codex" : "anthropic";

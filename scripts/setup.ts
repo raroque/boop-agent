@@ -389,8 +389,8 @@ Before you start:
         skip: (_prev: unknown, values: any) => values.AI_PROVIDER === "codex",
         choices: [
           { title: "claude-sonnet-4-6 (recommended)", value: "claude-sonnet-4-6" },
-          { title: "claude-opus-4-6 (slowest, most capable)", value: "claude-opus-4-6" },
-          { title: "claude-haiku-4-5 (fastest, cheapest)", value: "claude-haiku-4-5" },
+          { title: "claude-opus-4-7 (slowest, most capable)", value: "claude-opus-4-7" },
+          { title: "claude-haiku-4-5-20251001 (fastest, cheapest)", value: "claude-haiku-4-5-20251001" },
         ],
         initial: 0,
       },
@@ -556,8 +556,18 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
   if (env.VITE_CONVEX_URL?.includes("example.convex.cloud")) delete env.VITE_CONVEX_URL;
   writeEnv(ENV_PATH, env);
 
-  banner("Claude authentication");
-  console.log(`This project uses your Claude Code subscription — no Anthropic API key needed.
+  banner(answers.AI_PROVIDER === "codex" ? "Codex authentication" : "Claude authentication");
+  if (answers.AI_PROVIDER === "codex") {
+    console.log(`This project uses your local Codex login/session — no OpenAI API key needed.
+
+If you haven't already:
+  • Install Codex CLI
+  • Sign in once
+
+The Codex SDK reads the credentials Codex saves on disk.
+`);
+  } else {
+    console.log(`This project uses your Claude Code subscription — no Anthropic API key needed.
 
 If you haven't already:
   • Install Claude Code:  npm install -g @anthropic-ai/claude-code
@@ -567,6 +577,7 @@ If you haven't already:
 The Claude Agent SDK reads the credentials Claude Code saves on disk.
 You can override with ANTHROPIC_API_KEY in .env.local if you'd rather use an API key.
 `);
+  }
 
   if (answers.runConvex) {
     await runConvexDev();
