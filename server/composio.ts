@@ -1,6 +1,6 @@
-import { Composio } from "@composio/core";
+import { Composio, OpenAIProvider } from "@composio/core";
 import { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
-import { createSdkMcpServer, type McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, type McpSdkServerConfigWithInstance } from "./llm/index.js";
 import type { IntegrationModule } from "./integrations/registry.js";
 
 export type ToolkitAuthMode = "managed" | "byo";
@@ -9,10 +9,10 @@ export interface CuratedToolkit {
   slug: string;
   displayName: string;
   // "managed"  = Composio hosts a shared OAuth app — click Connect, it works.
-  // "byo"      = You must create your own OAuth app on the toolkit's dev portal
-  //              and register it as an Auth Config in Composio's dashboard first.
-  //              Happens when the toolkit's terms don't allow a shared OAuth app
-  //              (Twitter/X and LinkedIn are the usual suspects).
+  // "byo"      = User must register their own OAuth app on the toolkit's dev portal
+  //              and add it as an Auth Config in Composio's dashboard first.
+  //              Composio now ships managed OAuth for most toolkits; reserve "byo"
+  //              for the rare cases where a hosted app isn't available.
   authMode: ToolkitAuthMode;
 }
 
@@ -40,22 +40,27 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
   { slug: "stripe", displayName: "Stripe", authMode: "managed" },
   { slug: "supabase", displayName: "Supabase", authMode: "managed" },
   { slug: "granola_mcp", displayName: "Granola", authMode: "managed" },
-  { slug: "salesforce", displayName: "Salesforce", authMode: "byo" },
+  { slug: "salesforce", displayName: "Salesforce", authMode: "managed" },
   { slug: "twitter", displayName: "Twitter / X", authMode: "byo" },
-  { slug: "linkedin", displayName: "LinkedIn", authMode: "byo" },
+  { slug: "linkedin", displayName: "LinkedIn", authMode: "managed" },
 ];
 
 const DISPLAY_NAME_BY_SLUG = new Map(CURATED_TOOLKITS.map((t) => [t.slug, t.displayName]));
 
-let singleton: Composio<ClaudeAgentSDKProvider> | null = null;
+let singleton: Composio<any> | null = null;
 
-export function getComposio(): Composio<ClaudeAgentSDKProvider> | null {
+export function getComposio(): Composio<any> | null {
   if (singleton) return singleton;
   const apiKey = process.env.COMPOSIO_API_KEY;
   if (!apiKey) return null;
-  singleton = new Composio<ClaudeAgentSDKProvider>({
+
+  const provider = process.env.AI_PROVIDER === "codex"
+    ? new OpenAIProvider()
+    : new ClaudeAgentSDKProvider();
+
+  singleton = new Composio({
     apiKey,
-    provider: new ClaudeAgentSDKProvider(),
+    provider,
   });
   return singleton;
 }
@@ -276,12 +281,17 @@ const WHOAMI_BY_TOOLKIT: Record<string, WhoAmITool> = {
 async function fetchToolkitIdentity(
   composio: NonNullable<ReturnType<typeof getComposio>>,
   slug: string,
+  connectedAccountId?: string,
 ): Promise<AccountIdentity> {
   const spec = WHOAMI_BY_TOOLKIT[slug];
   if (!spec) return {};
   try {
     const result = await composio.tools.execute(spec.tool, {
       userId: boopUserId(),
+      // Without this, Composio picks the user's *default* connection for the
+      // toolkit, so every Gmail row in the UI ends up labeled with the same
+      // (newest) email — even when distinct accounts are connected.
+      ...(connectedAccountId ? { connectedAccountId } : {}),
       arguments: spec.arguments,
       // Composio's tools.execute requires a pinned toolkit version OR this
       // flag. We skip pinning so a toolkit bump doesn't break identity lookup
@@ -318,7 +328,7 @@ async function getIdentityFor(
     console.warn(`[composio] failed to fetch identity for ${id}`, err);
   }
   if (!identity.label) {
-    const whoami = await fetchToolkitIdentity(composio, slug);
+    const whoami = await fetchToolkitIdentity(composio, slug, id);
     if (whoami.label) identity = { ...identity, ...whoami };
   }
   identityCache.set(id, { at: Date.now(), identity });
@@ -447,20 +457,11 @@ export class ComposioNeedsAuthConfigError extends Error {
   ) {
     super(
       `Toolkit "${slug}" needs an auth config — Composio doesn't host a managed OAuth app for it. ` +
-        `Create one at https://platform.composio.dev/auth-configs (select ${slug}).`,
+        `Add it via the Composio Dashboard: Toolkits → search ${slug} → Add to project → paste your OAuth credentials. ` +
+        `https://dashboard.composio.dev`,
     );
     this.name = "ComposioNeedsAuthConfigError";
   }
-}
-
-function isNeedsAuthConfigError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const maybe = err as { status?: number; message?: string; error?: { error?: { message?: string } } };
-  const message =
-    maybe.error?.error?.message ??
-    maybe.message ??
-    "";
-  return maybe.status === 400 && /require auth configs? but none exist/i.test(message);
 }
 
 export async function authorizeToolkit(
@@ -469,28 +470,46 @@ export async function authorizeToolkit(
 ): Promise<{ redirectUrl: string | null; connectionId: string }> {
   const composio = getComposio();
   if (!composio) throw new Error("COMPOSIO_API_KEY not set");
-  // If there's already an active connection for this slug, we're adding another account —
-  // tell Composio to allow multiple.
+
+  // 1. Find or create an auth config for the toolkit. session.authorize doesn't
+  //    auto-discover or auto-create — we have to pass an authConfigId explicitly
+  //    to connectedAccounts.initiate. That's why a manually-added BYO config in
+  //    the dashboard would still trip "require auth configs but none exist" on
+  //    the previous session.authorize-based code path.
+  let authConfigId: string;
+  const existingConfig = (await composio.authConfigs.list({ toolkit: slug })).items[0];
+  if (existingConfig) {
+    authConfigId = existingConfig.id;
+  } else {
+    try {
+      const created = await composio.authConfigs.create(slug, {
+        type: "use_composio_managed_auth",
+        name: `${displayNameFor(slug)} Auth Config`,
+      });
+      authConfigId = created.id;
+    } catch (err) {
+      // 400 here means Composio doesn't host a managed OAuth app for this toolkit —
+      // user has to register their own at the toolkit's dev portal and add it via
+      // the Composio Dashboard (Toolkits → search → Add to project).
+      const status = (err as { status?: number })?.status;
+      if (status === 400) {
+        throw new ComposioNeedsAuthConfigError(slug, String(err));
+      }
+      throw err;
+    }
+  }
+
+  // 2. Initiate the connection. allowMultiple if there's already an active connection
+  //    so we add another account instead of replacing.
   const existing = (await listConnectedToolkits()).filter(
     (c) => c.slug === slug && c.status === "ACTIVE",
   );
-  try {
-    const session = await composio.create(boopUserId(), {
-      toolkits: [slug],
-      manageConnections: false,
-      ...(existing.length > 0 ? { multiAccount: { enable: true } } : {}),
-    });
-    const conn = await session.authorize(slug, {
-      ...(opts?.callbackUrl ? { callbackUrl: opts.callbackUrl } : {}),
-      ...(opts?.alias ? { alias: opts.alias } : {}),
-    });
-    return { redirectUrl: conn.redirectUrl ?? null, connectionId: conn.id };
-  } catch (err) {
-    if (isNeedsAuthConfigError(err)) {
-      throw new ComposioNeedsAuthConfigError(slug, String(err));
-    }
-    throw err;
-  }
+  const conn = await composio.connectedAccounts.initiate(boopUserId(), authConfigId, {
+    ...(existing.length > 0 ? { allowMultiple: true } : {}),
+    ...(opts?.callbackUrl ? { callbackUrl: opts.callbackUrl } : {}),
+    ...(opts?.alias ? { alias: opts.alias } : {}),
+  });
+  return { redirectUrl: conn.redirectUrl ?? null, connectionId: conn.id };
 }
 
 export async function disconnectToolkit(connectionId: string): Promise<void> {
@@ -515,14 +534,21 @@ export function buildComposioIntegrationModule(slug: string): IntegrationModule 
       const activeCount = (await listConnectedToolkits()).filter(
         (c) => c.slug === slug && c.status === "ACTIVE",
       ).length;
+      // Look up the auth config explicitly. Without this, composio.create() tries
+      // to auto-create one and 400s for BYO toolkits (Twitter etc.) that don't
+      // have a managed OAuth app available — error message even names the fix:
+      // "Please specify them in auth_configs."
+      const authConfig = (await composio.authConfigs.list({ toolkit: slug })).items[0];
       const session = await composio.create(boopUserId(), {
         toolkits: [slug],
         manageConnections: false,
+        ...(authConfig ? { authConfigs: { [slug]: authConfig.id } } : {}),
         ...(activeCount >= 2
           ? { multiAccount: { enable: true, requireExplicitSelection: true } }
           : {}),
       });
       const tools = await session.tools();
+
       return createSdkMcpServer({
         name: slug,
         version: "0.1.0",

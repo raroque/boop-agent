@@ -6,6 +6,7 @@ import { IntegrationLogo, BrailleIndicator, prettyToolName } from "../lib/brandi
 interface LogEntry {
   logType: string;
   toolName?: string;
+  accounts?: string[];
   content: string;
 }
 
@@ -32,9 +33,9 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
 
   const agentList = agents ?? [];
   const filtered =
-    statusFilter === "all" ? agentList : agentList.filter((a) => a.status === statusFilter);
+    statusFilter === "all" ? agentList : agentList.filter((a: any) => a.status === statusFilter);
   const activeCount = agentList.filter(
-    (a) => a.status === "running" || a.status === "spawned",
+    (a: any) => a.status === "running" || a.status === "spawned",
   ).length;
 
   const cardBg = isDark
@@ -113,7 +114,7 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
             {statusFilter !== "all" ? `No ${statusFilter} agents` : "No agents yet"}
           </p>
         ) : (
-          filtered.map((agent) => {
+          filtered.map((agent: any) => {
             const cfg = STATUS_CONFIG[agent.status] ?? STATUS_CONFIG.running;
             const isActive = agent.status === "running" || agent.status === "spawned";
             const totalTokens = agent.inputTokens + agent.outputTokens;
@@ -187,7 +188,7 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
 
                 {agent.mcpServers.length > 0 && (
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    {agent.mcpServers.map((name) => (
+                    {agent.mcpServers.map((name: string) => (
                       <IntegrationLogo key={name} raw={name} size={18} />
                     ))}
                   </div>
@@ -344,7 +345,7 @@ function AgentDetail({
               INTEGRATIONS
             </span>
             <div className="flex items-center gap-2 flex-wrap mt-1.5">
-              {agent.mcpServers.map((name) => (
+              {agent.mcpServers.map((name: string) => (
                 <span
                   key={name}
                   className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium ${
@@ -397,7 +398,7 @@ function AgentDetail({
           )
         ) : (
           <div className="space-y-0">
-            {logs.map((log, i) => (
+            {logs.map((log: any, i: number) => (
               <TimelineRow
                 key={log._id}
                 log={log as any}
@@ -487,7 +488,7 @@ function TimelineRow({
   isLast,
   isDark,
 }: {
-  log: { logType: string; toolName?: string; content: string };
+  log: { logType: string; toolName?: string; accounts?: string[]; content: string };
   isLast: boolean;
   isDark: boolean;
 }) {
@@ -550,6 +551,18 @@ function TimelineRow({
               }`}
             >
               {prettyToolName(log.toolName)}
+            </span>
+          )}
+          {isToolUse && log.accounts && log.accounts.length > 0 && (
+            <span
+              className={`text-[10px] mono px-1.5 py-px rounded ${
+                isDark
+                  ? "bg-sky-500/10 text-sky-300/80 border border-sky-500/20"
+                  : "bg-sky-50 text-sky-700 border border-sky-200"
+              }`}
+              title="Composio account(s) targeted by this call"
+            >
+              {log.accounts.join(", ")}
             </span>
           )}
         </div>

@@ -58,6 +58,12 @@ function writeEnv(path: string, env: Record<string, string>): void {
   writeFileSync(path, out.trim() + "\n");
 }
 
+function cleanConvexUrlEnv(path: string): void {
+  const envContent = readFileSync(path, "utf8");
+  const updated = envContent.replace(/^VITE_CONVEX_URL=.*(\r?\n)?/gm, "");
+  writeFileSync(path, updated);
+}
+
 function banner(s: string) {
   console.log("\n" + "━".repeat(60));
   console.log("  " + s);
@@ -73,7 +79,14 @@ async function runConvexDev(): Promise<void> {
     ? ["convex", "dev", "--once"]
     : ["convex", "dev", "--once", "--configure", "new"];
 
-  console.log(`\nLaunching \`npx ${args.join(" ")}\` to configure your deployment.`);
+  if (!existing.CONVEX_DEPLOYMENT) {
+    // Remove VITE_CONVEX_URL from the env file to allow convex cli to populate it.
+    cleanConvexUrlEnv(ENV_PATH);
+  }
+
+  console.log(
+    `\nLaunching \`npx ${args.join(" ")}\` to configure your deployment.`,
+  );
   console.log("Convex will open a browser window if you're not logged in.");
   if (existing.CONVEX_DEPLOYMENT) {
     console.log(`Reusing existing deployment: ${existing.CONVEX_DEPLOYMENT}`);
@@ -310,17 +323,14 @@ async function main() {
   console.log(`
 What this does:
   1. Pulls your Sendblue keys (via their CLI, or you paste them)
-  2. Asks which AI provider to use (Claude or OpenAI Codex)
-  3. Asks about your model preference
-  4. Runs \`npx convex dev\` to create a Convex project
-  5. Writes .env.local
+  2. Asks which AI provider/model to use
+  3. Runs \`npx convex dev\` to create a Convex project
+  4. Writes .env.local
 
 Before you start:
-  • One of the following AI subscriptions:
-      – Claude Code subscription:  https://claude.com/code  (default, no API key needed)
-      – OpenAI API key:            https://platform.openai.com/api-keys
+  • Claude Code or Codex login
   • Convex account (free tier):    https://convex.dev
-  • Sendblue (free on agent plan): https://sendblue.co
+  • Sendblue (free on agent plan): https://sendblue.com
 `);
 
   const existing = readEnv(ENV_PATH);
@@ -364,30 +374,32 @@ Before you start:
       ...sendbluePrompts,
       {
         type: "select",
-        name: "BOOP_PROVIDER",
-        message: "Which AI provider do you want to use?",
+        name: "AI_PROVIDER",
+        message: "Which AI provider should Boop use?",
         choices: [
-          {
-            title: "Claude (uses Claude Code subscription — no API key needed)",
-            value: "claude",
-          },
-          {
-            title: "OpenAI Codex (requires an OpenAI API key)",
-            value: "openai",
-          },
+          { title: "Anthropic Claude Agent SDK", value: "anthropic" },
+          { title: "OpenAI Codex SDK", value: "codex" },
         ],
-        initial: existing.BOOP_PROVIDER === "openai" ? 1 : 0,
+        initial: existing.AI_PROVIDER === "codex" ? 1 : 0,
       },
       {
-        type: (prev: string) => (prev === "claude" ? "select" : null),
+        type: "select",
         name: "BOOP_MODEL",
         message: "Which Claude model should the agent use?",
+        skip: (_prev: unknown, values: any) => values.AI_PROVIDER === "codex",
         choices: [
           { title: "claude-sonnet-4-6 (recommended)", value: "claude-sonnet-4-6" },
           { title: "claude-opus-4-6 (slowest, most capable)", value: "claude-opus-4-6" },
           { title: "claude-haiku-4-5 (fastest, cheapest)", value: "claude-haiku-4-5" },
         ],
         initial: 0,
+      },
+      {
+        type: "text",
+        name: "CODEX_MODEL",
+        message: "Which Codex model should the agent use?",
+        skip: (_prev: unknown, values: any) => values.AI_PROVIDER !== "codex",
+        initial: existing.CODEX_MODEL ?? "gpt-5.3-codex",
       },
       {
         type: "text",
@@ -409,38 +421,6 @@ Before you start:
       },
     },
   );
-
-  // ---- OpenAI model selection (only when provider is openai) ---------------
-  if (answers.BOOP_PROVIDER === "openai") {
-    const { OPENAI_MODEL } = await prompts(
-      {
-        type: "select",
-        name: "OPENAI_MODEL",
-        message: "Which OpenAI model should the agent use?",
-        choices: [
-          {
-            title: "codex-mini-latest (recommended for coding tasks)",
-            value: "codex-mini-latest",
-          },
-          { title: "gpt-4.1 (general purpose)", value: "gpt-4.1" },
-          { title: "gpt-4.1-mini (fast and cheap)", value: "gpt-4.1-mini" },
-          { title: "o4-mini (advanced reasoning)", value: "o4-mini" },
-        ],
-        initial: (() => {
-          const cur = existing.OPENAI_MODEL ?? "codex-mini-latest";
-          const idx = ["codex-mini-latest", "gpt-4.1", "gpt-4.1-mini", "o4-mini"].indexOf(cur);
-          return idx >= 0 ? idx : 0;
-        })(),
-      },
-      {
-        onCancel: () => {
-          console.log("Setup cancelled.");
-          process.exit(1);
-        },
-      },
-    );
-    (answers as any).OPENAI_MODEL = OPENAI_MODEL ?? existing.OPENAI_MODEL ?? "codex-mini-latest";
-  }
 
   // Merge CLI-sourced defaults with what the user answered (answer wins).
   Object.assign(answers, {
@@ -506,53 +486,6 @@ Before you start:
     console.log(
       `\nSkipped. Add COMPOSIO_API_KEY to .env.local later to enable integrations.`,
     );
-  }
-
-  // ---- OpenAI API key (only when provider is openai) -------------------------
-  if (answers.BOOP_PROVIDER === "openai") {
-    banner("OpenAI API key");
-    const existingOpenAI = existing.OPENAI_API_KEY ?? "";
-    const { openaiKeyMode } = await prompts(
-      {
-        type: "select",
-        name: "openaiKeyMode",
-        message: existingOpenAI
-          ? "OpenAI API key detected. Keep it or replace?"
-          : "Paste your OpenAI API key (from https://platform.openai.com/api-keys)",
-        choices: existingOpenAI
-          ? [
-              { title: "Keep existing key", value: "keep" },
-              { title: "Replace", value: "replace" },
-            ]
-          : [{ title: "Paste key now", value: "replace" }],
-        initial: 0,
-      },
-      {
-        onCancel: () => {
-          console.log("Setup cancelled.");
-          process.exit(1);
-        },
-      },
-    );
-    if (openaiKeyMode === "replace") {
-      const { OPENAI_API_KEY } = await prompts(
-        {
-          type: "password",
-          name: "OPENAI_API_KEY",
-          message: "OpenAI API key (starts with sk-):",
-          initial: "",
-        },
-        {
-          onCancel: () => {
-            console.log("Setup cancelled.");
-            process.exit(1);
-          },
-        },
-      );
-      (answers as any).OPENAI_API_KEY = OPENAI_API_KEY || existingOpenAI;
-    } else {
-      (answers as any).OPENAI_API_KEY = existingOpenAI;
-    }
   }
 
   // ---- Tunnel configuration ------------------------------------------------
@@ -623,13 +556,15 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
   if (env.VITE_CONVEX_URL?.includes("example.convex.cloud")) delete env.VITE_CONVEX_URL;
   writeEnv(ENV_PATH, env);
 
-  banner(answers.BOOP_PROVIDER === "openai" ? "OpenAI Codex setup" : "Claude authentication");
-  if (answers.BOOP_PROVIDER === "openai") {
-    console.log(`Your OpenAI API key has been saved to .env.local.
+  banner(answers.AI_PROVIDER === "codex" ? "Codex authentication" : "Claude authentication");
+  if (answers.AI_PROVIDER === "codex") {
+    console.log(`This project uses your local Codex login/session — no OpenAI API key needed.
 
-The agent will use model: ${(answers as any).OPENAI_MODEL ?? "codex-mini-latest"}
+If you haven't already:
+  • Install Codex CLI
+  • Sign in once
 
-To switch back to Claude at any time, set BOOP_PROVIDER=claude in .env.local.
+The Codex SDK reads the credentials Codex saves on disk.
 `);
   } else {
     console.log(`This project uses your Claude Code subscription — no Anthropic API key needed.
@@ -648,11 +583,16 @@ You can override with ANTHROPIC_API_KEY in .env.local if you'd rather use an API
     await runConvexDev();
     const after = readEnv(ENV_PATH);
 
-    // CONVEX_DEPLOYMENT is what `convex dev` writes; derive CONVEX_URL from it
-    // so it matches even if a stale URL lingered from a previous setup.
-    const deploymentMatch = after.CONVEX_DEPLOYMENT?.match(/^([a-z]+):([\w-]+)/);
+    // CONVEX_URL or VITE_CONVEX_URL is written to .env.local as part of `convex dev`; derive CONVEX_URL from it
+    // if not available, fallback to deriving from CONVEX_DEPLOYMENT.
+    const deploymentMatch =
+      after.CONVEX_DEPLOYMENT?.match(/^([a-z]+):([\w-]+)/);
+
     if (deploymentMatch) {
-      const url = `https://${deploymentMatch[2]}.convex.cloud`;
+      const url =
+        after.CONVEX_URL ||
+        after.VITE_CONVEX_URL ||
+        `https://${deploymentMatch[2]}.convex.cloud`;
       if (after.CONVEX_URL !== url || after.VITE_CONVEX_URL !== url) {
         writeEnv(ENV_PATH, {
           ...after,

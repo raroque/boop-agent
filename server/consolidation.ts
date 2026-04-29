@@ -1,8 +1,9 @@
-import { query } from "./providers/index.js";
+import { query } from "./llm/index.js";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { broadcast } from "./broadcast.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
+import { defaultAdversaryModel, defaultModel } from "./llm/model.js";
 
 function randomId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -97,8 +98,8 @@ interface Challenge {
   severity: "low" | "medium" | "high";
 }
 
-const ADVERSARY_MODEL = process.env.BOOP_ADVERSARY_MODEL ?? "claude-haiku-4-5";
-const DEFAULT_MODEL = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
+const ADVERSARY_MODEL = defaultAdversaryModel();
+const DEFAULT_MODEL = defaultModel();
 
 interface Decision {
   proposalIndex: number;
@@ -115,7 +116,7 @@ interface Applied {
 async function runLlm(
   systemPrompt: string,
   userPrompt: string,
-  model: string = DEFAULT_MODEL,
+  model: string | undefined = DEFAULT_MODEL,
 ): Promise<{ buffer: string; usage: UsageTotals; durationMs: number }> {
   const started = Date.now();
   let buffer = "";
@@ -198,7 +199,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
     }
 
     const payload = memories
-      .map((m) => {
+      .map((m: any) => {
         const ageDays = Math.round((Date.now() - m.createdAt) / 86400000);
         const prefix = `- [${m.memoryId}] (${m.tier}/${m.segment} i=${m.importance.toFixed(2)} age=${ageDays}d)`;
         // Surface correction metadata inline so the LLM sees what was being
@@ -321,7 +322,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
       const p = proposals[i];
       try {
         if (p.type === "merge" && p.keep && p.absorb?.length && p.rewriteContent) {
-          const keep = memories.find((m) => m.memoryId === p.keep);
+          const keep = memories.find((m: any) => m.memoryId === p.keep);
           if (!keep) continue;
           await convex.mutation(api.memoryRecords.upsert, {
             memoryId: keep.memoryId,
@@ -339,7 +340,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
             summary: `merged ${p.absorb.length} into ${p.keep}`,
           });
         } else if (p.type === "supersede" && p.newer && p.older?.length) {
-          const newer = memories.find((m) => m.memoryId === p.newer);
+          const newer = memories.find((m: any) => m.memoryId === p.newer);
           if (!newer) continue;
           await convex.mutation(api.memoryRecords.upsert, {
             memoryId: newer.memoryId,

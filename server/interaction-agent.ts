@@ -1,4 +1,4 @@
-import { query, tool, createSdkMcpServer } from "./providers/index.js";
+import { query, tool, createSdkMcpServer } from "./llm/index.js";
 import { z } from "zod";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
@@ -7,6 +7,8 @@ import { extractAndStore } from "./memory/extract.js";
 import { availableIntegrations, spawnExecutionAgent } from "./execution-agent.js";
 import { createAutomationMcp } from "./automation-tools.js";
 import { createDraftDecisionMcp } from "./draft-tools.js";
+import { createSelfMcp } from "./self-tools.js";
+import { getRuntimeModel } from "./runtime-config.js";
 import { broadcast } from "./broadcast.js";
 import { sendImessage } from "./sendblue.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
@@ -26,6 +28,7 @@ Your only tools:
 - spawn_agent (dispatches a sub-agent that CAN touch the world)
 - create_automation / list_automations / toggle_automation / delete_automation
 - list_drafts / send_draft / reject_draft
+- get_config / set_model / list_integrations / search_composio_catalog / inspect_toolkit (self-inspection)
 
 You cannot answer factual questions from your own knowledge. Not allowed.
 You have NO browser, NO WebSearch, NO WebFetch, NO file access, NO APIs.
@@ -85,6 +88,24 @@ Drafts:
 - When the user cancels or revises, call reject_draft.
 - Never claim something was sent unless send_draft returned success.
 
+Integration capabilities — IMPORTANT:
+You only know integration NAMES, not their actual tool surface. Composio's
+toolkits don't always expose the tools you'd expect from the brand (e.g. the
+LinkedIn toolkit has no inbox/DM tools). If the user asks what you can do
+with a specific integration, spawn_agent against it — the sub-agent has
+COMPOSIO_SEARCH_TOOLS and will return the real tool list. Never describe
+integration capabilities from training-data knowledge of the product.
+
+Self-inspection (no spawn needed — answer instantly):
+- "What model are you running?" → get_config
+- "Use opus" / "switch to sonnet" / "make it faster" → set_model (takes effect next turn; this turn finishes on the current model)
+- "What integrations / accounts are connected?" / "Which Gmail account?" → list_integrations
+- "Is there a tool for X?" / "Can you connect to Y?" → search_composio_catalog
+- "Is Slack connected?" / "What tools does Notion expose?" → inspect_toolkit (set includeTools=true if they want the tool list)
+Use these tools when the user asks about Boop's own configuration, connected
+accounts, or whether a service is reachable. They're cheap and synchronous —
+no ack required.
+
 Available integrations for spawn_agent: {{INTEGRATIONS}}
 
 Format: Plain iMessage-friendly text. Markdown sparingly. Keep replies under ~400 chars when you can.`;
@@ -115,6 +136,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const memoryServer = createMemoryMcp(opts.conversationId);
   const automationServer = createAutomationMcp(opts.conversationId);
   const draftDecisionServer = createDraftDecisionMcp(opts.conversationId);
+  const selfServer = createSelfMcp();
 
   const ackServer = createSdkMcpServer({
     name: "boop-ack",
@@ -198,7 +220,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   });
   const historyBlock = history
     .slice(0, -1)
-    .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+    .map((m: any) => `${m.role.toUpperCase()}: ${m.content}`)
     .join("\n");
 
   const systemPrompt = INTERACTION_SYSTEM.replace(
@@ -214,7 +236,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const log = (msg: string) => console.log(`[turn ${tag}] ${msg}`);
 
   const turnStart = Date.now();
-  const requestedModel = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
+  const requestedModel = await getRuntimeModel();
   let reply = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
   try {
@@ -222,13 +244,14 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
       prompt,
       options: {
         systemPrompt,
-        model: process.env.BOOP_MODEL ?? "claude-sonnet-4-6",
+        model: requestedModel,
         mcpServers: {
           "boop-memory": memoryServer,
           "boop-spawn": spawnServer,
           "boop-automations": automationServer,
           "boop-draft-decisions": draftDecisionServer,
           "boop-ack": ackServer,
+          "boop-self": selfServer,
         },
         allowedTools: [
           "mcp__boop-memory__write_memory",
@@ -242,6 +265,11 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           "mcp__boop-draft-decisions__send_draft",
           "mcp__boop-draft-decisions__reject_draft",
           "mcp__boop-ack__send_ack",
+          "mcp__boop-self__get_config",
+          "mcp__boop-self__set_model",
+          "mcp__boop-self__list_integrations",
+          "mcp__boop-self__search_composio_catalog",
+          "mcp__boop-self__inspect_toolkit",
         ],
         // Belt-and-suspenders: even with bypassPermissions the SDK can leak
         // its built-ins if we only whitelist. Explicitly block them on the

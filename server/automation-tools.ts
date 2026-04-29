@@ -1,4 +1,4 @@
-import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "./llm/index.js";
 import { z } from "zod";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
@@ -91,12 +91,12 @@ Integrations available: ${integrationHint}`,
           const all = await convex.query(api.automations.list, {
             enabledOnly: args.enabledOnly,
           });
-          const mine = all.filter((a) => a.conversationId === conversationId);
+          const mine = all.filter((a: any) => a.conversationId === conversationId);
           if (mine.length === 0) {
             return { content: [{ type: "text" as const, text: "No automations." }] };
           }
           const lines = mine.map(
-            (a) =>
+            (a: any) =>
               `• [${a.automationId}] ${a.enabled ? "●" : "○"} "${a.name}" — ${a.schedule} — ${a.task}`,
           );
           return { content: [{ type: "text" as const, text: lines.join("\n") }] };

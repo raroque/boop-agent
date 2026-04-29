@@ -65,6 +65,7 @@ export const addLog = mutation({
       v.literal("error"),
     ),
     toolName: v.optional(v.string()),
+    accounts: v.optional(v.array(v.string())),
     content: v.string(),
   },
   handler: async (ctx, args) => {

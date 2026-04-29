@@ -1,10 +1,4 @@
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { BoopMessage } from "./providers/types.js";
-
-/** Union of all result message shapes we can receive from any provider. */
-type AnyResultMessage =
-  | Extract<SDKMessage, { type: "result" }>
-  | Extract<BoopMessage, { type: "result" }>;
+import type { SDKMessage } from "./llm/index.js";
 
 export interface UsageTotals {
   /** Name of the model that consumed the most tokens. */
@@ -41,7 +35,7 @@ export const EMPTY_USAGE: UsageTotals = {
  * but often misleading.
  */
 export function aggregateUsageFromResult(
-  msg: AnyResultMessage,
+  msg: Extract<SDKMessage, { type: "result" }>,
   requestedModel?: string,
 ): UsageTotals {
   const modelUsage = (msg as { modelUsage?: Record<string, {

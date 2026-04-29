@@ -1,4 +1,4 @@
-import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { tool, createSdkMcpServer } from "./llm/index.js";
 import { z } from "zod";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
@@ -73,7 +73,7 @@ export function createDraftDecisionMcp(conversationId: string) {
             return { content: [{ type: "text" as const, text: "No pending drafts." }] };
           }
           const body = drafts
-            .map((d) => `• [${d.draftId}] (${d.kind}) ${d.summary}`)
+            .map((d: any) => `• [${d.draftId}] (${d.kind}) ${d.summary}`)
             .join("\n");
           return { content: [{ type: "text" as const, text: body }] };
         },
