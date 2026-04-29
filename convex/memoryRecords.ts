@@ -89,6 +89,22 @@ export const getByIds = query({
   },
 });
 
+export const getByMemoryIds = query({
+  args: { memoryIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const uniqueIds = [...new Set(args.memoryIds)].slice(0, 100);
+    const out = [];
+    for (const memoryId of uniqueIds) {
+      const record = await ctx.db
+        .query("memoryRecords")
+        .withIndex("by_memory_id", (q) => q.eq("memoryId", memoryId))
+        .unique();
+      if (record) out.push(record);
+    }
+    return out;
+  },
+});
+
 export const vectorSearch = action({
   args: { embedding: v.array(v.float64()), limit: v.optional(v.number()) },
   handler: async (ctx, args): Promise<Array<{ _id: Id<"memoryRecords">; score: number; record: any }>> => {
