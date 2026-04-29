@@ -55,3 +55,25 @@ export const recent = query({
     return msgs.reverse();
   },
 });
+
+export const remove = mutation({
+  args: { messageId: v.id("messages") },
+  handler: async (ctx, args) => {
+    const message = await ctx.db.get(args.messageId);
+    if (!message) return false;
+
+    await ctx.db.delete(args.messageId);
+
+    const conv = await ctx.db
+      .query("conversations")
+      .withIndex("by_conversation", (q) => q.eq("conversationId", message.conversationId))
+      .unique();
+    if (conv) {
+      await ctx.db.patch(conv._id, {
+        messageCount: Math.max(0, conv.messageCount - 1),
+      });
+    }
+
+    return true;
+  },
+});

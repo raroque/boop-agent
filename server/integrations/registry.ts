@@ -1,10 +1,42 @@
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import type { RuntimeTool } from "../runtimes/types.js";
 
 export interface IntegrationModule {
   name: string;
   description: string;
   requiredEnv?: string[];
   createServer: (ctx: IntegrationContext) => Promise<McpSdkServerConfigWithInstance>;
+  createTools?: (ctx: IntegrationContext) => Promise<RuntimeTool[]>;
+}
+
+export async function buildRuntimeToolsForIntegrations(
+  names: string[],
+  conversationId?: string,
+): Promise<RuntimeTool[]> {
+  const ctx = makeContext(conversationId);
+  const out: RuntimeTool[] = [];
+  const failures: string[] = [];
+  for (const name of names) {
+    const mod = registry.get(name);
+    if (!mod) {
+      failures.push(`${name}: unknown integration`);
+      continue;
+    }
+    if (!mod.createTools) {
+      failures.push(`${name}: does not expose runtime-neutral tools`);
+      continue;
+    }
+    try {
+      out.push(...(await mod.createTools(ctx)));
+    } catch (err) {
+      console.error(`[integrations] failed to build runtime tools for ${name}`, err);
+      failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`Failed to load integration tools: ${failures.join("; ")}`);
+  }
+  return out;
 }
 
 export interface IntegrationContext {
@@ -49,17 +81,22 @@ export async function buildMcpServersForIntegrations(
 ): Promise<Record<string, McpSdkServerConfigWithInstance>> {
   const ctx = makeContext(conversationId);
   const out: Record<string, McpSdkServerConfigWithInstance> = {};
+  const failures: string[] = [];
   for (const name of names) {
     const mod = registry.get(name);
     if (!mod) {
-      console.warn(`[integrations] unknown integration: ${name}`);
+      failures.push(`${name}: unknown integration`);
       continue;
     }
     try {
       out[name] = await mod.createServer(ctx);
     } catch (err) {
       console.error(`[integrations] failed to build ${name}`, err);
+      failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+  if (failures.length > 0) {
+    throw new Error(`Failed to load integration servers: ${failures.join("; ")}`);
   }
   return out;
 }

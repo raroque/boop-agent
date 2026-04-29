@@ -1,7 +1,11 @@
 import { Composio } from "@composio/core";
 import { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
 import { createSdkMcpServer, type McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import type { IntegrationModule } from "./integrations/registry.js";
+import type { RuntimeTool } from "./runtimes/types.js";
+import { runtimeText } from "./runtimes/types.js";
+import { formatError } from "./error-format.js";
 
 export type ToolkitAuthMode = "managed" | "byo";
 
@@ -547,6 +551,46 @@ export function buildComposioIntegrationModule(slug: string): IntegrationModule 
         name: slug,
         version: "0.1.0",
         tools,
+      });
+    },
+    createTools: async (): Promise<RuntimeTool[]> => {
+      const composio = getComposio();
+      if (!composio) {
+        throw new Error(`[composio] cannot build ${slug} tools - COMPOSIO_API_KEY not set`);
+      }
+      const rawTools = await composio.tools.getRawComposioTools({
+        toolkits: [slug],
+        limit: 500,
+      });
+      return rawTools.map((rawTool: any) => {
+        const toolName = String(rawTool.slug ?? rawTool.name);
+        return {
+          namespace: slug,
+          name: toolName,
+          description: String(rawTool.description ?? rawTool.name ?? toolName),
+          zodSchema: z.record(z.unknown()).optional() as unknown as Record<string, z.ZodTypeAny>,
+          jsonSchema:
+            rawTool.inputParameters ??
+            rawTool.parameters ??
+            rawTool.input_schema ??
+            rawTool.schema ?? {
+              type: "object",
+              properties: {},
+              additionalProperties: true,
+          },
+          handle: async (args: Record<string, unknown>) => {
+            try {
+              const result = await composio.tools.execute(toolName, {
+                userId: boopUserId(),
+                arguments: args,
+                dangerouslySkipVersionCheck: true,
+              });
+              return runtimeText(JSON.stringify(result, null, 2), Boolean(result?.successful ?? true));
+            } catch (err) {
+              return runtimeText(formatError(err), false);
+            }
+          },
+        };
       });
     },
   };

@@ -16,6 +16,9 @@ export const create = mutation({
     name: v.string(),
     task: v.string(),
     mcpServers: v.array(v.string()),
+    runtime: v.optional(v.string()),
+    model: v.optional(v.string()),
+    reasoningEffort: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("executionAgents", {
@@ -35,6 +38,9 @@ export const update = mutation({
     status: v.optional(statusV),
     result: v.optional(v.string()),
     error: v.optional(v.string()),
+    runtime: v.optional(v.string()),
+    model: v.optional(v.string()),
+    reasoningEffort: v.optional(v.string()),
     inputTokens: v.optional(v.number()),
     outputTokens: v.optional(v.number()),
     cacheReadTokens: v.optional(v.number()),
@@ -67,9 +73,10 @@ export const addLog = mutation({
     toolName: v.optional(v.string()),
     accounts: v.optional(v.array(v.string())),
     content: v.string(),
+    createdAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    return await ctx.db.insert("agentLogs", { ...args, createdAt: Date.now() });
+    return await ctx.db.insert("agentLogs", { ...args, createdAt: args.createdAt ?? Date.now() });
   },
 });
 
@@ -106,5 +113,25 @@ export const getLogs = query({
       .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
       .order("asc")
       .take(args.limit ?? 500);
+  },
+});
+
+export const relatedRuns = query({
+  args: { agentId: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const agent = await ctx.db
+      .query("executionAgents")
+      .withIndex("by_agent_id", (q) => q.eq("agentId", args.agentId))
+      .unique();
+    if (!agent) return [];
+
+    const limit = args.limit ?? 12;
+    const recent = await ctx.db.query("executionAgents").order("desc").take(200);
+    return recent
+      .filter((run) => {
+        if (run.agentId === agent.agentId) return false;
+        return run.name === agent.name && run.task === agent.task;
+      })
+      .slice(0, limit);
   },
 });

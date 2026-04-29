@@ -163,11 +163,6 @@ export function createSendblueRouter(): express.Router {
           `[turn ${turnTag}] → reply (${elapsed}s, ${reply.length} chars): ${JSON.stringify(replyPreview)}`,
         );
         await sendImessage(from_number, reply);
-        await convex.mutation(api.messages.send, {
-          conversationId,
-          role: "assistant",
-          content: reply,
-        });
       } else {
         console.log(`[turn ${turnTag}] → (no reply)`);
       }
