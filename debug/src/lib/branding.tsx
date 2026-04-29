@@ -7,6 +7,10 @@ type ToolBrand = {
   displayName: string;
   domain: string;
   aliases: string[];
+  // Override the favicon-by-domain icon with a local asset URL when the brand's
+  // canonical favicon doesn't actually depict the product (e.g. "browser" wants
+  // the Chrome browser pinwheel, not the Chrome Web Store logo).
+  assetUrl?: string;
 };
 
 const TOOL_BRANDS: ToolBrand[] = [
@@ -59,6 +63,13 @@ const TOOL_BRANDS: ToolBrand[] = [
   { key: "supabase", displayName: "Supabase", domain: "supabase.com", aliases: ["supabase"] },
   { key: "granola", displayName: "Granola", domain: "granola.ai", aliases: ["granola", "granola_mcp"] },
   { key: "imessage", displayName: "iMessage", domain: "apple.com", aliases: ["imessage", "messages"] },
+  {
+    key: "browser",
+    displayName: "Browser",
+    domain: "google.com/chrome",
+    aliases: ["browser"],
+    assetUrl: "/chrome-logo.svg",
+  },
 ];
 
 function normalize(value: string): string {
@@ -204,8 +215,15 @@ export function IntegrationLogo({
   const radius = Math.max(4, Math.round(size * 0.28));
   const iconSize = Math.max(12, Math.round(size * 0.72));
 
-  // Prefer an explicit URL (e.g. Composio's branded toolkit logo) over favicon-by-domain.
-  const imgSrc = !failed && logoUrl ? logoUrl : !failed && brand ? faviconUrl(brand.domain) : null;
+  // Source priority:
+  //   1. Brand asset override (a curated local file for brands whose favicon
+  //      doesn't depict the product — e.g. "browser" → Chrome pinwheel, not
+  //      Chrome Web Store logo).
+  //   2. Explicit URL passed in (Composio's branded toolkit logo).
+  //   3. Favicon-by-domain fallback.
+  const imgSrc = !failed
+    ? (brand?.assetUrl ?? logoUrl ?? (brand ? faviconUrl(brand.domain) : null))
+    : null;
 
   if (imgSrc) {
     return (

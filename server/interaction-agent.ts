@@ -43,16 +43,46 @@ spawn_agent. No exceptions. Even if you're 99% sure. The sub-agent has
 WebSearch/WebFetch and will return real citations; you don't and won't.
 
 Acknowledgment rule (iMessage UX):
-BEFORE every spawn_agent call, you MUST call send_ack first with a short
+BEFORE any spawn_agent call(s), you MUST call send_ack first with a short
 1-sentence message. The user otherwise sees nothing for 10-30 seconds while
 the sub-agent works. Examples of good acks:
   "On it — one sec 🔍"
   "Looking into your calendar…"
   "Drafting that email now."
   "Checking Slack, hold tight."
-Order: send_ack → spawn_agent → (wait) → final reply with the result.
+Order: send_ack → spawn_agent(s) → (wait) → final reply with the result(s).
+ONE ack covers multiple parallel spawns — don't ack each one separately.
 Skip the ack ONLY for things you'll answer in under 2 seconds (chit-chat,
 simple memory recall, single automation toggle).
+
+Parallel spawning:
+When the user's request decomposes into independent sub-tasks (e.g. "check
+my gmail unreads AND summarize today's calendar", or "draft the email and
+also find me 3 restaurants nearby"), emit MULTIPLE spawn_agent tool_use
+blocks in the SAME assistant turn. They run concurrently and you'll see
+all results before your next turn. This is much faster than chaining
+sequential spawns. Rules:
+  - Only fan out for genuinely independent tasks. If task B needs task A's
+    result, do them sequentially.
+  - Send ONE send_ack first, then all the spawns in the same turn.
+  - When relaying, combine the results in one reply — don't make the user
+    read N separate messages.
+
+Resolving references ("it", "her", "this", "the flight", "send it"):
+The user texts in shorthand. Before spawning, resolve the referent from
+visible conversation history and bake the concrete noun into the spawn
+task — never pass the user's pronoun through. "Forward her the flight
+details" should become a task that names WHICH flight (e.g. "the SFO
+itinerary May 1–7 we found earlier"), not "the most recent flight email."
+"Most recent X" is NOT a safe default for ambiguous references.
+- If two recent topics could match, or the referent isn't in your visible
+  history at all, ASK the user one short clarifying question instead of
+  guessing.
+- If the referent might be a saved fact (a person, a project, an account),
+  call recall() first.
+- Topic hops (the user wandered to YouTube/Twitter/etc.) push earlier
+  context out of view — don't assume your visible history covers the whole
+  thread. When in doubt, ask.
 
 Memory:
 - Call recall() early for anything that might touch the user's preferences, projects, or history.
@@ -118,7 +148,35 @@ user once ("what timezone are you in?") and call set_timezone with their
 answer. Don't silently guess from city names mentioned in passing — confirm
 before saving.
 
+Choosing integrations for spawn_agent:
+- Pick the SPECIFIC native toolkit that matches the task (gmail for email,
+  calendar for events, slack for slack, etc.). Don't shotgun all of them.
+- The "browser" integration is a FALLBACK for sites/services with no native
+  toolkit. NEVER pass "browser" for a task a native toolkit can do — if the
+  user asks about Gmail, pass ["gmail"], NOT ["browser"] or ["gmail", "browser"].
+  Browser is for tasks like "log into my landlord's tenant portal and grab
+  this month's invoice" — sites we don't have a Composio toolkit for. The
+  sub-agent already runs in a logged-in Chrome profile via "browser".
+- If you're unsure whether a toolkit exists, prefer the toolkit name and let
+  the sub-agent fall back if it doesn't have the right tool surface.
+
 Available integrations for spawn_agent: {{INTEGRATIONS}}
+
+Pending continuation for this conversation: {{PENDING_CONTINUATION}}
+
+When pending continuation is non-null, a previous sub-agent paused mid-task
+and asked the user to do something by hand (login, OAuth, captcha, file
+pick). Decide based on the user's CURRENT message:
+- If their reply indicates they completed the action (any signal of
+  readiness — "done", "logged in", "ready", "ok", "yes", "now", "go", or
+  similar; OR they say nothing about cancelling and just push forward like
+  "what's the balance?"): IMMEDIATELY call spawn_agent with the saved
+  resume_task, the saved integrations, and a name like "resume". Do NOT
+  ask for clarification first — the user is waiting. Send_ack right before
+  if it'll take a while.
+- If they cancel, change topic, or say it didn't work: tell the user
+  briefly ("got it, dropping that"), call clear_pending_continuation, and
+  proceed normally with their new request.
 
 Format: Plain iMessage-friendly text. Markdown sparingly. Keep replies under ~400 chars when you can.`;
 
@@ -151,6 +209,10 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   broadcast(opts.kind === "proactive" ? "proactive_notice" : "user_message", {
     conversationId: opts.conversationId,
     content: opts.content,
+  });
+
+  const pendingContinuation = await convex.query(api.pendingContinuations.get, {
+    conversationId: opts.conversationId,
   });
 
   const memoryServer = createMemoryMcp(opts.conversationId);
@@ -203,13 +265,18 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     ],
   });
 
+  // Set by spawn_agent when a sub-agent paused for user action. The post-loop
+  // logic uses this to skip the "(no reply)" fallback so the user doesn't
+  // receive a placeholder message after the sub-agent already sent its own.
+  let dispatcherSilent = false;
+
   const spawnServer = createSdkMcpServer({
     name: "boop-spawn",
     version: "0.1.0",
     tools: [
       tool(
         "spawn_agent",
-        "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use for anything requiring lookups, drafting, or actions in the user's integrations.",
+        "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use for anything requiring lookups, drafting, or actions in the user's integrations. Multiple independent spawn_agent calls in one turn run in parallel — fan out when the request has independent sub-tasks instead of chaining serially.",
         {
           task: z
             .string()
@@ -226,6 +293,17 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
             conversationId: opts.conversationId,
             name: args.name,
           });
+          if (res.status === "paused") {
+            dispatcherSilent = true;
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `[agent ${res.agentId} PAUSED — waiting for user to complete a hand-action]\n\nThe sub-agent already messaged the user with what to do. DO NOT relay anything else for this turn — return an empty assistant message. Boop will re-spawn the agent when the user replies.`,
+                },
+              ],
+            };
+          }
           return {
             content: [
               {
@@ -241,17 +319,39 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
 
   const history = await convex.query(api.messages.recent, {
     conversationId: opts.conversationId,
-    limit: 10,
+    limit: 30,
   });
   const historyBlock = history
     .slice(0, -1)
     .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
     .join("\n");
 
+  const pendingServer = createSdkMcpServer({
+    name: "boop-pending",
+    version: "0.1.0",
+    tools: [
+      tool(
+        "clear_pending_continuation",
+        "Drop any pending continuation set by a paused sub-agent for THIS conversation. Call this when the user changes topic, cancels, or reports the hand-action didn't work — anything that means we shouldn't auto-resume the saved task. No-op when there's nothing pending.",
+        {},
+        async () => {
+          await convex.mutation(api.pendingContinuations.clear, {
+            conversationId: opts.conversationId,
+          });
+          return { content: [{ type: "text" as const, text: "Pending continuation cleared." }] };
+        },
+      ),
+    ],
+  });
+
+  const pendingDescription = pendingContinuation
+    ? `RESUME_TASK="${pendingContinuation.resumeTask.replace(/"/g, '\\"')}", INTEGRATIONS=[${pendingContinuation.integrations.join(", ")}], asked ${Math.round((Date.now() - pendingContinuation.askedAt) / 1000)}s ago by agent ${pendingContinuation.pausedByAgentId ?? "?"}`
+    : "(none)";
+
   const systemPrompt = INTERACTION_SYSTEM.replace(
     "{{INTEGRATIONS}}",
     integrations.join(", ") || "(no integrations configured yet)",
-  );
+  ).replace("{{PENDING_CONTINUATION}}", pendingDescription);
 
   const prompt = historyBlock
     ? `Prior turns:\n${historyBlock}\n\nCurrent message:\n${opts.content}`
@@ -277,6 +377,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           "boop-draft-decisions": draftDecisionServer,
           "boop-ack": ackServer,
           "boop-self": selfServer,
+          "boop-pending": pendingServer,
         },
         allowedTools: [
           "mcp__boop-memory__write_memory",
@@ -289,6 +390,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           "mcp__boop-draft-decisions__list_drafts",
           "mcp__boop-draft-decisions__send_draft",
           "mcp__boop-draft-decisions__reject_draft",
+          "mcp__boop-pending__clear_pending_continuation",
           "mcp__boop-ack__send_ack",
           "mcp__boop-self__get_config",
           "mcp__boop-self__set_model",
@@ -343,7 +445,11 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     reply = "Sorry — I hit an error processing that. Try again in a moment.";
   }
 
-  reply = reply.trim() || "(no reply)";
+  // When a sub-agent paused for user action it already sent its own message —
+  // don't fall back to the "(no reply)" placeholder, since that'd send a
+  // useless string to the user. Returning empty here makes the caller skip
+  // the iMessage send entirely.
+  reply = dispatcherSilent ? reply.trim() : reply.trim() || "(no reply)";
 
   if (usage.costUsd > 0 || usage.inputTokens > 0) {
     log(

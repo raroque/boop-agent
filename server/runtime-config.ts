@@ -58,3 +58,36 @@ export async function clearRuntimeModel(): Promise<void> {
   await convex.mutation(api.settings.clear, { key: MODEL_KEY });
   cached = null;
 }
+
+const BROWSER_HEADED_KEY = "browser_headed";
+const BROWSER_HEADED_TTL_MS = 30 * 1000;
+let browserHeadedCache: { at: number; value: boolean } | null = null;
+
+// Default headed: real visible Chrome window. Headless gets fingerprinted by
+// Cloudflare/Reddit/etc., so headed is the safer default. Override via the
+// debug UI toggle (writes to settings.browser_headed) or via the env var
+// AGENT_BROWSER_HEADED.
+const HEADED_DEFAULT = true;
+
+export async function getBrowserHeaded(): Promise<boolean> {
+  if (browserHeadedCache && Date.now() - browserHeadedCache.at < BROWSER_HEADED_TTL_MS) {
+    return browserHeadedCache.value;
+  }
+  let stored: string | null = null;
+  try {
+    stored = await convex.query(api.settings.get, { key: BROWSER_HEADED_KEY });
+  } catch (err) {
+    console.warn("[runtime-config] browser_headed:get failed", err);
+  }
+  let value = HEADED_DEFAULT;
+  if (stored === "true") value = true;
+  else if (stored === "false") value = false;
+  else if (process.env.AGENT_BROWSER_HEADED === "0") value = false;
+  else if (process.env.AGENT_BROWSER_HEADED === "1") value = true;
+  browserHeadedCache = { at: Date.now(), value };
+  return value;
+}
+
+export function invalidateBrowserHeadedCache(): void {
+  browserHeadedCache = null;
+}

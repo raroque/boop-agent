@@ -70,6 +70,7 @@ export default defineSchema({
       v.literal("completed"),
       v.literal("failed"),
       v.literal("cancelled"),
+      v.literal("paused"),
     ),
     result: v.optional(v.string()),
     error: v.optional(v.string()),
@@ -218,6 +219,33 @@ export default defineSchema({
     value: v.string(),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
+
+  // Per-conversation pause-and-resume slot. A sub-agent that hits a wall
+  // requiring hand-action (login, OAuth, captcha, file pick) writes here and
+  // ends its turn; the dispatcher picks this up on the next user message and
+  // re-spawns with the saved resume task. Only one pending continuation per
+  // conversation at a time.
+  pendingContinuations: defineTable({
+    conversationId: v.string(),
+    resumeTask: v.string(),
+    integrations: v.array(v.string()),
+    pausedByAgentId: v.optional(v.string()),
+    askedAt: v.number(),
+  }).index("by_conversation", ["conversationId"]),
+
+  // Cookie imports from the user's daily Chrome profile into boop's stealth
+  // Chrome. One row per (service, profile) — re-importing updates the same
+  // row. Identity is the Google email / handle we read off the source
+  // profile so the UI can show "Active as user@example.com".
+  cookieImports: defineTable({
+    service: v.string(),
+    sourceProfile: v.string(),
+    identity: v.optional(v.string()),
+    cookieCount: v.number(),
+    lastImportedAt: v.number(),
+    lastVerifiedAt: v.optional(v.number()),
+    verifiedOk: v.optional(v.boolean()),
+  }).index("by_service", ["service"]),
 
   automationRuns: defineTable({
     runId: v.string(),

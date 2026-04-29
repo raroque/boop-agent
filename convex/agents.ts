@@ -7,6 +7,7 @@ const statusV = v.union(
   v.literal("completed"),
   v.literal("failed"),
   v.literal("cancelled"),
+  v.literal("paused"),
 );
 
 export const create = mutation({
@@ -48,7 +49,7 @@ export const update = mutation({
       .withIndex("by_agent_id", (q) => q.eq("agentId", agentId))
       .unique();
     if (!agent) return null;
-    const completed = patch.status && ["completed", "failed", "cancelled"].includes(patch.status);
+    const completed = patch.status && ["completed", "failed", "cancelled", "paused"].includes(patch.status);
     await ctx.db.patch(agent._id, { ...patch, ...(completed ? { completedAt: Date.now() } : {}) });
     return agent._id;
   },

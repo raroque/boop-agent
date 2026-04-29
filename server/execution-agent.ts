@@ -4,6 +4,7 @@ import { convex } from "./convex-client.js";
 import { broadcast } from "./broadcast.js";
 import { buildMcpServersForIntegrations, listIntegrations } from "./integrations/registry.js";
 import { createDraftStagingMcp } from "./draft-tools.js";
+import { createPauseMcp } from "./pause-tools.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
 import { getRuntimeModel } from "./runtime-config.js";
 
@@ -54,6 +55,22 @@ Research discipline:
 - Cite real URLs only — NEVER invent sources. If a page failed to load, say so.
 - Cross-check when it matters: one search is rarely enough for a claim.
 
+Tool selection priority (read this carefully):
+1. Native Composio toolkit (gmail, calendar, slack, github, notion, linear, etc.) — ALWAYS first choice when one covers the task. They're structured, fast, and reliable.
+2. WebSearch / WebFetch — for public read-only info that doesn't require login.
+3. browser_* tools (the "browser" integration) — LAST RESORT. Use ONLY when:
+     • No Composio toolkit can do the job (e.g. a site that isn't connected), OR
+     • The task genuinely needs a real logged-in browser (a JS-heavy app, a visual layout question, scraping behind a login that has no API).
+   If a Gmail task lands in your kit and you have both gmail and browser, USE GMAIL. Do not open Gmail in the browser. Same for any other connected toolkit.
+   When you do use the browser: call browser_snapshot (cheap, returns refs) before browser_screenshot (expensive). Don't try to close the browser — the server reuses one shared Chrome across agents and manages its lifecycle.
+
+Pause for user (browser flows that need a sign-in):
+- If you open a site and hit a login/auth wall, OAuth screen, captcha, 2FA prompt, or any other roadblock that needs the human to do something by hand, do NOT give up and do NOT try to brute-force past it. Call pause_for_user with:
+    • message: a friendly 1-2 sentence prompt referencing the open Chrome window ("Opened Chase login — sign in via the Chrome window I just popped, then reply when ready.")
+    • resume_task: a complete, standalone task description for the fresh sub-agent that picks up after the user confirms ("The user has now logged into chase.com. Look up their current checking balance and report it.")
+- After calling pause_for_user, RETURN immediately with an empty reply. The dispatcher knows not to relay anything; the user already got your message. Boop re-spawns a fresh agent (with the same browser session — your tabs persist) when they reply.
+- ONLY use pause_for_user for genuine hand-action requirements. Don't use it for "I need clarification on the task" — work with what you have or ask in your normal reply.
+
 MANDATORY: for any task that used WebSearch or WebFetch, end your response with
 a "Sources:" section listing the ACTUAL URLs you fetched or found. Example:
 
@@ -86,7 +103,7 @@ export interface SpawnOptions {
 export interface SpawnResult {
   agentId: string;
   result: string;
-  status: "completed" | "failed" | "cancelled";
+  status: "completed" | "failed" | "cancelled" | "paused";
 }
 
 export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResult> {
@@ -118,13 +135,24 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   const integrationServers = await buildMcpServersForIntegrations(
     opts.integrations,
     opts.conversationId,
+    agentId,
   );
   const draftServer = opts.conversationId
     ? createDraftStagingMcp(opts.conversationId)
     : undefined;
+  const pausedFlag = { paused: false };
+  const pauseServer = opts.conversationId
+    ? createPauseMcp({
+        conversationId: opts.conversationId,
+        agentId,
+        integrations: opts.integrations,
+        pausedFlag,
+      })
+    : undefined;
   const mcpServers = {
     ...integrationServers,
     ...(draftServer ? { "boop-drafts": draftServer } : {}),
+    ...(pauseServer ? { "boop-pause": pauseServer } : {}),
   };
   const allowedTools = [
     "WebSearch",
@@ -135,7 +163,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
 
   let buffer = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
-  let status: "completed" | "failed" | "cancelled" = "completed";
+  let status: "completed" | "failed" | "cancelled" | "paused" = "completed";
   let errorMsg: string | undefined;
 
   const requestedModel = await getRuntimeModel();
@@ -209,6 +237,13 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
     });
   } finally {
     running.delete(agentId);
+  }
+
+  // pause_for_user wins over the natural "completed" status — the tool already
+  // sent the user a message and saved a continuation; the dispatcher should
+  // skip its normal relay and stay silent for this turn.
+  if (status === "completed" && pausedFlag.paused) {
+    status = "paused";
   }
 
   const elapsed = ((Date.now() - agentStart) / 1000).toFixed(1);
