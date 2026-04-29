@@ -96,6 +96,7 @@ function supportsReasoning(model: string): boolean {
 async function createResponse(
   apiKey: string,
   body: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<OpenAIResponse> {
   const response = await fetch(RESPONSES_URL, {
     method: "POST",
@@ -106,12 +107,19 @@ async function createResponse(
       ...(process.env.OPENAI_PROJECT_ID ? { "OpenAI-Project": process.env.OPENAI_PROJECT_ID } : {}),
     },
     body: JSON.stringify(body),
+    signal,
   });
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`OpenAI Responses API failed (${response.status}): ${text.slice(0, 1200)}`);
   }
   return (await response.json()) as OpenAIResponse;
+}
+
+function throwIfAborted(request: RuntimeRunRequest): void {
+  if (request.abortController?.signal.aborted) {
+    throw new Error("OpenAI runtime aborted");
+  }
 }
 
 export async function runOpenAIResponsesAgent(
@@ -139,6 +147,7 @@ export async function runOpenAIResponsesAgent(
   let usage = { ...EMPTY_RUNTIME_USAGE, model: request.model };
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    throwIfAborted(request);
     const response = await createResponse(apiKey, {
       model: request.model,
       instructions: request.systemPrompt,
@@ -148,7 +157,8 @@ export async function runOpenAIResponsesAgent(
         ? { reasoning: { effort: request.reasoningEffort } }
         : {}),
       ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
-    });
+    }, request.abortController?.signal);
+    throwIfAborted(request);
     previousResponseId = response.id;
     usage = addUsage(usage, usageFrom(response, request.model));
     await request.onUsage?.(usage);
@@ -166,6 +176,7 @@ export async function runOpenAIResponsesAgent(
 
     const outputs = [];
     for (const call of functionCalls) {
+      throwIfAborted(request);
       const mapping = mappingByName.get(String(call.name ?? ""));
       if (!mapping) {
         outputs.push({

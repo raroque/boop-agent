@@ -64,6 +64,15 @@ class CodexAppServerClient {
     this.currentAgentMessageText = "";
     this.usage = { ...EMPTY_RUNTIME_USAGE, model: request.model };
     this.child = spawnCodexAppServer();
+    const abortSignal = request.abortController?.signal;
+    const onAbort = () => {
+      const err = new Error("Codex runtime aborted");
+      for (const pending of this.pending.values()) pending.reject(err);
+      this.pending.clear();
+      this.turnCompletion?.reject(err);
+      void this.close();
+    };
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
     this.child.stdout.on("data", (chunk) => this.onStdout(chunk));
     this.child.stderr.on("data", (chunk) => {
       const text = chunk.toString().trim();
@@ -79,6 +88,9 @@ class CodexAppServerClient {
     });
 
     try {
+      if (abortSignal?.aborted) {
+        onAbort();
+      }
       await this.call("initialize", {
         clientInfo: { name: "boop-agent", title: "Boop Agent", version: "0.1.0" },
         capabilities: { experimentalApi: true },
@@ -122,6 +134,7 @@ class CodexAppServerClient {
       await turnWait;
       return { text: this.reply, usage: this.usage };
     } finally {
+      abortSignal?.removeEventListener("abort", onAbort);
       await this.close();
     }
   }
