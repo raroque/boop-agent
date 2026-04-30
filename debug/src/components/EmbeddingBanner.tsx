@@ -28,7 +28,10 @@ export function EmbeddingBanner({ isDark }: { isDark: boolean }) {
       if (!r.ok) throw new Error(`status ${r.status}`);
       const data = (await r.json()) as Status;
       setStatus(data);
-      if (data.running) setBusy(true);
+      // Trust the server: if it says nothing's running, clear busy. This is
+      // the recovery path when a WebSocket drop swallowed the "done" event
+      // and busy would otherwise stick at true forever, hiding the button.
+      setBusy(data.running);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     }
@@ -37,6 +40,17 @@ export function EmbeddingBanner({ isDark }: { isDark: boolean }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Belt-and-suspenders poll while busy so a dropped WebSocket eventually
+  // surfaces the server's "not running" state and clears busy. Stops as
+  // soon as busy flips false.
+  useEffect(() => {
+    if (!busy) return;
+    const interval = setInterval(() => {
+      void refresh();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [busy, refresh]);
 
   // Live progress + auto-refresh on completion. We intentionally do not
   // refresh on every "progress" event — the banner shows the running
@@ -128,7 +142,11 @@ export function EmbeddingBanner({ isDark }: { isDark: boolean }) {
               isDark ? "text-amber-300" : "text-amber-700"
             }`}
           >
-            {progress?.embedded ?? 0} / {status.withoutEmbedding}
+            {progress?.embedded ?? 0} /{" "}
+            {Math.max(
+              status.withoutEmbedding,
+              (progress?.embedded ?? 0) + (progress?.failed ?? 0),
+            )}
           </div>
         )}
       </div>
