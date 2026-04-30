@@ -390,9 +390,17 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   // call cycle where it lost the thread of what to say. Treat those as
   // empty so the user gets a real fallback they can act on.
   reply = reply.trim();
-  if (!reply || /^\(?\s*no (output|reply|response|content)\s*\)?\.?$/i.test(reply)) {
+  // Match "(no output)" / "no reply." / "(No Response)" etc. Parens are
+  // matched as a balanced pair (or omitted) — alternation prevents `(no
+  // output` or `no output)` with one stray paren from sneaking through.
+  const placeholder =
+    /^(?:\(\s*no (?:output|reply|response|content)\s*\)|no (?:output|reply|response|content))\.?$/i;
+  if (!reply || placeholder.test(reply)) {
     console.warn(`[turn ${tag}] empty/placeholder reply (${JSON.stringify(reply)}) — using fallback`);
-    reply = "Hmm — I'm not sure what to do with that. Could you say it a different way?";
+    // Frame as model-side hiccup, not user error — the placeholder fires
+    // when the model loses the thread mid-tool-call, the user's phrasing
+    // is fine.
+    reply = "Hmm — got tangled up there. Want to try that again?";
   }
 
   if (usage.costUsd > 0 || usage.inputTokens > 0) {
