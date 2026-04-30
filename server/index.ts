@@ -62,6 +62,12 @@ function hostHeader(req: express.Request | IncomingMessage): string {
   return host ?? "";
 }
 
+function headerValue(req: express.Request | IncomingMessage, name: string): string {
+  const value = req.headers[name.toLowerCase()];
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
+}
+
 function hostnameFromHost(host: string): string {
   const value = host.trim().toLowerCase();
   if (!value) return "";
@@ -72,28 +78,58 @@ function hostnameFromHost(host: string): string {
   return value.split(":")[0] ?? "";
 }
 
-function isLocalHostname(hostname: string): boolean {
+function normalizeHostname(hostname: string): string {
+  const value = hostname.trim().toLowerCase();
+  if (value.startsWith("[") && value.endsWith("]")) {
+    return value.slice(1, -1);
+  }
+  if (value.startsWith("::ffff:")) {
+    return value.slice("::ffff:".length);
+  }
+  return value;
+}
+
+function isLoopbackHostname(hostname: string, opts: { allowEmpty?: boolean } = {}): boolean {
+  const normalized = normalizeHostname(hostname);
   return (
-    hostname === "" ||
-    hostname === "localhost" ||
-    hostname === "::1" ||
-    hostname === "0.0.0.0" ||
-    hostname === "::ffff:127.0.0.1" ||
-    /^127(?:\.\d{1,3}){3}$/.test(hostname)
+    (opts.allowEmpty === true && normalized === "") ||
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === "0:0:0:0:0:0:0:1" ||
+    /^127(?:\.\d{1,3}){3}$/.test(normalized)
   );
 }
 
 function isLocalOrigin(origin: string): boolean {
   try {
     const url = new URL(origin);
-    return (url.protocol === "http:" || url.protocol === "https:") && isLocalHostname(url.hostname);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      isLoopbackHostname(url.hostname)
+    );
   } catch {
     return false;
   }
 }
 
+function remoteAddress(req: express.Request | IncomingMessage): string {
+  return req.socket.remoteAddress ?? "";
+}
+
+function forwardedAddress(req: express.Request | IncomingMessage): string {
+  const forwardedFor = headerValue(req, "x-forwarded-for");
+  return forwardedFor.split(",")[0]?.trim() ?? "";
+}
+
 function isPublicRequest(req: express.Request | IncomingMessage): boolean {
-  return !isLocalHostname(hostnameFromHost(hostHeader(req)));
+  const hostIsLocal = isLoopbackHostname(hostnameFromHost(hostHeader(req)), { allowEmpty: true });
+  const remoteIsLocal = isLoopbackHostname(remoteAddress(req));
+  const forwardedHost = headerValue(req, "x-forwarded-host");
+  const forwardedHostIsLocal =
+    !forwardedHost || isLoopbackHostname(hostnameFromHost(forwardedHost));
+  const forwardedFor = forwardedAddress(req);
+  const forwardedForIsLocal = !forwardedFor || isLoopbackHostname(forwardedFor);
+  return !(hostIsLocal && remoteIsLocal && forwardedHostIsLocal && forwardedForIsLocal);
 }
 
 function isPublicRouteAllowed(method: string | undefined, pathname: string): boolean {
