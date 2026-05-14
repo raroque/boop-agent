@@ -12,6 +12,7 @@ import { getRuntimeModel } from "./runtime-config.js";
 import { broadcast } from "./broadcast.js";
 import { sendImessage } from "./sendblue.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
+import { buildPromptWithImages, fetchStoredBytes } from "./images/content-blocks.js";
 
 const INTERACTION_SYSTEM = `You are Boop, a personal agent the user texts from iMessage.
 
@@ -162,6 +163,16 @@ before saving.
 
 Available integrations for spawn_agent: {{INTEGRATIONS}}
 
+Images:
+When the user texts a photo or screenshot, you'll see it directly as
+input — treat it as part of the message. Describe it, answer questions
+about it, or extract info from it the same way you'd handle text. If
+the user's request depends on the image AND requires a sub-agent (e.g.
+"search the web for this product I'm photographing"), pass the relevant
+storage IDs to spawn_agent's imageRefs parameter so the sub-agent can
+see the image too. If the user sends a photo with no caption, ask a
+short clarifying question rather than guessing what they want.
+
 Format: Plain iMessage-friendly text. Markdown sparingly. Keep replies under ~400 chars when you can.`;
 
 interface HandleOpts {
@@ -173,6 +184,8 @@ interface HandleOpts {
   // role=user, so the synthetic notice the IA receives doesn't pollute the
   // user-message history. Defaults to "user".
   kind?: "user" | "proactive";
+  images?: Array<{ storageId: string; mediaType: string }>;
+  mediaError?: string;
 }
 
 function randomId(prefix: string): string {
@@ -184,11 +197,18 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const integrations = availableIntegrations();
 
   const inboundRole = opts.kind === "proactive" ? "system" : "user";
+  const inboundImageStorageIds = (opts.images ?? []).map((i) => i.storageId);
+  const inboundImageStorageIdsForPrompt = inboundImageStorageIds;
   await convex.mutation(api.messages.send, {
     conversationId: opts.conversationId,
     role: inboundRole,
     content: opts.content,
     turnId,
+    // TODO(codegen): drop cast once schema push regenerates Convex API.
+    imageStorageIds: inboundImageStorageIds.length > 0
+      ? (inboundImageStorageIds as never)
+      : undefined,
+    mediaError: opts.mediaError,
   });
   broadcast(opts.kind === "proactive" ? "proactive_notice" : "user_message", {
     conversationId: opts.conversationId,
@@ -251,7 +271,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     tools: [
       tool(
         "spawn_agent",
-        "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use for anything requiring lookups, drafting, or actions in the user's integrations.",
+        "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use for anything requiring lookups, drafting, or actions in the user's integrations. If the current user message includes images and the sub-agent's task depends on them, pass the relevant storage IDs in imageRefs.",
         {
           task: z
             .string()
@@ -260,13 +280,27 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
             .array(z.string())
             .describe(`Which integrations to give the agent. Available: ${integrations.join(", ") || "(none)"}`),
           name: z.string().optional().describe("Short label for the agent."),
+          imageRefs: z
+            .array(z.string())
+            .optional()
+            .describe("Convex storage IDs from the user's current message. Available in this turn: " +
+              (inboundImageStorageIdsForPrompt.length > 0 ? inboundImageStorageIdsForPrompt.join(", ") : "(none)")),
         },
         async (args) => {
+          // Only forward storage IDs that were actually attached to the
+          // current inbound turn — guards against the dispatcher passing a
+          // hallucinated or stale ref, which would otherwise fail the
+          // spawn mid-run when fetchStoredBytes can't resolve it.
+          const allowedRefs = args.imageRefs?.filter((id) =>
+            inboundImageStorageIds.includes(id),
+          );
           const res = await spawnExecutionAgent({
             task: args.task,
             integrations: args.integrations,
             conversationId: opts.conversationId,
             name: args.name,
+            imageStorageIds:
+              allowedRefs && allowedRefs.length > 0 ? allowedRefs : undefined,
           });
           return {
             content: [
@@ -295,9 +329,30 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     integrations.join(", ") || "(no integrations configured yet)",
   );
 
-  const prompt = historyBlock
-    ? `Prior turns:\n${historyBlock}\n\nCurrent message:\n${opts.content}`
+  const userText = opts.mediaError
+    ? `[user sent images but they couldn't be downloaded: ${opts.mediaError}]\n${opts.content}`
     : opts.content;
+  const promptBlocks = await buildPromptWithImages({
+    text: historyBlock
+      ? `Prior turns:\n${historyBlock}\n\nCurrent message:\n${userText}`
+      : userText,
+    imageStorageIds: inboundImageStorageIds,
+    fetchBytes: fetchStoredBytes,
+  });
+  // The SDK's query() only accepts string | AsyncIterable<SDKUserMessage>.
+  // When promptBlocks is a content-block array (images present), wrap it as
+  // an async generator that yields one SDKUserMessage with that content array.
+  const promptBody: string | AsyncIterable<{ type: "user"; session_id: string; message: { role: "user"; content: unknown }; parent_tool_use_id: null }> =
+    typeof promptBlocks === "string"
+      ? promptBlocks
+      : (async function* () {
+          yield {
+            type: "user" as const,
+            session_id: "",
+            message: { role: "user" as const, content: promptBlocks },
+            parent_tool_use_id: null,
+          };
+        })();
 
   const tag = opts.turnTag ?? turnId.slice(-6);
   const log = (msg: string) => console.log(`[turn ${tag}] ${msg}`);
@@ -308,7 +363,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   let usage: UsageTotals = { ...EMPTY_USAGE };
   try {
     for await (const msg of query({
-      prompt,
+      prompt: promptBody,
       options: {
         systemPrompt,
         model: requestedModel,
@@ -436,6 +491,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
       userMessage: opts.content,
       assistantReply: reply,
       turnId,
+      imageStorageIds: inboundImageStorageIds,
     }).catch((err) => console.error("[interaction] extraction error", err));
   }
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
+import type { Id } from "../../../convex/_generated/dataModel.js";
 import MemoryGraphView from "./MemoryGraphView.js";
 import { EmbeddingBanner } from "./EmbeddingBanner.js";
 
@@ -48,6 +49,22 @@ const SEGMENT_COLOR: Record<string, { dark: string; light: string }> = {
   knowledge: { dark: "text-blue-400", light: "text-blue-600" },
   context: { dark: "text-slate-400", light: "text-slate-500" },
 };
+
+function MemoryImageBadge({ storageId }: { storageId: string }) {
+  const url = useQuery(api.messages.getStorageUrl, {
+    storageId: storageId as Id<"_storage">,
+  });
+  if (!url) return <div className="w-12 h-12 bg-neutral-200 rounded" />;
+  return (
+    <a href={url} target="_blank" rel="noreferrer">
+      <img
+        src={url}
+        alt="image memory"
+        className="w-12 h-12 object-cover rounded border border-neutral-300"
+      />
+    </a>
+  );
+}
 
 export function MemoryPanel({ isDark }: { isDark: boolean }) {
   const [viewMode, setViewMode] = useState<ViewMode>("table");
@@ -255,6 +272,14 @@ export function MemoryPanel({ isDark }: { isDark: boolean }) {
                     >
                       {r.content}
                     </p>
+
+                    {Array.isArray(r.imageStorageIds) && r.imageStorageIds.length > 0 && (
+                      <div className="flex gap-1 mt-1">
+                        {r.imageStorageIds.map((id: string) => (
+                          <MemoryImageBadge key={id} storageId={id} />
+                        ))}
+                      </div>
+                    )}
 
                     {isExpanded && (
                       <div className="mt-3 space-y-2 text-xs slide-down">

@@ -27,6 +27,7 @@ export const upsert = mutation({
     supersedes: v.optional(v.array(v.string())),
     embedding: v.optional(v.array(v.float64())),
     metadata: v.optional(v.string()),
+    imageStorageIds: v.optional(v.array(v.id("_storage"))),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -62,13 +63,21 @@ export const upsert = mutation({
         supersedes: args.supersedes,
         embedding: args.embedding ?? existing.embedding,
         metadata: args.metadata ?? existing.metadata,
+        imageStorageIds:
+          args.imageStorageIds && args.imageStorageIds.length > 0
+            ? args.imageStorageIds
+            : existing.imageStorageIds,
         lastAccessedAt: now,
       });
       return existing._id;
     }
 
+    const { imageStorageIds, ...rest } = args;
     return await ctx.db.insert("memoryRecords", {
-      ...args,
+      ...rest,
+      ...(imageStorageIds && imageStorageIds.length > 0
+        ? { imageStorageIds }
+        : {}),
       accessCount: 0,
       lastAccessedAt: now,
       lifecycle: "active",
@@ -274,5 +283,19 @@ export const countsByTier = query({
       truncated: all.length === COUNTS_SCAN_LIMIT,
       scanLimit: COUNTS_SCAN_LIMIT,
     };
+  },
+});
+
+export const hasImageRef = query({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    // Linear scan is fine while memory volume is small; for large user
+    // bases, add an index on imageStorageIds via a secondary join table.
+    const all = await ctx.db.query("memoryRecords").collect();
+    return all.some(
+      (r) =>
+        Array.isArray(r.imageStorageIds) &&
+        r.imageStorageIds.includes(args.storageId),
+    );
   },
 });
