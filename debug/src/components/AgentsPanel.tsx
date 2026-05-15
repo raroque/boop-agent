@@ -1,14 +1,36 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
 import { IntegrationLogo, BrailleIndicator, prettyToolName } from "../lib/branding.js";
 
 interface LogEntry {
+  _id?: string;
   logType: string;
   toolName?: string;
   accounts?: string[];
   content: string;
 }
+
+type TextTimelineItem = {
+  kind: "text";
+  id: string;
+  content: string;
+  logType: "text" | "thinking";
+};
+
+type TimelineItem =
+  | TextTimelineItem
+  | {
+      kind: "log";
+      id: string;
+      log: LogEntry;
+    };
+
+type SourceLink = {
+  url: string;
+  title: string;
+  displayUrl: string;
+};
 
 const STATUS_CONFIG: Record<string, { dot: string; label: string; color: string }> = {
   spawned: { dot: "bg-amber-400", label: "Spawning", color: "text-amber-400" },
@@ -18,12 +40,407 @@ const STATUS_CONFIG: Record<string, { dot: string; label: string; color: string 
   cancelled: { dot: "bg-slate-500", label: "Cancelled", color: "text-slate-500" },
 };
 
-function formatLogRow(log: LogEntry): string {
-  if (log.logType === "tool_use") return prettyToolName(log.toolName);
-  if (log.logType === "tool_result" || log.logType === "error") {
-    return (log.content ?? "").replace(/<[^>]+>/g, "").trim().slice(0, 80);
+function plainPreview(value?: string | null, length = 160): string {
+  return normalizeDisplayText(value ?? "")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, "$1")
+    .replace(/\*\*/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, length);
+}
+
+function isEstimatedCost(agent: { runtime?: string; billingMode?: string }): boolean {
+  return agent.runtime === "codex" || agent.billingMode === "codex-subscription";
+}
+
+function formatCostUsd(costUsd: number, estimated: boolean): string {
+  return `${estimated ? "~" : ""}$${costUsd.toFixed(4)}`;
+}
+
+function buildTimeline(logs: LogEntry[]): TimelineItem[] {
+  const items: TimelineItem[] = [];
+
+  for (const log of logs) {
+    const logId = log._id ?? `${log.logType}-${items.length}`;
+    if (log.logType === "text" || log.logType === "thinking") {
+      const previous = items[items.length - 1];
+      if (previous?.kind === "text" && previous.logType === log.logType) {
+        previous.content += log.content ?? "";
+      } else {
+        items.push({
+          kind: "text",
+          id: logId,
+          content: log.content ?? "",
+          logType: log.logType,
+        });
+      }
+      continue;
+    }
+
+    items.push({ kind: "log", id: logId, log });
   }
-  return (log.content ?? "").slice(0, 80);
+
+  return items;
+}
+
+function normalizeDisplayText(value: string): string {
+  const headings = [
+    "At a glance",
+    "When to use",
+    "Key concepts",
+    "Main APIs",
+    "Main APIs/workflow",
+    "Setup requirements",
+    "Notable differences",
+    "Notable differences or tradeoffs",
+    "Tradeoffs",
+    "Bottom line",
+    "Sources",
+  ];
+  let text = value
+    .replace(/\r\n?/g, "\n")
+    .replace(/([a-z0-9])\.([A-Z])/g, "$1. $2")
+    .replace(/\s+•\s+/g, "\n- ");
+  for (const heading of headings) {
+    const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    text = text.replace(
+      new RegExp(`\\s*\\*\\*${escaped}\\*\\*:?(?=\\s|$)`, "gi"),
+      `\n\n**${heading}**`,
+    );
+  }
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function cleanUrl(raw: string): string {
+  return raw.replace(/[),.;:]+$/g, "");
+}
+
+function displayUrl(url: string): { host: string; displayUrl: string } {
+  try {
+    const parsed = new URL(url);
+    const path = `${parsed.pathname}${parsed.search}`.replace(/\/$/, "");
+    return {
+      host: parsed.hostname.replace(/^www\./, ""),
+      displayUrl: `${parsed.hostname.replace(/^www\./, "")}${path}`.slice(0, 88),
+    };
+  } catch {
+    return { host: url, displayUrl: url.slice(0, 88) };
+  }
+}
+
+function extractSourceLinks(text: string): SourceLink[] {
+  const links = new Map<string, SourceLink>();
+  const add = (rawUrl: string, rawTitle?: string) => {
+    const url = cleanUrl(rawUrl);
+    if (!url || links.has(url)) return;
+    const display = displayUrl(url);
+    const title = (rawTitle ?? display.displayUrl)
+      .replace(/\*\*/g, "")
+      .replace(/^[-*\s]+/, "")
+      .trim();
+    links.set(url, {
+      url,
+      title: title || display.displayUrl,
+      displayUrl: display.displayUrl,
+    });
+  };
+
+  for (const match of text.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g)) {
+    add(match[2], match[1]);
+  }
+  for (const match of text.matchAll(/https?:\/\/[^\s)\]>]+/g)) {
+    add(match[0]);
+  }
+
+  return Array.from(links.values());
+}
+
+function renderInline(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|`([^`]+)`|\*\*([^*]+)\*\*/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text))) {
+    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
+    if (match[1] && match[2]) {
+      const url = cleanUrl(match[2]);
+      nodes.push(
+        <a
+          key={`${url}-${match.index}`}
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium underline decoration-current/30 underline-offset-2 hover:decoration-current"
+        >
+          {match[1]}
+        </a>,
+      );
+    } else if (match[3]) {
+      nodes.push(
+        <code key={`code-${match.index}`} className="rounded bg-slate-500/10 px-1 py-0.5 mono">
+          {match[3]}
+        </code>,
+      );
+    } else if (match[4]) {
+      nodes.push(<strong key={`strong-${match.index}`}>{match[4]}</strong>);
+    }
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes;
+}
+
+function RichTextBlock({
+  text,
+  isDark,
+  compact = false,
+}: {
+  text: string;
+  isDark: boolean;
+  compact?: boolean;
+}) {
+  const normalized = normalizeDisplayText(text);
+  const sourceLinks = extractSourceLinks(normalized);
+  const blocks = normalized.split(/\n{2,}/).filter(Boolean);
+
+  return (
+    <div
+      className={`space-y-2 break-words ${compact ? "text-xs" : "text-sm"} ${
+        isDark ? "text-slate-300" : "text-slate-700"
+      }`}
+    >
+      {blocks.map((block, blockIndex) => {
+        const lines = block.split("\n").filter(Boolean);
+        const isList = lines.length > 0 && lines.every((line) => /^[-*]\s+/.test(line));
+
+        if (isList) {
+          return (
+            <ul key={blockIndex} className="space-y-1 pl-4 list-disc">
+              {lines.map((line, lineIndex) => (
+                <li key={lineIndex}>{renderInline(line.replace(/^[-*]\s+/, ""))}</li>
+              ))}
+            </ul>
+          );
+        }
+
+        return (
+          <p key={blockIndex} className="whitespace-pre-wrap leading-relaxed">
+            {lines.map((line, lineIndex) => (
+              <span key={lineIndex}>
+                {renderInline(line)}
+                {lineIndex < lines.length - 1 && <br />}
+              </span>
+            ))}
+          </p>
+        );
+      })}
+      <SourceCards links={sourceLinks} isDark={isDark} />
+    </div>
+  );
+}
+
+function SourceCards({
+  links,
+  isDark,
+}: {
+  links: SourceLink[];
+  isDark: boolean;
+}) {
+  if (links.length === 0) return null;
+  return (
+    <div className="pt-2 space-y-2">
+      <div
+        className={`text-[10px] font-bold mono tracking-wider ${
+          isDark ? "text-slate-500" : "text-slate-400"
+        }`}
+      >
+        SOURCES
+      </div>
+      <div className="space-y-1.5">
+        {links.map((link) => (
+          <a
+            key={link.url}
+            href={link.url}
+            target="_blank"
+            rel="noreferrer"
+            className={`block rounded-lg border px-3 py-2 transition-colors ${
+              isDark
+                ? "border-slate-800 bg-slate-950/40 hover:border-slate-700 hover:bg-slate-900"
+                : "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white"
+            }`}
+          >
+            <div
+              className={`text-xs font-medium truncate ${
+                isDark ? "text-sky-300" : "text-sky-700"
+              }`}
+            >
+              {link.title}
+            </div>
+            <div
+              className={`text-[11px] truncate ${
+                isDark ? "text-slate-500" : "text-slate-500"
+              }`}
+            >
+              {link.displayUrl}
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function summarizeToolPayload(content: string): string {
+  try {
+    const value = JSON.parse(content) as Record<string, unknown>;
+    if (Array.isArray(value.tools)) {
+      return value.tools
+        .slice(0, 4)
+        .map((tool) => {
+          if (!tool || typeof tool !== "object") return String(tool);
+          const record = tool as Record<string, unknown>;
+          const args = record.arguments as Record<string, unknown> | undefined;
+          const query = typeof args?.query === "string" ? `: ${args.query}` : "";
+          return `${String(record.tool_slug ?? "tool")}${query}`;
+        })
+        .join(" · ");
+    }
+    if (Array.isArray(value.queries)) {
+      return value.queries
+        .slice(0, 4)
+        .map((query) => {
+          if (!query || typeof query !== "object") return String(query);
+          const record = query as Record<string, unknown>;
+          return String(record.use_case ?? record.query ?? "query");
+        })
+        .join(" · ");
+    }
+    if (typeof value.thought === "string" && value.thought.trim()) {
+      return value.thought.trim();
+    }
+    const preferred = ["query", "q", "url", "path", "message", "prompt", "task", "name"];
+    for (const key of preferred) {
+      const entry = value[key];
+      if (typeof entry === "string" && entry.trim()) return `${key}: ${entry.trim()}`;
+    }
+    const entries = Object.entries(value)
+      .filter(([, entry]) => entry !== undefined && entry !== null)
+      .slice(0, 4)
+      .map(([key, entry]) => {
+        const rendered =
+          typeof entry === "string" ? entry : Array.isArray(entry) ? entry.join(", ") : JSON.stringify(entry);
+        return `${key}: ${rendered}`;
+      });
+    if (entries.length > 0) return entries.join(" · ");
+  } catch {
+    // Fall through to the raw preview.
+  }
+  return content;
+}
+
+function summarizeToolResult(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return content;
+
+  try {
+    const value = JSON.parse(content) as Record<string, unknown>;
+    if (value.error) return `Error: ${String(value.error)}`;
+
+    const data = value.data as Record<string, unknown> | undefined;
+    if (data) {
+      if (typeof data.stdout === "string" && data.stdout.trim()) {
+        return data.stdout.trim();
+      }
+      if (typeof data.results === "string" && data.results.trim()) {
+        return data.results.trim();
+      }
+      if (Array.isArray(data.results)) {
+        return data.results.slice(0, 4).map(summarizeResultItem).join("\n");
+      }
+    }
+
+    if (Array.isArray(value.results)) {
+      return value.results.slice(0, 4).map(summarizeResultItem).join("\n");
+    }
+  } catch {
+    return summarizeJsonPreview(content);
+  }
+
+  return summarizeJsonPreview(content);
+}
+
+function summarizeJsonPreview(content: string): string {
+  const stdout = content.match(/"stdout":"((?:\\.|[^"])*)"/);
+  if (stdout) return decodeJsonString(stdout[1]).trim();
+
+  const useCases = Array.from(content.matchAll(/"use_case":"((?:\\.|[^"])*)"/g))
+    .slice(0, 4)
+    .map((match) => decodeJsonString(match[1]));
+  if (useCases.length > 0) {
+    return useCases.map((useCase) => `${useCase}: result guidance`).join("\n");
+  }
+
+  const toolSlugs = Array.from(content.matchAll(/"tool_slug":"((?:\\.|[^"])*)"/g))
+    .slice(0, 4)
+    .map((match) => decodeJsonString(match[1]));
+  if (toolSlugs.length > 0) {
+    const queries = Array.from(content.matchAll(/"query":"((?:\\.|[^"])*)"/g))
+      .slice(0, toolSlugs.length)
+      .map((match) => decodeJsonString(match[1]));
+    return toolSlugs
+      .map((slug, index) => {
+        const query = queries[index] ? `: ${queries[index]}` : "";
+        return `${slug}${query}: result returned`;
+      })
+      .join("\n");
+  }
+
+  return "JSON result returned. Expand payload for details.";
+}
+
+function decodeJsonString(value: string): string {
+  try {
+    return JSON.parse(`"${value.replace(/"/g, '\\"')}"`);
+  } catch {
+    return value.replace(/\\"/g, '"').replace(/\\n/g, "\n");
+  }
+}
+
+function summarizeResultItem(item: unknown): string {
+  if (!item || typeof item !== "object") return String(item);
+  const record = item as Record<string, unknown>;
+
+  if (typeof record.use_case === "string") {
+    const count = Array.isArray(record.primary_tool_slugs)
+      ? `${record.primary_tool_slugs.length} primary tools`
+      : "tool guidance";
+    return `${record.use_case}: ${count}`;
+  }
+
+  const toolSlug = typeof record.tool_slug === "string" ? record.tool_slug : "tool";
+  const response = record.response as Record<string, unknown> | undefined;
+  const data = response?.data as Record<string, unknown> | undefined;
+  const preview = response?.data_preview as Record<string, unknown> | undefined;
+  const source = data ?? preview;
+  const query = typeof source?.query === "string" ? `: ${source.query}` : "";
+
+  const messages = source?.messages as Record<string, unknown> | undefined;
+  if (messages && typeof messages.total === "number") {
+    return `${toolSlug}${query}: ${messages.total} messages`;
+  }
+
+  const channels = source?.channels;
+  if (Array.isArray(channels)) {
+    return `${toolSlug}: ${channels.length} conversations returned`;
+  }
+
+  if (typeof response?.successful === "boolean") {
+    return `${toolSlug}: ${response.successful ? "successful" : "failed"}`;
+  }
+
+  return `${toolSlug}: result returned`;
 }
 
 export function AgentsPanel({ isDark }: { isDark: boolean }) {
@@ -118,6 +535,7 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
             const cfg = STATUS_CONFIG[agent.status] ?? STATUS_CONFIG.running;
             const isActive = agent.status === "running" || agent.status === "spawned";
             const totalTokens = agent.inputTokens + agent.outputTokens;
+            const estimatedCost = isEstimatedCost(agent);
             const elapsed = agent.completedAt
               ? (agent.completedAt - agent.startedAt) / 1000
               : (Date.now() - agent.startedAt) / 1000;
@@ -160,17 +578,20 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
                   }`}
                 >
                   {agent.status === "completed"
-                    ? agent.result?.slice(0, 120)
+                    ? plainPreview(agent.result, 120)
                     : agent.status === "failed"
-                      ? agent.error?.slice(0, 120)
-                      : agent.task.slice(0, 120)}
+                      ? plainPreview(agent.error, 120)
+                      : plainPreview(agent.task, 120)}
                 </p>
 
                 {(agent.costUsd > 0 || totalTokens > 0) && (
                   <div className="flex items-center gap-3 text-[10px] mono mb-2">
                     {agent.costUsd > 0 && (
-                      <span className="text-emerald-500 font-semibold">
-                        ${agent.costUsd.toFixed(4)}
+                      <span
+                        className="text-emerald-500 font-semibold"
+                        title={estimatedCost ? "API-equivalent estimate from Codex tokens" : undefined}
+                      >
+                        {formatCostUsd(agent.costUsd, estimatedCost)}
                       </span>
                     )}
                     {totalTokens > 0 && (
@@ -233,6 +654,8 @@ function AgentDetail({
   const cfg = STATUS_CONFIG[agent.status] ?? STATUS_CONFIG.running;
   const isActive = agent.status === "running" || agent.status === "spawned";
   const totalTokens = agent.inputTokens + agent.outputTokens;
+  const estimatedCost = isEstimatedCost(agent);
+  const timeline = logs ? buildTimeline(logs as LogEntry[]) : [];
 
   return (
     <div className="flex flex-col h-full -m-5 fade-in">
@@ -271,8 +694,11 @@ function AgentDetail({
         <span className={`text-xs ${cfg.color}`}>{cfg.label}</span>
         <div className="ml-auto flex items-center gap-3 text-xs mono">
           {agent.costUsd > 0 && (
-            <span className="text-emerald-500 font-semibold">
-              ${agent.costUsd.toFixed(4)}
+            <span
+              className="text-emerald-500 font-semibold"
+              title={estimatedCost ? "API-equivalent estimate from Codex tokens" : undefined}
+            >
+              {formatCostUsd(agent.costUsd, estimatedCost)}
             </span>
           )}
           {totalTokens > 0 && (
@@ -309,7 +735,7 @@ function AgentDetail({
                   isDark ? "text-slate-500" : "text-slate-400"
                 }`}
               >
-                {agent.task}
+                {plainPreview(agent.task)}
               </span>
             )}
             <span className={`ml-auto shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
@@ -398,11 +824,11 @@ function AgentDetail({
           )
         ) : (
           <div className="space-y-0">
-            {logs.map((log, i) => (
+            {timeline.map((item, i) => (
               <TimelineRow
-                key={log._id}
-                log={log as any}
-                isLast={i === logs.length - 1}
+                key={item.id}
+                item={item}
+                isLast={i === timeline.length - 1}
                 isDark={isDark}
               />
             ))}
@@ -437,7 +863,7 @@ function AgentDetail({
                     isDark ? "text-slate-500" : "text-slate-400"
                   }`}
                 >
-                  {agent.result.slice(0, 160)}
+                  {plainPreview(agent.result, 160)}
                 </span>
               )}
               <span className={`ml-auto shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
@@ -445,13 +871,9 @@ function AgentDetail({
               </span>
             </button>
             {responseOpen && (
-              <p
-                className={`text-xs whitespace-pre-wrap break-words mt-2 ${
-                  isDark ? "text-slate-300" : "text-slate-700"
-                }`}
-              >
-                {agent.result}
-              </p>
+              <div className="mt-3">
+                <RichTextBlock text={agent.result} isDark={isDark} compact />
+              </div>
             )}
           </div>
         </div>
@@ -484,17 +906,20 @@ function AgentDetail({
 }
 
 function TimelineRow({
-  log,
+  item,
   isLast,
   isDark,
 }: {
-  log: { logType: string; toolName?: string; accounts?: string[]; content: string };
+  item: TimelineItem;
   isLast: boolean;
   isDark: boolean;
 }) {
-  const isToolUse = log.logType === "tool_use";
-  const isToolResult = log.logType === "tool_result";
-  const isError = log.logType === "error";
+  const log = item.kind === "log" ? item.log : null;
+  const logType = item.kind === "text" ? item.logType : (log?.logType ?? "text");
+  const isToolUse = item.kind === "log" && logType === "tool_use";
+  const isToolResult = item.kind === "log" && logType === "tool_result";
+  const isError = item.kind === "log" && logType === "error";
+  const isThinking = logType === "thinking";
 
   const dotColor = isToolUse
     ? "bg-sky-400"
@@ -509,7 +934,7 @@ function TimelineRow({
       <div className="flex flex-col items-center shrink-0 w-5">
         <div className="mt-1.5">
           {isToolUse ? (
-            <IntegrationLogo raw={log.toolName} size={20} />
+            <IntegrationLogo raw={log?.toolName} size={20} />
           ) : (
             <span
               className={`block w-2.5 h-2.5 rounded-full ${dotColor}`}
@@ -540,11 +965,19 @@ function TimelineRow({
                     : isDark
                       ? "text-slate-600"
                       : "text-slate-400"
-            }`}
+              }`}
           >
-            {isToolUse ? "TOOL" : isError ? "ERROR" : isToolResult ? "RESPONSE" : "TEXT"}
+            {isToolUse
+              ? "TOOL"
+              : isError
+                ? "ERROR"
+                : isToolResult
+                  ? "RESULT"
+                  : isThinking
+                    ? "THINKING"
+                    : "TEXT"}
           </span>
-          {isToolUse && log.toolName && (
+          {isToolUse && log?.toolName && (
             <span
               className={`text-xs font-medium ${
                 isDark ? "text-sky-300" : "text-sky-600"
@@ -553,7 +986,7 @@ function TimelineRow({
               {prettyToolName(log.toolName)}
             </span>
           )}
-          {isToolUse && log.accounts && log.accounts.length > 0 && (
+          {isToolUse && log?.accounts && log.accounts.length > 0 && (
             <span
               className={`text-[10px] mono px-1.5 py-px rounded ${
                 isDark
@@ -566,22 +999,93 @@ function TimelineRow({
             </span>
           )}
         </div>
-        <p
-          className={`text-xs whitespace-pre-wrap break-words ${
-            isError
-              ? "text-rose-400"
-              : isToolUse
-                ? isDark
-                  ? "text-sky-400/60"
-                  : "text-sky-600/60"
+        {item.kind === "text" ? (
+          <RichTextBlock text={item.content} isDark={isDark} compact />
+        ) : isToolUse && log ? (
+          <ToolPayload content={log.content} isDark={isDark} />
+        ) : isToolResult && log ? (
+          <ToolResultPayload content={log.content} isDark={isDark} />
+        ) : log ? (
+          <p
+            className={`text-xs whitespace-pre-wrap break-words ${
+              isError
+                ? "text-rose-400"
                 : isDark
                   ? "text-slate-400"
                   : "text-slate-600"
-          }`}
-        >
-          {log.content.slice(0, 600)}
-        </p>
+            }`}
+          >
+            {log.content.slice(0, 2000)}
+          </p>
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function ToolResultPayload({ content, isDark }: { content: string; isDark: boolean }) {
+  const isJsonPayload = /^[\[{]/.test(content.trim());
+  if (!isJsonPayload) {
+    return <RichTextBlock text={content.slice(0, 2000)} isDark={isDark} compact />;
+  }
+
+  const summary = summarizeToolResult(content).slice(0, 1000);
+  const hasRawPayload = summary !== content && content.trim().length > 0;
+
+  return (
+    <div className="space-y-1.5">
+      <p
+        className={`text-xs whitespace-pre-wrap break-words ${
+          isDark ? "text-slate-400" : "text-slate-600"
+        }`}
+      >
+        {summary}
+      </p>
+      {hasRawPayload && (
+        <details className={isDark ? "text-slate-500" : "text-slate-500"}>
+          <summary className="cursor-pointer select-none text-[10px] mono uppercase tracking-wider">
+            Payload
+          </summary>
+          <pre
+            className={`mt-1 max-h-44 overflow-auto rounded-lg p-2 text-[11px] whitespace-pre-wrap debug-scroll ${
+              isDark ? "bg-slate-950/60 text-slate-400" : "bg-slate-50 text-slate-600"
+            }`}
+          >
+            {content.slice(0, 2000)}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function ToolPayload({ content, isDark }: { content: string; isDark: boolean }) {
+  const summary = summarizeToolPayload(content).slice(0, 600);
+  const hasRawPayload = summary !== content && content.trim().length > 0;
+
+  return (
+    <div className="space-y-1.5">
+      <p
+        className={`text-xs whitespace-pre-wrap break-words ${
+          isDark ? "text-sky-300/75" : "text-sky-700/75"
+        }`}
+      >
+        {summary}
+      </p>
+      {hasRawPayload && (
+        <details className={isDark ? "text-slate-500" : "text-slate-500"}>
+          <summary className="cursor-pointer select-none text-[10px] mono uppercase tracking-wider">
+            Payload
+          </summary>
+          <pre
+            className={`mt-1 max-h-44 overflow-auto rounded-lg p-2 text-[11px] whitespace-pre-wrap debug-scroll ${
+              isDark ? "bg-slate-950/60 text-slate-400" : "bg-slate-50 text-slate-600"
+            }`}
+          >
+            {content.slice(0, 2000)}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }

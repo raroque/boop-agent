@@ -3,7 +3,8 @@
 // Prefixes each child's output so you can tell who's saying what.
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,6 +43,24 @@ const publicUrl = envVars.PUBLIC_URL || "";
 const hasStaticUrl =
   publicUrl && !publicUrl.includes("localhost") && !publicUrl.includes("127.0.0.1");
 const useNgrok = !hasStaticUrl || Boolean(ngrokDomain);
+let convexEnvFile = null;
+
+function writeConvexDevEnvFile() {
+  const convexUrl = envVars.VITE_CONVEX_URL || envVars.CONVEX_URL;
+  const lines = [];
+  if (envVars.CONVEX_DEPLOYMENT) {
+    lines.push(`CONVEX_DEPLOYMENT=${envVars.CONVEX_DEPLOYMENT}`);
+  }
+  if (convexUrl) {
+    // Convex CLI warns when both CONVEX_URL and VITE_CONVEX_URL are active.
+    // The debug UI is Vite-based, and the server falls back to this value.
+    lines.push(`VITE_CONVEX_URL=${convexUrl}`);
+  }
+  if (!lines.length) return null;
+  const path = resolve(tmpdir(), `boop-convex-${process.pid}.env.local`);
+  writeFileSync(path, lines.join("\n") + "\n");
+  return path;
+}
 
 // --- binary detection ---------------------------------------------------
 function hasBinary(name) {
@@ -64,6 +83,7 @@ const C = {
   dim: "\x1b[2m",
   reset: "\x1b[0m",
 };
+let dashboardUrl = "http://localhost:5173";
 
 // Vite's http-proxy attaches its own socket error logger that can't be removed
 // via configure(). EPIPE on WS reconnects is harmless — filter it at the
@@ -96,6 +116,10 @@ function run(name, cmd, args, readyPattern) {
 
       // ANSI-strip for matching without disturbing the display output.
       const plain = line.replace(/\x1b\[[0-9;]*m/g, "");
+      if (name === "debug") {
+        const localMatch = plain.match(/Local:\s+(http:\/\/\S+)/);
+        if (localMatch) dashboardUrl = localMatch[1].replace(/\/$/, "");
+      }
 
       if (NOISE_TRIGGERS.some((r) => r.test(plain))) {
         suppressing = true;
@@ -138,7 +162,6 @@ async function waitForNgrokUrl(timeoutMs = 15000) {
 function showBanner(url, stable) {
   const line = "═".repeat(68);
   const webhook = `${url}/sendblue/webhook`;
-  const dashboard = `http://localhost:5173`;
   const from = envVars.SENDBLUE_FROM_NUMBER;
   const fromLine = from
     ? `  📱 Text this Sendblue number:  ${from}  (from a DIFFERENT phone)`
@@ -160,7 +183,7 @@ function showBanner(url, stable) {
 ${C.banner}${line}
   Boop is ready — ${headline}
 
-  🐶 Debug dashboard (click me):   ${dashboard}
+  🐶 Debug dashboard (click me):   ${dashboardUrl}
   🌐 Public URL:                   ${url}
   📮 Sendblue webhook (inbound):   ${webhook}
 ${fromLine}${guide}
@@ -199,10 +222,13 @@ const serverChild = run(
   ["tsx", "watch", "server/index.ts"],
   /listening on :/,
 );
+convexEnvFile = writeConvexDevEnvFile();
+const convexArgs = ["convex", "dev"];
+if (convexEnvFile) convexArgs.push("--env-file", convexEnvFile);
 const convexChild = run(
   "convex",
   "npx",
-  ["convex", "dev"],
+  convexArgs,
   /Convex functions ready/,
 );
 const debugChild = run(
@@ -299,7 +325,7 @@ Promise.all([
 ${C.banner}${line}
   Boop is running locally.
 
-  🐶 Debug dashboard:   http://localhost:5173
+  🐶 Debug dashboard:   ${dashboardUrl}
 
   ⚠ No public tunnel configured. iMessage won't work until you expose
     the server. Use the Chat tab in the dashboard to test for now.
@@ -313,6 +339,13 @@ let shuttingDown = false;
 const shutdown = (code = 0) => {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (convexEnvFile) {
+    try {
+      unlinkSync(convexEnvFile);
+    } catch {
+      /* ignore */
+    }
+  }
   for (const c of children) {
     try {
       c.kill();

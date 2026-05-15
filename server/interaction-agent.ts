@@ -1,17 +1,19 @@
-import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
-import { createMemoryMcp } from "./memory/tools.js";
+import { createMemoryTools } from "./memory/tools.js";
 import { extractAndStore } from "./memory/extract.js";
 import { availableIntegrations, spawnExecutionAgent } from "./execution-agent.js";
-import { createAutomationMcp } from "./automation-tools.js";
-import { createDraftDecisionMcp } from "./draft-tools.js";
-import { createSelfMcp } from "./self-tools.js";
-import { getRuntimeModel } from "./runtime-config.js";
+import { createAutomationTools } from "./automation-tools.js";
+import { createDraftDecisionTools } from "./draft-tools.js";
+import { createSelfTools } from "./self-tools.js";
+import { getRuntimeConfig } from "./runtime-config.js";
 import { broadcast } from "./broadcast.js";
 import { sendImessage } from "./sendblue.js";
-import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
+import { defineRuntimeTool } from "./runtimes/tool.js";
+import { runAgentRuntime } from "./runtimes/index.js";
+import { runtimeText } from "./runtimes/types.js";
+import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
 
 const INTERACTION_SYSTEM = `You are Boop, a personal agent the user texts from iMessage.
 
@@ -28,7 +30,7 @@ Your only tools:
 - spawn_agent (dispatches a sub-agent that CAN touch the world)
 - create_automation / list_automations / toggle_automation / delete_automation
 - list_drafts / send_draft / reject_draft
-- get_config / set_model / set_timezone / list_integrations / search_composio_catalog / inspect_toolkit (self-inspection)
+- get_config / set_runtime / set_model / set_codex_reasoning_effort / set_timezone / list_integrations / search_composio_catalog / inspect_toolkit (self-inspection)
 
 You cannot answer factual questions from your own knowledge. Not allowed.
 You have NO browser, NO WebSearch, NO WebFetch, NO file access, NO APIs.
@@ -137,8 +139,10 @@ integration capabilities from training-data knowledge of the product.
 Self-inspection (no spawn needed — answer instantly):
 When the user asks about Boop itself, pick the tool by intent:
 - Wants to know what model / config / time is currently in effect → get_config
+- Wants to switch providers/runtimes (Claude vs Codex) → set_runtime
 - Wants to switch models or change speed/quality tradeoff → set_model
   (takes effect next turn; this turn finishes on the current model)
+- Wants to tune Codex depth/speed specifically → set_codex_reasoning_effort
 - Wants to know which integrations or accounts are connected → list_integrations
 - Wondering whether some service is connectable at all → search_composio_catalog
 - Probing the actual capabilities of a specific connected integration
@@ -173,6 +177,10 @@ interface HandleOpts {
   // role=user, so the synthetic notice the IA receives doesn't pollute the
   // user-message history. Defaults to "user".
   kind?: "user" | "proactive";
+  // The Sendblue/proactive callers persist the delivered final message after
+  // transport succeeds. Local chat callers still need the assistant turn in
+  // Convex so conversation views reflect the full exchange.
+  persistAssistantReply?: boolean;
 }
 
 function randomId(prefix: string): string {
@@ -195,96 +203,13 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     content: opts.content,
   });
 
-  const memoryServer = createMemoryMcp(opts.conversationId);
-  const automationServer = createAutomationMcp(opts.conversationId);
-  const draftDecisionServer = createDraftDecisionMcp(opts.conversationId);
-  const selfServer = createSelfMcp();
-
-  const ackServer = createSdkMcpServer({
-    name: "boop-ack",
-    version: "0.1.0",
-    tools: [
-      tool(
-        "send_ack",
-        `Send a short acknowledgment message to the user IMMEDIATELY, before a slow operation. Use this BEFORE spawn_agent so the user knows you heard them and are working on it. Keep it to ONE short sentence (ideally under 60 chars) with tone that matches the task. Examples: "On it — one sec 🔍", "Looking into it…", "Drafting now, hold tight.", "Let me check your calendar."`,
-        {
-          message: z.string().describe("1 short sentence ack. No markdown. Emojis OK."),
-        },
-        async (args) => {
-          const text = args.message.trim();
-          if (!text) {
-            return {
-              content: [{ type: "text" as const, text: "Empty ack skipped." }],
-            };
-          }
-          // Skip the iMessage send for proactive turns — those go out as a
-          // single self-contained notice from dispatchProactiveNotice. If the
-          // IA calls send_ack here on a proactive turn, the user would get
-          // two iMessages (the ack + the final reply). Still persist + log
-          // so the debug UI sees it.
-          if (opts.conversationId.startsWith("sms:") && opts.kind !== "proactive") {
-            const number = opts.conversationId.slice(4);
-            await sendImessage(number, text);
-          }
-          await convex.mutation(api.messages.send, {
-            conversationId: opts.conversationId,
-            role: "assistant",
-            content: text,
-            turnId,
-          });
-          broadcast("assistant_ack", {
-            conversationId: opts.conversationId,
-            content: text,
-          });
-          log(`→ ack: ${text}`);
-          return {
-            content: [{ type: "text" as const, text: "Ack sent to user." }],
-          };
-        },
-      ),
-    ],
-  });
-
-  const spawnServer = createSdkMcpServer({
-    name: "boop-spawn",
-    version: "0.1.0",
-    tools: [
-      tool(
-        "spawn_agent",
-        "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use for anything requiring lookups, drafting, or actions in the user's integrations.",
-        {
-          task: z
-            .string()
-            .describe("Crisp task description — what to find/draft/do, not the raw user message."),
-          integrations: z
-            .array(z.string())
-            .describe(`Which integrations to give the agent. Available: ${integrations.join(", ") || "(none)"}`),
-          name: z.string().optional().describe("Short label for the agent."),
-        },
-        async (args) => {
-          const res = await spawnExecutionAgent({
-            task: args.task,
-            integrations: args.integrations,
-            conversationId: opts.conversationId,
-            name: args.name,
-          });
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `[agent ${res.agentId} ${res.status}]\n\n${res.result}`,
-              },
-            ],
-          };
-        },
-      ),
-    ],
-  });
-
-  const history = await convex.query(api.messages.recent, {
-    conversationId: opts.conversationId,
-    limit: 10,
-  });
+  const history =
+    opts.kind === "proactive"
+      ? []
+      : await convex.query(api.messages.recent, {
+          conversationId: opts.conversationId,
+          limit: 10,
+        });
   const historyBlock = history
     .slice(0, -1)
     .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
@@ -295,91 +220,142 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     integrations.join(", ") || "(no integrations configured yet)",
   );
 
-  const prompt = historyBlock
-    ? `Prior turns:\n${historyBlock}\n\nCurrent message:\n${opts.content}`
-    : opts.content;
+  const prompt =
+    opts.kind === "proactive"
+      ? `Standalone proactive notice. Write a concise user-facing iMessage from this notice only. Do not research, spawn agents, or continue any prior conversation.\n\n${opts.content}`
+      : historyBlock
+        ? `Prior turns:\n${historyBlock}\n\nCurrent message:\n${opts.content}`
+        : opts.content;
 
   const tag = opts.turnTag ?? turnId.slice(-6);
   const log = (msg: string) => console.log(`[turn ${tag}] ${msg}`);
 
   const turnStart = Date.now();
-  const requestedModel = await getRuntimeModel();
+  // Snapshot runtime for this top-level turn so same-turn set_runtime/set_model
+  // changes do not split the dispatcher and any spawned execution agent.
+  const runtimeConfig = await getRuntimeConfig();
+  const requestedModel = runtimeConfig.model;
+  const tools = [
+    ...createMemoryTools(opts.conversationId),
+    ...createAutomationTools(opts.conversationId),
+    ...createDraftDecisionTools(opts.conversationId, runtimeConfig),
+    ...createSelfTools(),
+    defineRuntimeTool(
+      "boop-ack",
+      "send_ack",
+      `Send a short acknowledgment message to the user IMMEDIATELY, before a slow operation. Use this BEFORE spawn_agent so the user knows you heard them and are working on it. Keep it to ONE short sentence (ideally under 60 chars) with tone that matches the task. Examples: "On it — one sec 🔍", "Looking into it…", "Drafting now, hold tight.", "Let me check your calendar."`,
+      {
+        message: z.string().describe("1 short sentence ack. No markdown. Emojis OK."),
+      },
+      async (args) => {
+        const text = args.message.trim();
+        if (!text) return runtimeText("Empty ack skipped.");
+        // Skip the iMessage send for proactive turns — those go out as a
+        // single self-contained notice from dispatchProactiveNotice. If the
+        // IA calls send_ack here on a proactive turn, the user would get
+        // two iMessages (the ack + the final reply). Still persist + log
+        // so the debug UI sees it.
+        if (opts.conversationId.startsWith("sms:") && opts.kind !== "proactive") {
+          const number = opts.conversationId.slice(4);
+          await sendImessage(number, text);
+        }
+        await convex.mutation(api.messages.send, {
+          conversationId: opts.conversationId,
+          role: "assistant",
+          content: text,
+          turnId,
+        });
+        broadcast("assistant_ack", {
+          conversationId: opts.conversationId,
+          content: text,
+        });
+        log(`→ ack: ${text}`);
+        return runtimeText("Ack sent to user.");
+      },
+    ),
+    defineRuntimeTool(
+      "boop-spawn",
+      "spawn_agent",
+      "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use for anything requiring lookups, drafting, or actions in the user's integrations.",
+      {
+        task: z
+          .string()
+          .describe("Crisp task description — what to find/draft/do, not the raw user message."),
+        integrations: z
+          .array(z.string())
+          .describe(`Which integrations to give the agent. Available: ${integrations.join(", ") || "(none)"}`),
+        name: z.string().optional().describe("Short label for the agent."),
+      },
+      async (args) => {
+        const res = await spawnExecutionAgent({
+          task: args.task,
+          integrations: args.integrations,
+          conversationId: opts.conversationId,
+          name: args.name,
+          runtimeConfig,
+        });
+        return runtimeText(`[agent ${res.agentId} ${res.status}]\n\n${res.result}`);
+      },
+    ),
+  ];
   let reply = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
   try {
-    for await (const msg of query({
+    const result = await runAgentRuntime(runtimeConfig, {
       prompt,
-      options: {
-        systemPrompt,
-        model: requestedModel,
-        mcpServers: {
-          "boop-memory": memoryServer,
-          "boop-spawn": spawnServer,
-          "boop-automations": automationServer,
-          "boop-draft-decisions": draftDecisionServer,
-          "boop-ack": ackServer,
-          "boop-self": selfServer,
-        },
-        allowedTools: [
-          "mcp__boop-memory__write_memory",
-          "mcp__boop-memory__recall",
-          "mcp__boop-spawn__spawn_agent",
-          "mcp__boop-automations__create_automation",
-          "mcp__boop-automations__list_automations",
-          "mcp__boop-automations__toggle_automation",
-          "mcp__boop-automations__delete_automation",
-          "mcp__boop-draft-decisions__list_drafts",
-          "mcp__boop-draft-decisions__send_draft",
-          "mcp__boop-draft-decisions__reject_draft",
-          "mcp__boop-ack__send_ack",
-          "mcp__boop-self__get_config",
-          "mcp__boop-self__set_model",
-          "mcp__boop-self__set_timezone",
-          "mcp__boop-self__list_integrations",
-          "mcp__boop-self__search_composio_catalog",
-          "mcp__boop-self__inspect_toolkit",
-        ],
-        // Belt-and-suspenders: even with bypassPermissions the SDK can leak
-        // its built-ins if we only whitelist. Explicitly block them on the
-        // dispatcher so it MUST spawn a sub-agent for external work.
-        disallowedTools: [
-          "WebSearch",
-          "WebFetch",
-          "Bash",
-          "Read",
-          "Write",
-          "Edit",
-          "Glob",
-          "Grep",
-          "Agent",
-          "Skill",
-        ],
-        permissionMode: "bypassPermissions",
+      systemPrompt,
+      tools,
+      mode: "dispatcher",
+      allowedTools:
+        opts.kind === "proactive"
+          ? []
+          : [
+              "mcp__boop-memory__write_memory",
+              "mcp__boop-memory__recall",
+              "mcp__boop-spawn__spawn_agent",
+              "mcp__boop-automations__create_automation",
+              "mcp__boop-automations__list_automations",
+              "mcp__boop-automations__toggle_automation",
+              "mcp__boop-automations__delete_automation",
+              "mcp__boop-draft-decisions__list_drafts",
+              "mcp__boop-draft-decisions__send_draft",
+              "mcp__boop-draft-decisions__reject_draft",
+              "mcp__boop-ack__send_ack",
+              "mcp__boop-self__get_config",
+              "mcp__boop-self__set_runtime",
+              "mcp__boop-self__set_model",
+              "mcp__boop-self__set_codex_reasoning_effort",
+              "mcp__boop-self__set_timezone",
+              "mcp__boop-self__list_integrations",
+              "mcp__boop-self__search_composio_catalog",
+              "mcp__boop-self__inspect_toolkit",
+            ],
+      // Belt-and-suspenders: even with bypassPermissions the SDK can leak
+      // its built-ins if we only whitelist. Explicitly block them on the
+      // dispatcher so it MUST spawn a sub-agent for external work.
+      disallowedTools: [
+        "WebSearch",
+        "WebFetch",
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Agent",
+        "Skill",
+      ],
+      onText: (chunk) => opts.onThinking?.(chunk),
+      onToolUse: (toolName, input) => {
+        const name = toolName.replace(/^mcp__boop-[a-z-]+__/, "");
+        const inputPreview = JSON.stringify(input);
+        log(
+          `tool: ${name}(${inputPreview.length > 90 ? inputPreview.slice(0, 90) + "…" : inputPreview})`,
+        );
       },
-    })) {
-      if (msg.type === "assistant") {
-        // Reset `reply` on each new assistant turn so only the LAST turn's
-        // text becomes the user-facing iMessage. Earlier turns are usually
-        // pre-tool-call narration ("Got it — saving that now.") that, if
-        // concatenated with the post-tool-result final text, sends as one
-        // smushed iMessage. Streaming via onThinking still sees everything.
-        reply = "";
-        for (const block of msg.message.content) {
-          if (block.type === "text") {
-            reply += block.text;
-            opts.onThinking?.(block.text);
-          } else if (block.type === "tool_use") {
-            const name = block.name.replace(/^mcp__boop-[a-z-]+__/, "");
-            const inputPreview = JSON.stringify(block.input);
-            log(
-              `tool: ${name}(${inputPreview.length > 90 ? inputPreview.slice(0, 90) + "…" : inputPreview})`,
-            );
-          }
-        }
-      } else if (msg.type === "result") {
-        usage = aggregateUsageFromResult(msg, requestedModel);
-      }
-    }
+    });
+    reply = result.text;
+    usage = result.usage;
   } catch (err) {
     console.error(`[turn ${tag}] query failed`, err);
     reply = "Sorry — I hit an error processing that. Try again in a moment.";
@@ -411,6 +387,8 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
       source: "dispatcher",
       conversationId: opts.conversationId,
       turnId,
+      runtime: runtimeConfig.runtime,
+      billingMode: runtimeConfig.billingMode,
       model: usage.model,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -422,6 +400,15 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   }
 
   broadcast("assistant_message", { conversationId: opts.conversationId, content: reply });
+
+  if (opts.persistAssistantReply) {
+    await convex.mutation(api.messages.send, {
+      conversationId: opts.conversationId,
+      role: "assistant",
+      content: reply,
+      turnId,
+    });
+  }
 
   // Background extraction — fire-and-forget; don't block the reply.
   // Skip on proactive turns: the "user message" is a synthetic
@@ -436,6 +423,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
       userMessage: opts.content,
       assistantReply: reply,
       turnId,
+      runtimeConfig,
     }).catch((err) => console.error("[interaction] extraction error", err));
   }
 

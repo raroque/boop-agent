@@ -1,13 +1,14 @@
 // Webhook-driven Gmail watcher. Runs after Composio fires
 // `composio.trigger.message` for a `GMAIL_NEW_GMAIL_MESSAGE` trigger.
 // Pipeline: ignore non-Gmail → warmup-skip the first event per connection
-// → recall user preferences → cheap Haiku classifier → on important, route
+// → recall user preferences → runtime classifier → on important, route
 // the summary into the interaction agent as a synthetic system message so it
 // gets the same tone/spawn pipeline as a real user turn.
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
-import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
+import { getRuntimeConfig, type RuntimeConfig } from "./runtime-config.js";
+import { runAgentRuntime } from "./runtimes/index.js";
+import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
 import { handleUserMessage } from "./interaction-agent.js";
 import { sendImessage } from "./sendblue.js";
 import { ensureTrigger, getComposio, listConnectedToolkits } from "./composio.js";
@@ -15,7 +16,6 @@ import { ensureWebhookSubscription } from "./composio-webhook.js";
 import { describeUserNow } from "./timezone-config.js";
 
 const TRIGGER_SLUG = "GMAIL_NEW_GMAIL_MESSAGE";
-const CLASSIFIER_MODEL = "claude-haiku-4-5-20251001";
 
 // First event per connection since process boot is treated as warmup —
 // classification is skipped to avoid noise from any backfill behavior on
@@ -181,10 +181,13 @@ export async function getUserGmailIdentities(): Promise<string[]> {
 export async function classifyEmailImportance(
   email: NormalizedEmail,
   preferenceLines: string[],
-  options: { model?: string; recordUsage?: boolean } = {},
+  options: { model?: string; recordUsage?: boolean; runtimeConfig?: RuntimeConfig } = {},
 ): Promise<{ important: boolean; summary?: string; usage: UsageTotals }> {
   const started = Date.now();
-  const model = options.model ?? CLASSIFIER_MODEL;
+  const baseRuntimeConfig = options.runtimeConfig ?? (await getRuntimeConfig());
+  const runtimeConfig = options.model
+    ? { ...baseRuntimeConfig, model: options.model }
+    : baseRuntimeConfig;
   const recordUsage = options.recordUsage ?? true;
   const userIdentities = await getUserGmailIdentities();
   const tzInfo = await describeUserNow();
@@ -210,24 +213,15 @@ export async function classifyEmailImportance(
     `Body (truncated):\n${(email.body || "(empty)").slice(0, 1500)}`,
   ].join("\n");
 
-  let buffer = "";
-  let usage: UsageTotals = { ...EMPTY_USAGE };
-  for await (const msg of query({
+  let usage: UsageTotals = { ...EMPTY_USAGE, model: runtimeConfig.model };
+  const result = await runAgentRuntime(runtimeConfig, {
     prompt: userPrompt,
-    options: {
-      systemPrompt: `${RUBRIC_PROMPT}\n\n${prefBlock}\n\n${idBlock}\n\n${timeBlock}`,
-      model,
-      permissionMode: "bypassPermissions",
-    },
-  })) {
-    if (msg.type === "assistant") {
-      for (const block of msg.message.content) {
-        if (block.type === "text") buffer += block.text;
-      }
-    } else if (msg.type === "result") {
-      usage = aggregateUsageFromResult(msg, model);
-    }
-  }
+    systemPrompt: `${RUBRIC_PROMPT}\n\n${prefBlock}\n\n${idBlock}\n\n${timeBlock}`,
+    tools: [],
+    mode: "background",
+  });
+  const buffer = result.text;
+  usage = result.usage;
 
   let important = false;
   let summary: string | undefined;
@@ -246,6 +240,8 @@ export async function classifyEmailImportance(
   if (recordUsage && (usage.costUsd > 0 || usage.inputTokens > 0)) {
     await convex.mutation(api.usageRecords.record, {
       source: "proactive",
+      runtime: runtimeConfig.runtime,
+      billingMode: runtimeConfig.billingMode,
       model: usage.model,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,

@@ -160,25 +160,25 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
           c={c}
         />
         <StatCard
-          label="Total Cost"
+          label="Est. Cost"
           value={`$${filtered.cost.total.toFixed(2)}`}
           color={isDark ? "text-emerald-400" : "text-emerald-600"}
           c={c}
           isDark={isDark}
           info={{
-            title: "API-equivalent cost",
+            title: "Estimated/API-equivalent cost",
             body: (
               <>
                 <p className="mb-1.5">
-                  This number is what your token usage <em>would</em> cost at Anthropic API rates.
+                  Claude rows use the SDK-reported cost when available. Codex rows are
+                  estimated from token counts and published OpenAI API prices.
                 </p>
                 <p className="mb-1.5">
-                  If you're using your <strong>Claude Code subscription</strong> (the default), you're
-                  paying a flat monthly rate — not these dollar amounts.
+                  If you're using a <strong>subscription-backed runtime</strong>, you're paying
+                  the subscription price — not these per-run dollar amounts.
                 </p>
                 <p>
-                  Watch this as a usage-burn proxy (against subscription rate limits) or as a
-                  forecast for what API auth would cost.
+                  Watch this as a usage-burn proxy or as a forecast for what API auth would cost.
                 </p>
               </>
             ),
@@ -217,7 +217,7 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
               data={filtered.days}
               keys={["agentCost"]}
               colors={isDark ? ["#38bdf8"] : ["#0284c7"]}
-              labels={["Agents"]}
+              labels={["LLM usage"]}
               format={(v) => `$${v.toFixed(2)}`}
               isDark={isDark}
             />

@@ -2,6 +2,8 @@ import { Composio } from "@composio/core";
 import { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
 import { createSdkMcpServer, type McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { IntegrationModule } from "./integrations/registry.js";
+import { formatError } from "./error-format.js";
+import { runtimeText, type RuntimeTool } from "./runtimes/types.js";
 
 export type ToolkitAuthMode = "managed" | "byo";
 
@@ -549,6 +551,120 @@ export function buildComposioIntegrationModule(slug: string): IntegrationModule 
         tools,
       });
     },
+    createTools: async (): Promise<RuntimeTool[]> => {
+      const composio = getComposio();
+      if (!composio) {
+        throw new Error(`[composio] cannot build ${slug} — COMPOSIO_API_KEY not set`);
+      }
+      const active = (await listConnectedToolkits()).filter(
+        (c) => c.slug === slug && c.status === "ACTIVE",
+      );
+      const rawTools = await composio.tools.getRawComposioTools({
+        toolkits: [slug],
+        limit: 500,
+      });
+
+      const accountHint = active
+        .map(
+          (c) =>
+            `${c.connectionId} (${c.accountLabel ?? c.accountEmail ?? c.alias ?? "unknown account"})`,
+        )
+        .join(", ");
+
+      return rawTools.map((rawTool: any): RuntimeTool => {
+        const toolName = String(rawTool.slug ?? rawTool.name);
+        const baseSchema =
+          rawTool.inputParameters ??
+          rawTool.parameters ??
+          rawTool.input_schema ??
+          rawTool.schema ?? {
+            type: "object",
+            properties: {},
+            additionalProperties: true,
+          };
+        const jsonSchema = withConnectedAccountSchema(baseSchema, active.length);
+        const description = [
+          String(rawTool.description ?? rawTool.name ?? toolName),
+          active.length >= 2
+            ? `Multiple ${slug} accounts are connected. The connectedAccountId field is required. Available accounts: ${accountHint}.`
+            : active.length === 1
+              ? `Uses connected account ${accountHint}.`
+              : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+
+        return {
+          namespace: slug,
+          name: toolName,
+          description,
+          inputSchema: {},
+          jsonSchema,
+          handle: async (args: Record<string, unknown>) => {
+            try {
+              const toolArgs = { ...args };
+              const explicitAccountId =
+                typeof toolArgs.connectedAccountId === "string"
+                  ? toolArgs.connectedAccountId
+                  : typeof toolArgs.connected_account_id === "string"
+                    ? toolArgs.connected_account_id
+                    : undefined;
+              delete toolArgs.connectedAccountId;
+              delete toolArgs.connected_account_id;
+
+              const connectedAccountId =
+                explicitAccountId ?? (active.length === 1 ? active[0]?.connectionId : undefined);
+              if (active.length >= 2 && !connectedAccountId) {
+                return runtimeText(
+                  `Choose a connectedAccountId before calling ${toolName}. Available accounts: ${accountHint}.`,
+                  false,
+                );
+              }
+
+              const result = await composio.tools.execute(toolName, {
+                userId: boopUserId(),
+                arguments: toolArgs,
+                ...(connectedAccountId ? { connectedAccountId } : {}),
+                dangerouslySkipVersionCheck: true,
+              });
+              return runtimeText(
+                JSON.stringify(result, null, 2),
+                Boolean((result as { successful?: boolean })?.successful ?? true),
+              );
+            } catch (err) {
+              return runtimeText(formatError(err), false);
+            }
+          },
+        };
+      });
+    },
+  };
+}
+
+function withConnectedAccountSchema(schema: unknown, activeCount: number): Record<string, unknown> {
+  const base: Record<string, unknown> =
+    schema && typeof schema === "object" && !Array.isArray(schema)
+      ? { ...(schema as Record<string, unknown>) }
+      : { type: "object" };
+  const properties =
+    base.properties && typeof base.properties === "object" && !Array.isArray(base.properties)
+      ? { ...(base.properties as Record<string, unknown>) }
+      : {};
+  if (activeCount >= 2) {
+    properties.connectedAccountId = {
+      type: "string",
+      description: "Composio connected account id to use for this call.",
+    };
+  }
+  const required = Array.isArray(base.required) ? [...base.required] : [];
+  if (activeCount >= 2 && !required.includes("connectedAccountId")) {
+    required.push("connectedAccountId");
+  }
+  return {
+    type: "object",
+    ...base,
+    properties,
+    ...(required.length ? { required } : {}),
   };
 }
 

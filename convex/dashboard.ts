@@ -8,17 +8,19 @@ const METRICS_SCAN_LIMIT = 5000;
 export const metrics = query({
   args: {},
   handler: async (ctx) => {
-    const [messages, memories, agents, automationRuns] = await Promise.all([
+    const [messages, memories, agents, automationRuns, usageRecords] = await Promise.all([
       ctx.db.query("messages").order("desc").take(METRICS_SCAN_LIMIT),
       ctx.db.query("memoryRecords").order("desc").take(METRICS_SCAN_LIMIT),
       ctx.db.query("executionAgents").order("desc").take(METRICS_SCAN_LIMIT),
       ctx.db.query("automationRuns").order("desc").take(METRICS_SCAN_LIMIT),
+      ctx.db.query("usageRecords").order("desc").take(METRICS_SCAN_LIMIT),
     ]);
     const truncated =
       messages.length === METRICS_SCAN_LIMIT ||
       memories.length === METRICS_SCAN_LIMIT ||
       agents.length === METRICS_SCAN_LIMIT ||
-      automationRuns.length === METRICS_SCAN_LIMIT;
+      automationRuns.length === METRICS_SCAN_LIMIT ||
+      usageRecords.length === METRICS_SCAN_LIMIT;
 
     const activeMem = memories.filter((m) => m.lifecycle === "active");
 
@@ -60,12 +62,24 @@ export const metrics = query({
       return b;
     }
 
+    const usageAgentIds = new Set<string>();
+
+    for (const r of usageRecords) {
+      const b = bucketFor(keyFor(r.createdAt));
+      b.agentCost += r.costUsd ?? 0;
+      b.inputTokens += r.inputTokens ?? 0;
+      b.outputTokens += r.outputTokens ?? 0;
+      if (r.agentId) usageAgentIds.add(r.agentId);
+    }
+
     for (const a of agents) {
       const b = bucketFor(keyFor(a.startedAt));
       b.agentsSpawned += 1;
-      b.agentCost += a.costUsd ?? 0;
-      b.inputTokens += a.inputTokens ?? 0;
-      b.outputTokens += a.outputTokens ?? 0;
+      if (!usageAgentIds.has(a.agentId)) {
+        b.agentCost += a.costUsd ?? 0;
+        b.inputTokens += a.inputTokens ?? 0;
+        b.outputTokens += a.outputTokens ?? 0;
+      }
       if (a.status === "completed") b.agentsCompleted += 1;
       else if (a.status === "failed") b.agentsFailed += 1;
       else if (a.status === "cancelled") b.agentsCancelled += 1;
@@ -95,11 +109,11 @@ export const metrics = query({
         ).length,
       },
       cost: {
-        total: agents.reduce((s, a) => s + (a.costUsd ?? 0), 0),
+        total: dailyBuckets.reduce((s, b) => s + b.agentCost, 0),
       },
       tokens: {
-        input: agents.reduce((s, a) => s + (a.inputTokens ?? 0), 0),
-        output: agents.reduce((s, a) => s + (a.outputTokens ?? 0), 0),
+        input: dailyBuckets.reduce((s, b) => s + b.inputTokens, 0),
+        output: dailyBuckets.reduce((s, b) => s + b.outputTokens, 0),
       },
       dailyBuckets,
       truncated,

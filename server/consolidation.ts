@@ -1,8 +1,9 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { broadcast } from "./broadcast.js";
-import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
+import { getRuntimeConfig, type RuntimeConfig } from "./runtime-config.js";
+import { runAgentRuntime } from "./runtimes/index.js";
+import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
 
 function randomId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -98,7 +99,7 @@ interface Challenge {
 }
 
 const ADVERSARY_MODEL = process.env.BOOP_ADVERSARY_MODEL ?? "claude-haiku-4-5";
-const DEFAULT_MODEL = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
+const CODEX_ADVERSARY_MODEL = process.env.BOOP_CODEX_ADVERSARY_MODEL;
 
 interface Decision {
   proposalIndex: number;
@@ -115,28 +116,20 @@ interface Applied {
 async function runLlm(
   systemPrompt: string,
   userPrompt: string,
-  model: string = DEFAULT_MODEL,
+  runtimeConfig: RuntimeConfig,
+  modelOverride?: string,
 ): Promise<{ buffer: string; usage: UsageTotals; durationMs: number }> {
   const started = Date.now();
-  let buffer = "";
-  let usage: UsageTotals = { ...EMPTY_USAGE };
-  for await (const msg of query({
+  const callConfig = modelOverride ? { ...runtimeConfig, model: modelOverride } : runtimeConfig;
+  let usage: UsageTotals = { ...EMPTY_USAGE, model: callConfig.model };
+  const result = await runAgentRuntime(callConfig, {
     prompt: userPrompt,
-    options: {
-      systemPrompt,
-      model,
-      permissionMode: "bypassPermissions",
-    },
-  })) {
-    if (msg.type === "assistant") {
-      for (const block of msg.message.content) {
-        if (block.type === "text") buffer += block.text;
-      }
-    } else if (msg.type === "result") {
-      usage = aggregateUsageFromResult(msg, model);
-    }
-  }
-  return { buffer, usage, durationMs: Date.now() - started };
+    systemPrompt,
+    tools: [],
+    mode: "background",
+  });
+  usage = result.usage;
+  return { buffer: result.text, usage, durationMs: Date.now() - started };
 }
 
 async function recordConsolidationUsage(
@@ -144,11 +137,14 @@ async function recordConsolidationUsage(
   runId: string,
   usage: UsageTotals,
   durationMs: number,
+  runtimeConfig: RuntimeConfig,
 ): Promise<void> {
   if (usage.costUsd <= 0 && usage.inputTokens <= 0) return;
   await convex.mutation(api.usageRecords.record, {
     source,
     runId,
+    runtime: runtimeConfig.runtime,
+    billingMode: runtimeConfig.billingMode,
     model: usage.model,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
@@ -176,6 +172,7 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
   pruned: number;
 }> {
   const runId = randomId("cons");
+  const runtimeConfig = await getRuntimeConfig();
   await convex.mutation(api.consolidation.createRun, { runId, trigger });
   broadcast("consolidation_started", { runId, trigger });
 
@@ -205,6 +202,11 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
       });
       return { runId, proposals: 0, merged: 0, pruned: 0 };
     }
+
+    const adversaryModel =
+      runtimeConfig.runtime === "claude"
+        ? ADVERSARY_MODEL
+        : CODEX_ADVERSARY_MODEL ?? runtimeConfig.model;
 
     const payload = memories
       .map((m) => {
@@ -237,12 +239,13 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
       .join("\n");
 
     broadcast("consolidation_phase", { runId, phase: "proposing" });
-    const proposerCall = await runLlm(PROPOSER_PROMPT, payload);
+    const proposerCall = await runLlm(PROPOSER_PROMPT, payload, runtimeConfig);
     await recordConsolidationUsage(
       "consolidation-proposer",
       runId,
       proposerCall.usage,
       proposerCall.durationMs,
+      runtimeConfig,
     );
     const proposerJson = parseJson<{ proposals: Proposal[] }>(proposerCall.buffer);
     const proposals = proposerJson?.proposals ?? [];
@@ -309,12 +312,18 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
 
     broadcast("consolidation_phase", { runId, phase: "challenging" });
     const adversaryPayload = `Proposals:\n${proposalsList}\n\nOriginal memories:\n${payload}`;
-    const adversaryCall = await runLlm(ADVERSARY_PROMPT, adversaryPayload, ADVERSARY_MODEL);
+    const adversaryCall = await runLlm(
+      ADVERSARY_PROMPT,
+      adversaryPayload,
+      runtimeConfig,
+      adversaryModel,
+    );
     await recordConsolidationUsage(
       "consolidation-adversary",
       runId,
       adversaryCall.usage,
       adversaryCall.durationMs,
+      runtimeConfig,
     );
     const adversaryJson = parseJson<{ challenges: Challenge[] }>(adversaryCall.buffer);
     const challenges = adversaryJson?.challenges ?? [];
@@ -346,12 +355,13 @@ export async function runConsolidation(trigger = "scheduled"): Promise<{
     const judgePayload = `Proposals:\n${proposalsList}\n\nAdversary challenges:\n${challengesBlock}\n\nOriginal memories:\n${payload}`;
 
     broadcast("consolidation_phase", { runId, phase: "judging" });
-    const judgeCall = await runLlm(JUDGE_PROMPT, judgePayload);
+    const judgeCall = await runLlm(JUDGE_PROMPT, judgePayload, runtimeConfig);
     await recordConsolidationUsage(
       "consolidation-judge",
       runId,
       judgeCall.usage,
       judgeCall.durationMs,
+      runtimeConfig,
     );
     const judgeJson = parseJson<{
       decisions: { proposalIndex: number; approve: boolean; rationale: string }[];

@@ -254,6 +254,93 @@ export function ClaudeLogo({ size = 12, className = "" }: { size?: number; class
   return <img src="/claude-logo.png" width={size} height={size} alt="Claude" className={`inline-block ${className}`} />;
 }
 
+export type RuntimeProvider = "claude" | "codex";
+
+export function CodexLogo({ size = 12, className = "" }: { size?: number; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  const radius = Math.max(4, Math.round(size * 0.28));
+
+  if (!failed) {
+    return (
+      <span
+        className={`inline-flex shrink-0 items-center justify-center overflow-hidden bg-white ${className}`}
+        style={{ width: size, height: size, borderRadius: radius }}
+      >
+        <img
+          src="https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+          width={Math.max(10, Math.round(size * 0.78))}
+          height={Math.max(10, Math.round(size * 0.78))}
+          alt="Codex"
+          className="block object-contain"
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed(true)}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center justify-center overflow-hidden bg-black text-white ${className}`}
+      style={{ width: size, height: size, borderRadius: radius }}
+      aria-label="Codex"
+    >
+      <span className="text-[9px] font-bold leading-none">C</span>
+    </span>
+  );
+}
+
+export function RuntimeProviderLogo({
+  runtime,
+  size = 16,
+  className = "",
+}: {
+  runtime: RuntimeProvider;
+  size?: number;
+  className?: string;
+}) {
+  return runtime === "codex" ? (
+    <CodexLogo size={size} className={className} />
+  ) : (
+    <ClaudeLogo size={size} className={className} />
+  );
+}
+
+export function RuntimeProviderBadge({
+  runtime,
+  model,
+  isDark,
+  compact = false,
+  className = "",
+}: {
+  runtime: RuntimeProvider;
+  model?: string | null;
+  isDark: boolean;
+  compact?: boolean;
+  className?: string;
+}) {
+  const label = runtime === "codex" ? "Codex" : "Claude";
+  return (
+    <div
+      className={`inline-flex min-w-0 items-center gap-1.5 rounded-lg border px-2 py-1 ${
+        isDark
+          ? "border-slate-800 bg-slate-900/70 text-slate-300"
+          : "border-slate-200 bg-white/80 text-slate-700"
+      } ${className}`}
+      title={`Active provider: ${label}${model ? ` (${model})` : ""}`}
+    >
+      <RuntimeProviderLogo runtime={runtime} size={compact ? 14 : 16} />
+      <span className="text-xs font-medium">{label}</span>
+      {!compact && model && (
+        <span className={`text-[10px] mono truncate ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+          {model}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function BrailleIndicator({ className = "" }: { className?: string }) {
   return (
     <div className={`braille-grid ${className}`}>

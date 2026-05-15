@@ -1,11 +1,15 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { broadcast } from "./broadcast.js";
-import { buildMcpServersForIntegrations, listIntegrations } from "./integrations/registry.js";
-import { createDraftStagingMcp } from "./draft-tools.js";
-import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
-import { getRuntimeModel } from "./runtime-config.js";
+import {
+  buildMcpServersForIntegrations,
+  buildRuntimeToolsForIntegrations,
+  listIntegrations,
+} from "./integrations/registry.js";
+import { createDraftStagingTools } from "./draft-tools.js";
+import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
+import { getRuntimeConfig, type RuntimeConfig } from "./runtime-config.js";
+import { runAgentRuntime } from "./runtimes/index.js";
 
 const running = new Map<string, AbortController>();
 
@@ -81,6 +85,7 @@ export interface SpawnOptions {
   integrations: string[];
   conversationId?: string;
   name?: string;
+  runtimeConfig?: RuntimeConfig;
 }
 
 export interface SpawnResult {
@@ -103,34 +108,40 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
     `spawn: ${name} [${opts.integrations.join(", ") || "no integrations"}] — ${JSON.stringify(taskPreview)}`,
   );
   const agentStart = Date.now();
+  const runtimeConfig = opts.runtimeConfig ?? (await getRuntimeConfig());
 
   await convex.mutation(api.agents.create, {
     agentId,
     conversationId: opts.conversationId,
     name,
     task: opts.task,
+    runtime: runtimeConfig.runtime,
+    model: runtimeConfig.model,
+    reasoningEffort: runtimeConfig.reasoningEffort,
+    billingMode: runtimeConfig.billingMode,
     mcpServers: opts.integrations,
   });
   broadcast("agent_spawned", { agentId, name, task: opts.task });
 
   await convex.mutation(api.agents.update, { agentId, status: "running" });
 
-  const integrationServers = await buildMcpServersForIntegrations(
-    opts.integrations,
-    opts.conversationId,
-  );
-  const draftServer = opts.conversationId
-    ? createDraftStagingMcp(opts.conversationId)
-    : undefined;
-  const mcpServers = {
-    ...integrationServers,
-    ...(draftServer ? { "boop-drafts": draftServer } : {}),
-  };
+  const draftTools = opts.conversationId ? createDraftStagingTools(opts.conversationId) : [];
+  const integrationServers =
+    runtimeConfig.runtime === "claude"
+      ? await buildMcpServersForIntegrations(opts.integrations, opts.conversationId)
+      : {};
+  const integrationTools =
+    runtimeConfig.runtime === "codex"
+      ? await buildRuntimeToolsForIntegrations(opts.integrations, opts.conversationId)
+      : [];
+  const mcpServers = integrationServers;
+  const runtimeTools = [...draftTools, ...integrationTools];
   const allowedTools = [
     "WebSearch",
     "WebFetch",
     "Skill",
     ...Object.keys(mcpServers).flatMap((n) => [`mcp__${n}__*`]),
+    ...(draftTools.length ? ["mcp__boop-drafts__*"] : []),
   ];
 
   let buffer = "";
@@ -138,67 +149,48 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   let status: "completed" | "failed" | "cancelled" = "completed";
   let errorMsg: string | undefined;
 
-  const requestedModel = await getRuntimeModel();
+  const requestedModel = runtimeConfig.model;
   try {
-    for await (const msg of query({
+    const result = await runAgentRuntime(runtimeConfig, {
       prompt: opts.task,
-      options: {
-        systemPrompt: EXECUTION_SYSTEM,
-        model: requestedModel,
-        mcpServers,
-        allowedTools,
-        // Load .claude/skills/ so the model can invoke SKILL.md playbooks. Without
-        // this the SDK runs in isolation mode and skills are silently ignored.
-        settingSources: ["project"],
-        permissionMode: "bypassPermissions",
-        abortController: abort,
+      systemPrompt: EXECUTION_SYSTEM,
+      claudeMcpServers: mcpServers,
+      tools: runtimeTools,
+      allowedTools,
+      abortController: abort,
+      mode: "execution",
+      onText: async (text) => {
+        buffer += text;
+        await convex.mutation(api.agents.addLog, {
+          agentId,
+          logType: "text",
+          content: text,
+        });
       },
-    })) {
-      if (msg.type === "assistant") {
-        for (const block of msg.message.content) {
-          if (block.type === "text") {
-            buffer += block.text;
-            await convex.mutation(api.agents.addLog, {
-              agentId,
-              logType: "text",
-              content: block.text,
-            });
-          } else if (block.type === "tool_use") {
-            const toolShort = block.name.replace(/^mcp__[a-z-]+__/, "");
-            const accounts = extractAccounts(block.input);
-            const acctSuffix = accounts.length ? ` [${accounts.join(", ")}]` : "";
-            logAgent(`tool: ${toolShort}${acctSuffix}`);
-            await convex.mutation(api.agents.addLog, {
-              agentId,
-              logType: "tool_use",
-              toolName: block.name,
-              ...(accounts.length ? { accounts } : {}),
-              content: JSON.stringify(block.input).slice(0, 2000),
-            });
-            broadcast("agent_tool", { agentId, toolName: block.name, accounts });
-          }
-        }
-      } else if (msg.type === "user") {
-        for (const block of msg.message.content) {
-          if (block.type === "tool_result") {
-            const text = Array.isArray(block.content)
-              ? block.content
-                  .map((c: { type: string; text?: string }) => (c.type === "text" ? (c.text ?? "") : ""))
-                  .join("")
-              : String(block.content ?? "");
-            await convex.mutation(api.agents.addLog, {
-              agentId,
-              logType: "tool_result",
-              content: text.slice(0, 2000),
-            });
-          }
-        }
-      } else if (msg.type === "result") {
-        // Always take the aggregate from modelUsage — msg.usage is just the
-        // final turn's raw tokens and massively undercounts on tool-heavy runs.
-        usage = aggregateUsageFromResult(msg, requestedModel);
-      }
-    }
+      onToolUse: async (toolName, input) => {
+        const toolShort = toolName.replace(/^mcp__[a-z-]+__/, "");
+        const accounts = extractAccounts(input);
+        const acctSuffix = accounts.length ? ` [${accounts.join(", ")}]` : "";
+        logAgent(`tool: ${toolShort}${acctSuffix}`);
+        await convex.mutation(api.agents.addLog, {
+          agentId,
+          logType: "tool_use",
+          toolName,
+          ...(accounts.length ? { accounts } : {}),
+          content: JSON.stringify(input).slice(0, 2000),
+        });
+        broadcast("agent_tool", { agentId, toolName, accounts });
+      },
+      onToolResult: async (_toolName, text) => {
+        await convex.mutation(api.agents.addLog, {
+          agentId,
+          logType: "tool_result",
+          content: text.slice(0, 2000),
+        });
+      },
+    });
+    if (!buffer) buffer = result.text;
+    usage = result.usage;
   } catch (err) {
     status = abort.signal.aborted ? "cancelled" : "failed";
     errorMsg = String(err);
@@ -233,6 +225,8 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
       source: "execution",
       conversationId: opts.conversationId,
       agentId,
+      runtime: runtimeConfig.runtime,
+      billingMode: runtimeConfig.billingMode,
       model: usage.model,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -261,11 +255,22 @@ export function runningAgentIds(): string[] {
 export async function retryAgent(agentId: string): Promise<SpawnResult | null> {
   const existing = await convex.query(api.agents.get, { agentId });
   if (!existing) return null;
+  const originalRuntime = existing as typeof existing & Partial<RuntimeConfig>;
+  const runtimeConfig =
+    originalRuntime.runtime && originalRuntime.model && originalRuntime.billingMode
+      ? {
+          runtime: originalRuntime.runtime,
+          model: originalRuntime.model,
+          reasoningEffort: originalRuntime.reasoningEffort,
+          billingMode: originalRuntime.billingMode,
+        }
+      : undefined;
   return await spawnExecutionAgent({
     task: existing.task,
     integrations: existing.mcpServers,
     conversationId: existing.conversationId,
     name: existing.name,
+    runtimeConfig,
   });
 }
 

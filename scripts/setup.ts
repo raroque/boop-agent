@@ -8,6 +8,45 @@ const ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
 const ENV_PATH = resolve(ROOT, ".env.local");
 const EXAMPLE_PATH = resolve(ROOT, ".env.example");
 
+type RuntimeChoice = "claude" | "codex";
+
+const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
+const DEFAULT_CODEX_MODEL = "gpt-5.5";
+const DEFAULT_CODEX_REASONING_EFFORT = "medium";
+
+const CLAUDE_MODEL_CHOICES = [
+  { title: "claude-sonnet-4-6 (recommended)", value: "claude-sonnet-4-6" },
+  { title: "claude-opus-4-6 (slowest, most capable)", value: "claude-opus-4-6" },
+  { title: "claude-haiku-4-5 (fastest, cheapest)", value: "claude-haiku-4-5" },
+];
+
+const CODEX_MODEL_CHOICES = [
+  { title: "gpt-5.5 (most capable)", value: "gpt-5.5" },
+  { title: "gpt-5.4-mini (faster local testing)", value: "gpt-5.4-mini" },
+  { title: "gpt-5.4 (balanced)", value: "gpt-5.4" },
+  { title: "gpt-5.3-codex (coding optimized)", value: "gpt-5.3-codex" },
+];
+
+const CODEX_REASONING_CHOICES = [
+  { title: "low (fastest)", value: "low" },
+  { title: "medium (recommended)", value: "medium" },
+  { title: "high (deeper reasoning)", value: "high" },
+  { title: "xhigh (maximum reasoning)", value: "xhigh" },
+];
+
+function runtimeFromEnv(value: string | undefined): RuntimeChoice {
+  return value === "codex" ? "codex" : "claude";
+}
+
+function initialForChoice<T extends readonly { value: string }[]>(
+  choices: T,
+  value: string | undefined,
+  fallback = 0,
+): number {
+  const index = choices.findIndex((choice) => choice.value === value);
+  return index >= 0 ? index : fallback;
+}
+
 function readEnv(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
   const lines = readFileSync(path, "utf8").split("\n");
@@ -60,7 +99,7 @@ function writeEnv(path: string, env: Record<string, string>): void {
 
 function cleanConvexUrlEnv(path: string): void {
   const envContent = readFileSync(path, "utf8");
-  const updated = envContent.replace(/^VITE_CONVEX_URL=.*(\r?\n)?/gm, "");
+  const updated = envContent.replace(/^(?:CONVEX_URL|VITE_CONVEX_URL)=.*(\r?\n)?/gm, "");
   writeFileSync(path, updated);
 }
 
@@ -80,7 +119,8 @@ async function runConvexDev(): Promise<void> {
     : ["convex", "dev", "--once", "--configure", "new"];
 
   if (!existing.CONVEX_DEPLOYMENT) {
-    // Remove VITE_CONVEX_URL from the env file to allow convex cli to populate it.
+    // Remove old Convex URLs from the env file to allow convex cli to populate
+    // the Vite URL cleanly.
     cleanConvexUrlEnv(ENV_PATH);
   }
 
@@ -323,17 +363,19 @@ async function main() {
   console.log(`
 What this does:
   1. Pulls your Sendblue keys (via their CLI, or you paste them)
-  2. Asks about your Claude model preference
+  2. Asks whether Boop should use your Claude Code or Codex subscription
   3. Runs \`npx convex dev\` to create a Convex project
   4. Writes .env.local
 
 Before you start:
-  • A Claude Code subscription:    https://claude.com/code
-  • Convex account (free tier):    https://convex.dev
-  • Sendblue (free on agent plan): https://sendblue.com
+  • Claude Code subscription if choosing Claude: https://claude.com/code
+  • Codex/ChatGPT account if choosing Codex:     run \`codex login\`
+  • Convex account (free tier):                  https://convex.dev
+  • Sendblue (free on agent plan):               https://sendblue.com
 `);
 
   const existing = readEnv(ENV_PATH);
+  const runtimeDefault = runtimeFromEnv(existing.BOOP_RUNTIME);
   const cli = await importSendblueFromCli();
 
   const sendblueDefaults = {
@@ -374,14 +416,49 @@ Before you start:
       ...sendbluePrompts,
       {
         type: "select",
+        name: "BOOP_RUNTIME",
+        message: "Which subscription should Boop use for the agent runtime?",
+        choices: [
+          {
+            title: "Claude Code subscription",
+            value: "claude",
+            description: "Uses the Claude Agent SDK and your local `claude` login.",
+          },
+          {
+            title: "Codex / ChatGPT subscription",
+            value: "codex",
+            description: "Uses local `codex app-server` auth from `codex login`.",
+          },
+        ],
+        initial: runtimeDefault === "codex" ? 1 : 0,
+      },
+      {
+        type: (_prev: unknown, values: Record<string, unknown>) =>
+          values.BOOP_RUNTIME === "claude" ? "select" : null,
         name: "BOOP_MODEL",
         message: "Which Claude model should the agent use?",
-        choices: [
-          { title: "claude-sonnet-4-6 (recommended)", value: "claude-sonnet-4-6" },
-          { title: "claude-opus-4-6 (slowest, most capable)", value: "claude-opus-4-6" },
-          { title: "claude-haiku-4-5 (fastest, cheapest)", value: "claude-haiku-4-5" },
-        ],
-        initial: 0,
+        choices: CLAUDE_MODEL_CHOICES,
+        initial: initialForChoice(CLAUDE_MODEL_CHOICES, existing.BOOP_MODEL),
+      },
+      {
+        type: (_prev: unknown, values: Record<string, unknown>) =>
+          values.BOOP_RUNTIME === "codex" ? "select" : null,
+        name: "BOOP_CODEX_MODEL",
+        message: "Which Codex model should the agent use?",
+        choices: CODEX_MODEL_CHOICES,
+        initial: initialForChoice(CODEX_MODEL_CHOICES, existing.BOOP_CODEX_MODEL),
+      },
+      {
+        type: (_prev: unknown, values: Record<string, unknown>) =>
+          values.BOOP_RUNTIME === "codex" ? "select" : null,
+        name: "BOOP_CODEX_REASONING_EFFORT",
+        message: "How much Codex reasoning effort should Boop use?",
+        choices: CODEX_REASONING_CHOICES,
+        initial: initialForChoice(
+          CODEX_REASONING_CHOICES,
+          existing.BOOP_CODEX_REASONING_EFFORT,
+          1,
+        ),
       },
       {
         type: "text",
@@ -406,6 +483,14 @@ Before you start:
 
   // Merge CLI-sourced defaults with what the user answered (answer wins).
   Object.assign(answers, {
+    BOOP_RUNTIME: answers.BOOP_RUNTIME ?? runtimeDefault,
+    BOOP_MODEL: answers.BOOP_MODEL ?? existing.BOOP_MODEL ?? DEFAULT_CLAUDE_MODEL,
+    BOOP_CODEX_MODEL:
+      answers.BOOP_CODEX_MODEL ?? existing.BOOP_CODEX_MODEL ?? DEFAULT_CODEX_MODEL,
+    BOOP_CODEX_REASONING_EFFORT:
+      answers.BOOP_CODEX_REASONING_EFFORT ??
+      existing.BOOP_CODEX_REASONING_EFFORT ??
+      DEFAULT_CODEX_REASONING_EFFORT,
     SENDBLUE_API_KEY: answers.SENDBLUE_API_KEY ?? sendblueDefaults.SENDBLUE_API_KEY,
     SENDBLUE_API_SECRET: answers.SENDBLUE_API_SECRET ?? sendblueDefaults.SENDBLUE_API_SECRET,
     SENDBLUE_FROM_NUMBER: answers.SENDBLUE_FROM_NUMBER ?? sendblueDefaults.SENDBLUE_FROM_NUMBER,
@@ -626,8 +711,26 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
   if (env.VITE_CONVEX_URL?.includes("example.convex.cloud")) delete env.VITE_CONVEX_URL;
   writeEnv(ENV_PATH, env);
 
-  banner("Claude authentication");
-  console.log(`This project uses your Claude Code subscription — no Anthropic API key needed.
+  if (env.BOOP_RUNTIME === "codex") {
+    const codexInstalled = await hasBinary("codex");
+    banner("Codex authentication");
+    console.log(`This project uses your Codex / ChatGPT subscription through local Codex auth — no OpenAI API key needed.
+
+If you haven't already:
+  • Install Codex CLI:  npm install -g @openai/codex
+  • Run once:           codex login
+  • Sign in when prompted
+
+Boop reads the Codex credentials saved on disk. Set BOOP_CODEX_AUTH_HOME in
+.env.local only if you need Boop to read a different Codex home containing
+auth.json.
+
+${codexInstalled ? "✓ Codex CLI found on PATH." : "⚠ Codex CLI was not found on PATH. Install it before running `npm run dev`."}
+`);
+  } else {
+    const claudeInstalled = await hasBinary("claude");
+    banner("Claude authentication");
+    console.log(`This project uses your Claude Code subscription — no Anthropic API key needed.
 
 If you haven't already:
   • Install Claude Code:  npm install -g @anthropic-ai/claude-code
@@ -636,29 +739,32 @@ If you haven't already:
 
 The Claude Agent SDK reads the credentials Claude Code saves on disk.
 You can override with ANTHROPIC_API_KEY in .env.local if you'd rather use an API key.
+
+${claudeInstalled ? "✓ Claude Code found on PATH." : "⚠ Claude Code was not found on PATH. Install it before running `npm run dev`."}
 `);
+  }
 
   if (answers.runConvex) {
     await runConvexDev();
     const after = readEnv(ENV_PATH);
 
-    // CONVEX_URL or VITE_CONVEX_URL is written to .env.local as part of `convex dev`; derive CONVEX_URL from it
-    // if not available, fallback to deriving from CONVEX_DEPLOYMENT.
+    // VITE_CONVEX_URL is written to .env.local as part of `convex dev`. The
+    // server falls back to it, so avoid writing an active CONVEX_URL too; Convex
+    // CLI treats multiple Convex URL env vars as ambiguous.
     const deploymentMatch =
       after.CONVEX_DEPLOYMENT?.match(/^([a-z]+):([\w-]+)/);
 
     if (deploymentMatch) {
       const url =
-        after.CONVEX_URL ||
         after.VITE_CONVEX_URL ||
+        after.CONVEX_URL ||
         `https://${deploymentMatch[2]}.convex.cloud`;
-      if (after.CONVEX_URL !== url || after.VITE_CONVEX_URL !== url) {
+      if (after.VITE_CONVEX_URL !== url || after.CONVEX_URL) {
         writeEnv(ENV_PATH, {
           ...after,
-          CONVEX_URL: url,
           VITE_CONVEX_URL: url,
         });
-        console.log(`\n✓ Synced CONVEX_URL + VITE_CONVEX_URL → ${url}`);
+        console.log(`\n✓ Synced VITE_CONVEX_URL → ${url}`);
       }
     }
   } else {

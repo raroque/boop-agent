@@ -16,6 +16,15 @@ import { createComposioRouter } from "./composio-routes.js";
 import { ensureProactiveWatcher } from "./proactive-email.js";
 import { preloadLocalModel } from "./embeddings.js";
 import { createMemoryRouter } from "./memory-routes.js";
+import {
+  getRuntimeConfig,
+  resolveModelInput,
+  resolveReasoningEffortInput,
+  resolveRuntimeInput,
+  setCodexReasoningEffort,
+  setRuntimeModel,
+  setRuntimeProvider,
+} from "./runtime-config.js";
 
 async function main() {
   await loadIntegrations();
@@ -50,6 +59,64 @@ async function main() {
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, service: "boop-agent" });
+  });
+
+  app.get("/runtime-config", async (_req, res) => {
+    try {
+      res.json(await getRuntimeConfig());
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.post("/runtime-config", async (req, res) => {
+    try {
+      const body = req.body as {
+        runtime?: unknown;
+        model?: unknown;
+        reasoningEffort?: unknown;
+      };
+      let runtime =
+        body.runtime === undefined
+          ? undefined
+          : resolveRuntimeInput(String(body.runtime));
+      if (body.runtime !== undefined && !runtime) {
+        res.status(400).json({ error: `Unknown runtime "${String(body.runtime)}"` });
+        return;
+      }
+
+      if (runtime) {
+        await setRuntimeProvider(runtime);
+      }
+
+      runtime ??= (await getRuntimeConfig()).runtime;
+
+      if (body.model !== undefined) {
+        const model = resolveModelInput(String(body.model), runtime);
+        if (!model) {
+          res
+            .status(400)
+            .json({ error: `Unknown ${runtime} model "${String(body.model)}"` });
+          return;
+        }
+        await setRuntimeModel(model, runtime);
+      }
+
+      if (body.reasoningEffort !== undefined) {
+        const effort = resolveReasoningEffortInput(String(body.reasoningEffort));
+        if (!effort) {
+          res.status(400).json({
+            error: `Unknown Codex reasoning effort "${String(body.reasoningEffort)}"`,
+          });
+          return;
+        }
+        await setCodexReasoningEffort(effort);
+      }
+
+      res.json(await getRuntimeConfig());
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
   });
 
   app.use("/sendblue", createSendblueRouter());
@@ -91,7 +158,11 @@ async function main() {
       return;
     }
     try {
-      const reply = await handleUserMessage({ conversationId, content });
+      const reply = await handleUserMessage({
+        conversationId,
+        content,
+        persistAssistantReply: true,
+      });
       res.json({ reply });
     } catch (err) {
       console.error(err);

@@ -21,6 +21,7 @@ import { EventsPanel } from "./components/EventsPanel.js";
 import { ConnectionsPanel } from "./components/ConnectionsPanel.js";
 import { ConsolidationPanel } from "./components/ConsolidationPanel.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
+import { RuntimeProviderBadge, type RuntimeProvider } from "./lib/branding.js";
 
 type View =
   | "dashboard"
@@ -33,6 +34,11 @@ type View =
   | "settings";
 
 type Theme = "dark" | "light";
+
+interface RuntimeConfigSnapshot {
+  runtime: RuntimeProvider;
+  model: string;
+}
 
 const NAV_ICONS: Record<View, any> = {
   dashboard: DashboardSquare01Icon,
@@ -67,10 +73,12 @@ function getStoredTheme(): Theme {
 export function App() {
   const [view, setView] = useState<View>("dashboard");
   const [theme, setTheme] = useState<Theme>(getStoredTheme);
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfigSnapshot | null>(null);
   const { connected } = useSocket();
 
   const counts = useQuery(api.memoryRecords.countsByTier, {});
   const agents = useQuery(api.agents.list, {});
+  const storedRuntime = useQuery(api.settings.get, { key: "runtime" });
   const activeAgentCount = (agents ?? []).filter(
     (a) => a.status === "running" || a.status === "spawned",
   ).length;
@@ -83,7 +91,30 @@ export function App() {
     localStorage.setItem("boop-debug-theme", theme);
   }, [theme]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/runtime-config")
+      .then((res) => {
+        if (!res.ok) throw new Error(`Runtime config fetch failed (${res.status})`);
+        return res.json() as Promise<RuntimeConfigSnapshot>;
+      })
+      .then((config) => {
+        if (!cancelled) setRuntimeConfig(config);
+      })
+      .catch(() => {
+        if (!cancelled) setRuntimeConfig(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [storedRuntime]);
+
   const isDark = theme === "dark";
+  const activeRuntime: RuntimeProvider =
+    storedRuntime === "claude" || storedRuntime === "codex"
+      ? storedRuntime
+      : runtimeConfig?.runtime ?? "claude";
+  const runtimeKnown = storedRuntime !== undefined || runtimeConfig !== null;
 
   return (
     <div
@@ -124,6 +155,13 @@ export function App() {
         </div>
 
         <div className="flex items-center gap-4">
+          {runtimeKnown && (
+            <RuntimeProviderBadge
+              runtime={activeRuntime}
+              model={runtimeConfig?.runtime === activeRuntime ? runtimeConfig.model : undefined}
+              isDark={isDark}
+            />
+          )}
           {counts && (
             <div className="flex items-center gap-4">
               <MetricPill label="Short" value={counts.short} isDark={isDark} />
@@ -214,7 +252,7 @@ export function App() {
             <span
               className={`text-[10px] ${isDark ? "text-slate-600" : "text-slate-400"} mono`}
             >
-              v0.1
+              v0.2
             </span>
           </div>
         </nav>

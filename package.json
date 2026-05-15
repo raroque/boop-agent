@@ -1,6 +1,6 @@
 {
   "name": "boop-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Text-an-agent starter: iMessage your Claude agent, it runs sub-agents, remembers you, and grows with integrations you add.",
   "license": "MIT",

@@ -1,8 +1,9 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { api } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 import { embed } from "../embeddings.js";
-import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "../usage.js";
+import { getRuntimeConfig, type RuntimeConfig } from "../runtime-config.js";
+import { runAgentRuntime } from "../runtimes/index.js";
+import { EMPTY_USAGE, type UsageTotals } from "../usage.js";
 import { SEGMENT_DEFAULTS, makeMemoryId, type MemorySegment } from "./types.js";
 
 const EXTRACTION_PROMPT = `You are a memory-extraction subagent.
@@ -42,35 +43,29 @@ export async function extractAndStore(opts: {
   userMessage: string;
   assistantReply: string;
   turnId: string;
+  runtimeConfig?: RuntimeConfig;
 }): Promise<void> {
   const started = Date.now();
-  const requestedModel = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
   try {
+    const runtimeConfig = opts.runtimeConfig ?? (await getRuntimeConfig());
     const payload = `USER: ${opts.userMessage}\n\nASSISTANT: ${opts.assistantReply}`;
-    let buffer = "";
-    let usage: UsageTotals = { ...EMPTY_USAGE };
-    for await (const msg of query({
+    let usage: UsageTotals = { ...EMPTY_USAGE, model: runtimeConfig.model };
+    const result = await runAgentRuntime(runtimeConfig, {
       prompt: payload,
-      options: {
-        systemPrompt: EXTRACTION_PROMPT,
-        model: requestedModel,
-        permissionMode: "bypassPermissions",
-      },
-    })) {
-      if (msg.type === "assistant") {
-        for (const block of msg.message.content) {
-          if (block.type === "text") buffer += block.text;
-        }
-      } else if (msg.type === "result") {
-        usage = aggregateUsageFromResult(msg, requestedModel);
-      }
-    }
+      systemPrompt: EXTRACTION_PROMPT,
+      tools: [],
+      mode: "background",
+    });
+    const buffer = result.text;
+    usage = result.usage;
 
     if (usage.costUsd > 0 || usage.inputTokens > 0) {
       await convex.mutation(api.usageRecords.record, {
         source: "extract",
         conversationId: opts.conversationId,
         turnId: opts.turnId,
+        runtime: runtimeConfig.runtime,
+        billingMode: runtimeConfig.billingMode,
         model: usage.model,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
