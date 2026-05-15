@@ -248,14 +248,20 @@ class CodexAppServerClient {
     this.codexHome = spawned.codexHome;
 
     const abortSignal = request.abortController?.signal;
+    let abortHandled = false;
     const onAbort = () => {
+      if (abortHandled) return;
+      abortHandled = true;
       const err = new Error("Codex runtime aborted");
       for (const pending of this.pending.values()) pending.reject(err);
       this.pending.clear();
-      this.turnCompletion?.reject(err);
+      const turnCompletion = this.turnCompletion;
+      this.turnCompletion = null;
+      turnCompletion?.reject(err);
       void this.close();
     };
-    abortSignal?.addEventListener("abort", onAbort, { once: true });
+    if (abortSignal?.aborted) onAbort();
+    else abortSignal?.addEventListener("abort", onAbort, { once: true });
 
     const stdout = readline.createInterface({ input: this.child.stdout });
     stdout.on("line", (line) => this.onLine(line));
@@ -269,11 +275,12 @@ class CodexAppServerClient {
       const err = new Error(`codex app-server exited (${code ?? signal ?? "unknown"})`);
       for (const pending of this.pending.values()) pending.reject(err);
       this.pending.clear();
-      this.turnCompletion?.reject(err);
+      const turnCompletion = this.turnCompletion;
+      this.turnCompletion = null;
+      turnCompletion?.reject(err);
     });
 
     try {
-      if (abortSignal?.aborted) onAbort();
       await this.call("initialize", {
         clientInfo: { name: "boop-agent", title: "Boop Agent", version: "0.2.0" },
         capabilities: { experimentalApi: true },
