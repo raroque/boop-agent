@@ -413,6 +413,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const requestedModel = await getRuntimeModel();
   let reply = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
+  let deltaSeq = 0;
   try {
     for await (const msg of query({
       prompt,
@@ -476,6 +477,11 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           if (block.type === "text") {
             reply += block.text;
             opts.onThinking?.(block.text);
+            broadcast("assistant_delta", {
+              conversationId: opts.conversationId,
+              delta: block.text,
+              seq: deltaSeq++,
+            });
           } else if (block.type === "tool_use") {
             const name = block.name.replace(/^mcp__boop-[a-z-]+__/, "");
             const inputPreview = JSON.stringify(block.input);

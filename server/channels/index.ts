@@ -125,11 +125,40 @@ export async function runTurn(inbound: ParsedInbound): Promise<void> {
             }
           : {};
       await dispatch(conversationId, reply, sendOpts);
-      await convex.mutation(api.messages.send, {
-        conversationId,
-        role: "assistant",
-        content: reply,
-      });
+      // F5 retry: the SSE/dashboard already streamed the reply via
+      // broadcast("assistant_message"), so a silent messages.send
+      // failure leaves an orphan — visible in the live UI, absent on
+      // cold reload. Retry with backoff; surface terminal failures as
+      // an error broadcast so iOS clients can flag the lost write.
+      let sendErr: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await convex.mutation(api.messages.send, {
+            conversationId,
+            role: "assistant",
+            content: reply,
+          });
+          sendErr = undefined;
+          break;
+        } catch (err) {
+          sendErr = err;
+          console.warn(
+            `[turn ${turnTag}] messages.send attempt ${attempt + 1} failed`,
+            err,
+          );
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 100 * Math.pow(3, attempt)));
+          }
+        }
+      }
+      if (sendErr) {
+        console.error(`[turn ${turnTag}] messages.send terminal failure`, sendErr);
+        broadcast("error", {
+          conversationId,
+          source: "messages.send",
+          message: "reply was not saved to history",
+        });
+      }
     } else {
       console.log(`[turn ${turnTag}] → (no reply)`);
     }

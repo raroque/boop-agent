@@ -2,7 +2,7 @@ import type { Router } from "express";
 import type { Doc } from "../../convex/_generated/dataModel.js";
 
 /** Identifier for each channel; used as the conversationId prefix and registry key. */
-export type ChannelId = "sms" | "tg";
+export type ChannelId = "sms" | "tg" | "ios";
 
 /** Conversation IDs are channel-prefixed: "sms:+15551234567" or "tg:123456789". */
 export type ConversationId = `${ChannelId}:${string}`;
@@ -57,5 +57,5 @@ export function stripChannelPrefix(conversationId: ConversationId): string {
 /** Extract the channel id from a ConversationId. "tg:123" -> "tg" */
 export function channelIdOf(conversationId: string): ChannelId | null {
   const prefix = conversationId.split(":", 1)[0];
-  return prefix === "sms" || prefix === "tg" ? prefix : null;
+  return prefix === "sms" || prefix === "tg" || prefix === "ios" ? prefix : null;
 }

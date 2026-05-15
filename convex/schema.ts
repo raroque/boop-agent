@@ -351,6 +351,29 @@ export default defineSchema({
   // only ever sees ciphertext + nonce + auth tag. `username` is stored in
   // the clear so list views can show "which github account" without
   // forcing a decrypt.
+  // Authorization roster for iOS app instances paired with this boop.
+  // Not a user table — boop is single-user; a row here is just "this
+  // device may talk to this boop." Pairing flow: client posts a UUID,
+  // server returns a 6-digit code + expiry (hashed in the row). User
+  // pastes the code into the dashboard, which marks the device paired
+  // and issues a bearer token (also stored as a hash). Subsequent
+  // inbound HTTP + SSE auth via the bearer.
+  devices: defineTable({
+    deviceId: v.string(),
+    pairingCodeHash: v.optional(v.string()),
+    pairingExpiresAt: v.optional(v.number()),
+    paired: v.boolean(),
+    bearerTokenHash: v.optional(v.string()),
+    apnsDeviceToken: v.optional(v.string()),
+    label: v.optional(v.string()),
+    pairedAt: v.optional(v.number()),
+    lastSeenAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_deviceId", ["deviceId"])
+    .index("by_pairing", ["pairingCodeHash"])
+    .index("by_bearer", ["bearerTokenHash"]),
+
   userCredentials: defineTable({
     label: v.string(),
     host: v.string(),
