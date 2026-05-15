@@ -59,3 +59,26 @@ export function channelIdOf(conversationId: string): ChannelId | null {
   const prefix = conversationId.split(":", 1)[0];
   return prefix === "sms" || prefix === "tg" || prefix === "ios" ? prefix : null;
 }
+
+/** Parse an iOS conversationId.
+ *
+ * Returns `{ deviceId, threadId }`:
+ *   - "ios:abc-uuid"             → { deviceId: "abc-uuid", threadId: null }   (legacy M1)
+ *   - "ios:abc-uuid:thread-id"   → { deviceId: "abc-uuid", threadId: "thread-id" }
+ *
+ * Returns `null` if the id doesn't have the `ios:` prefix.
+ */
+export function parseIosConversationId(
+  cid: string,
+): { deviceId: string; threadId: string | null } | null {
+  if (!cid.startsWith("ios:")) return null;
+  const rest = cid.slice("ios:".length);
+  const sep = rest.indexOf(":");
+  if (sep === -1) return { deviceId: rest, threadId: null };
+  return { deviceId: rest.slice(0, sep), threadId: rest.slice(sep + 1) };
+}
+
+/** Construct an iOS conversationId from a deviceId + threadId. */
+export function iosConversationId(deviceId: string, threadId: string): ConversationId {
+  return `ios:${deviceId}:${threadId}` as ConversationId;
+}
