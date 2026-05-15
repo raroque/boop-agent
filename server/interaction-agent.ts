@@ -7,7 +7,11 @@ import { availableIntegrations, spawnExecutionAgent } from "./execution-agent.js
 import { createAutomationTools } from "./automation-tools.js";
 import { createDraftDecisionTools } from "./draft-tools.js";
 import { createSelfTools } from "./self-tools.js";
-import { getRuntimeConfig } from "./runtime-config.js";
+import {
+  getRuntimeConfig,
+  resolveRuntimeInput,
+  setRuntimeProvider,
+} from "./runtime-config.js";
 import { broadcast } from "./broadcast.js";
 import { sendImessage } from "./sendblue.js";
 import { defineRuntimeTool } from "./runtimes/tool.js";
@@ -206,6 +210,23 @@ function randomId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function runtimeLabel(runtime: "claude" | "codex"): string {
+  return runtime === "codex" ? "Codex" : "Claude";
+}
+
+export function resolveDirectRuntimeSwitch(content: string): "claude" | "codex" | null {
+  const normalized = content
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+  const match = normalized.match(
+    /^(?:please |pls |can you )?(?:switch|change|set|use|move|flip)(?: me| boop)?(?: (?:runtime|provider))?(?: back| over)?(?: to)? (?<runtime>claude agent sdk|chatgpt codex|anthropic|claude|codex|chatgpt)(?: runtime| provider)?(?: for (?:the )?next turn)?(?: please)?$/,
+  );
+  if (!match?.groups?.runtime) return null;
+  return resolveRuntimeInput(match.groups.runtime);
+}
+
 export function resolveSpawnImageRefs(
   requestedRefs: string[] | undefined,
   inboundImageStorageIds: string[],
@@ -275,6 +296,28 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   // changes do not split the dispatcher and any spawned execution agent.
   const runtimeConfig = await getRuntimeConfig();
   const requestedModel = runtimeConfig.model;
+  const directRuntimeSwitch =
+    opts.kind === "proactive" ? null : resolveDirectRuntimeSwitch(opts.content);
+  if (directRuntimeSwitch) {
+    await setRuntimeProvider(directRuntimeSwitch);
+    const nextConfig = await getRuntimeConfig();
+    const label = runtimeLabel(directRuntimeSwitch);
+    const reply =
+      runtimeConfig.runtime === directRuntimeSwitch
+        ? `Already on ${label}. Next turn will use ${nextConfig.model}.`
+        : `Switched to ${label}. Next turn will use ${nextConfig.model}.`;
+    log(`runtime switch: ${runtimeConfig.runtime} -> ${directRuntimeSwitch}`);
+    broadcast("assistant_message", { conversationId: opts.conversationId, content: reply });
+    if (opts.persistAssistantReply) {
+      await convex.mutation(api.messages.send, {
+        conversationId: opts.conversationId,
+        role: "assistant",
+        content: reply,
+        turnId,
+      });
+    }
+    return reply;
+  }
   const sendAck = async (message: string): Promise<void> => {
     const text = message.trim();
     if (!text) return;
