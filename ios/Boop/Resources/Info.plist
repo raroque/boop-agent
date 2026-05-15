@@ -33,6 +33,14 @@
     <array>
         <string>arm64</string>
     </array>
+    <key>UIAppFonts</key>
+    <array>
+        <string>Fonts/Inter-Regular.otf</string>
+        <string>Fonts/Inter-Medium.otf</string>
+        <string>Fonts/Inter-SemiBold.otf</string>
+        <string>Fonts/JetBrainsMono-Regular.ttf</string>
+        <string>Fonts/JetBrainsMono-Medium.ttf</string>
+    </array>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
