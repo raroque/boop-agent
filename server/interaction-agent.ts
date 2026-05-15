@@ -8,7 +8,7 @@ import { extractAndStore } from "./memory/extract.js";
 import { availableIntegrations, describeIntegrations, spawnExecutionAgent } from "./execution-agent.js";
 import { createAutomationMcp } from "./automation-tools.js";
 import { createDraftDecisionMcp } from "./draft-tools.js";
-import { createSelfMcp } from "./self-tools.js";
+import { createSelfMcp, setCurrentTurnThreadId } from "./self-tools.js";
 import { getRuntimeModel } from "./runtime-config.js";
 import { getChannelPrimary } from "./runtime-config.js";
 import { broadcast } from "./broadcast.js";
@@ -194,6 +194,19 @@ answer. Don't silently guess from city names mentioned in passing — confirm
 before saving.
 
 Available integrations for spawn_agent: {{INTEGRATIONS}}
+
+Threads (iOS only):
+The user may have multiple threads open at once on iOS. Each thread is its own
+chat with its own message history; user memories (recall/write_memory) are
+shared across all threads.
+
+When you reply for the FIRST TIME in a brand-new thread (no prior assistant
+messages in this conversation), call set_thread_icon with one Lucide icon
+name that captures the thread's topic. Call it BEFORE your first text reply.
+Example: user says "what's on my calendar?" → call set_thread_icon({"icon":"calendar"}),
+then reply.
+
+Skip this on subsequent turns. Skip it on non-iOS channels (no-op anyway).
 
 Format: Plain iMessage-friendly text. Markdown sparingly. Keep replies under ~400 chars when you can.`;
 
@@ -415,6 +428,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   let reply = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
   let deltaSeq = 0;
+  setCurrentTurnThreadId(opts.threadId ?? null);
   try {
     for await (const msg of query({
       prompt,
@@ -448,6 +462,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           "mcp__boop-self__list_integrations",
           "mcp__boop-self__search_composio_catalog",
           "mcp__boop-self__inspect_toolkit",
+          "mcp__boop-self__set_thread_icon",
         ],
         // Belt-and-suspenders: even with bypassPermissions the SDK can leak
         // its built-ins if we only whitelist. Explicitly block them on the
@@ -498,6 +513,8 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   } catch (err) {
     console.error(`[turn ${tag}] query failed`, err);
     reply = "Sorry — I hit an error processing that. Try again in a moment.";
+  } finally {
+    setCurrentTurnThreadId(null);
   }
 
   // Sometimes the model produces a placeholder string like "(no output)" or

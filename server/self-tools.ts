@@ -25,6 +25,23 @@ import {
   resolveTimezoneInput,
   setUserTimezone,
 } from "./timezone-config.js";
+import { convex } from "./convex-client.js";
+import { api } from "../convex/_generated/api.js";
+
+// ---------- per-turn iOS thread id ref ----------
+// Set once per turn by the dispatcher; cleared in finally. Allows
+// set_thread_icon to stamp the current thread without the tool needing
+// the threadId in its own arguments.
+
+let currentTurnThreadId: string | null = null;
+
+export function setCurrentTurnThreadId(threadId: string | null): void {
+  currentTurnThreadId = threadId;
+}
+
+function getCurrentTurnThreadId(): string | null {
+  return currentTurnThreadId;
+}
 
 export function createSelfMcp() {
   return createSdkMcpServer({
@@ -206,6 +223,48 @@ channel is not configured or the user has not texted it yet.`,
               },
             ],
           };
+        },
+      ),
+      tool(
+        "set_thread_icon",
+        `Pick the Lucide icon name that best represents the topic of the current
+   iOS thread. Call this ONCE per thread, on the first reply, before any
+   other text. Choose from the curated set:
+   calendar, clock, lightbulb, sparkles, search, telescope, mail,
+   message-circle, send, code, terminal, git-branch, briefcase, building,
+   file-text, shopping-cart, dollar-sign, credit-card, plane, map,
+   compass, book, book-open, bookmark, music, headphones, heart, smile,
+   dumbbell, salad, car, train-front, graduation-cap, phone-call, video,
+   utensils, coffee, list-todo, check-square, globe, languages, baby,
+   paw-print.
+   Only effective when the user is on iOS. Returns success or no-op.`,
+        {
+          icon: z.string().describe("One of the curated Lucide icon names."),
+        },
+        async (args) => {
+          const threadId = getCurrentTurnThreadId();
+          if (!threadId) {
+            return {
+              content: [{ type: "text" as const, text: "Not an iOS thread — no-op." }],
+            };
+          }
+          try {
+            await convex.mutation(api.threads.setIcon, {
+              threadId: threadId as any,
+              icon: args.icon,
+            });
+            return {
+              content: [
+                { type: "text" as const, text: `Thread icon set to ${args.icon}.` },
+              ],
+            };
+          } catch (err) {
+            return {
+              content: [
+                { type: "text" as const, text: `Failed to set thread icon: ${String(err)}` },
+              ],
+            };
+          }
         },
       ),
       tool(
