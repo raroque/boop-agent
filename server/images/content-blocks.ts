@@ -23,6 +23,20 @@ type TextBlock = { type: "text"; text: string };
 
 export type PromptInput = string | Array<ImageBlock | TextBlock>;
 
+export interface PromptBuildResult {
+  prompt: PromptInput;
+  imageStorageIds: string[];
+  imageError?: string;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function textOnlyImageFallback(text: string): string {
+  return `[user sent images, but Boop couldn't retrieve the stored image bytes. Continue using the text-only message; if image details are necessary, say the image could not be inspected.]\n${text}`;
+}
+
 export async function buildPromptWithImages(
   args: BuildPromptArgs,
 ): Promise<PromptInput> {
@@ -40,6 +54,26 @@ export async function buildPromptWithImages(
   }));
   blocks.push({ type: "text", text: args.text.length > 0 ? args.text : "(image)" });
   return blocks;
+}
+
+export async function buildPromptWithImagesOrTextFallback(
+  args: BuildPromptArgs,
+): Promise<PromptBuildResult> {
+  const ids = args.imageStorageIds ?? [];
+  if (ids.length === 0) return { prompt: args.text, imageStorageIds: [] };
+
+  try {
+    return {
+      prompt: await buildPromptWithImages(args),
+      imageStorageIds: ids,
+    };
+  } catch (err) {
+    return {
+      prompt: textOnlyImageFallback(args.text),
+      imageStorageIds: [],
+      imageError: errorMessage(err),
+    };
+  }
 }
 
 export async function fetchStoredBytes(storageId: string): Promise<ImageBytes> {

@@ -126,7 +126,7 @@ export const imageStorageStats = query({
   args: {},
   handler: async (ctx) => {
     // Capped scan like the other dashboard queries — unbounded .collect()
-    // would silently truncate at Convex's row ceiling.
+    // throws TransactionTooLargeError when the bandwidth limit is exceeded.
     const msgs = await ctx.db
       .query("messages")
       .order("desc")

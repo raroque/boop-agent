@@ -99,10 +99,16 @@ export async function runImageCleanup(): Promise<{ deleted: number; kept: number
     kept += pairs.length - toDelete.length;
     await Promise.all(
       toDelete.map(async (p) => {
-        await convex.mutation(api.messages.clearMessageImage, {
-          messageId: p.messageId as never,
-          storageId: p.storageId as never,
-        });
+        try {
+          await convex.mutation(api.messages.clearMessageImage, {
+            messageId: p.messageId as never,
+            storageId: p.storageId as never,
+          });
+        } catch (err) {
+          console.warn(`[image-cleanup] failed to clear message ref ${p.storageId}`, err);
+          kept += 1;
+          return;
+        }
         try {
           await convex.mutation(api.messages.deleteImageBytes, {
             storageId: p.storageId as never,

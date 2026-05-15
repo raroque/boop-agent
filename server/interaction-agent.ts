@@ -18,7 +18,10 @@ import { defineRuntimeTool } from "./runtimes/tool.js";
 import { runAgentRuntime } from "./runtimes/index.js";
 import { runtimeText } from "./runtimes/types.js";
 import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
-import { buildPromptWithImages, fetchStoredBytes } from "./images/content-blocks.js";
+import {
+  buildPromptWithImagesOrTextFallback,
+  fetchStoredBytes,
+} from "./images/content-blocks.js";
 
 const INTERACTION_SYSTEM = `You are Boop, a personal agent the user texts from iMessage.
 
@@ -336,6 +339,20 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     });
     log(`→ ack: ${text}`);
   };
+
+  const promptBuild =
+    opts.kind === "proactive"
+      ? { prompt: promptText, imageStorageIds: [] }
+      : await buildPromptWithImagesOrTextFallback({
+          text: promptText,
+          imageStorageIds: inboundImageStorageIds,
+          fetchBytes: fetchStoredBytes,
+        });
+  if (promptBuild.imageError) {
+    log(`image fetch fallback: ${promptBuild.imageError}`);
+  }
+  const spawnableImageStorageIds = promptBuild.imageStorageIds;
+
   const tools = [
     ...createMemoryTools(opts.conversationId),
     ...createAutomationTools(opts.conversationId),
@@ -372,15 +389,15 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           .optional()
           .describe(
             "Convex storage IDs from the user's current message. Available in this turn: " +
-              (inboundImageStorageIds.length > 0
-                ? inboundImageStorageIds.join(", ")
+              (spawnableImageStorageIds.length > 0
+                ? spawnableImageStorageIds.join(", ")
                 : "(none)"),
           ),
       },
       async (args) => {
         const imageStorageIds = resolveSpawnImageRefs(
           args.imageRefs,
-          inboundImageStorageIds,
+          spawnableImageStorageIds,
         );
         const res = await spawnExecutionAgent({
           task: args.task,
@@ -397,16 +414,8 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   let reply = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
   try {
-    const prompt =
-      opts.kind === "proactive"
-        ? promptText
-        : await buildPromptWithImages({
-            text: promptText,
-            imageStorageIds: inboundImageStorageIds,
-            fetchBytes: fetchStoredBytes,
-          });
     const result = await runAgentRuntime(runtimeConfig, {
-      prompt,
+      prompt: promptBuild.prompt,
       systemPrompt,
       tools,
       mode: "dispatcher",

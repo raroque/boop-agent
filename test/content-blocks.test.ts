@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildPromptWithImages } from "../server/images/content-blocks.js";
+import {
+  buildPromptWithImages,
+  buildPromptWithImagesOrTextFallback,
+} from "../server/images/content-blocks.js";
 
 const fakeFetch = (mapping: Record<string, { bytes: Buffer; mediaType: string }>) =>
   async (id: string) => {
@@ -80,5 +83,19 @@ describe("buildPromptWithImages", () => {
         },
       }),
     ).rejects.toThrow(/not found/);
+  });
+
+  it("falls back to a text-only prompt when image retrieval fails", async () => {
+    const res = await buildPromptWithImagesOrTextFallback({
+      text: "can you inspect this?",
+      imageStorageIds: ["missing"],
+      fetchBytes: async () => {
+        throw new Error("storage unavailable");
+      },
+    });
+    expect(res.imageStorageIds).toEqual([]);
+    expect(res.imageError).toBe("storage unavailable");
+    expect(res.prompt).toContain("couldn't retrieve the stored image bytes");
+    expect(res.prompt).toContain("can you inspect this?");
   });
 });
