@@ -27,6 +27,8 @@ export interface ParsedInbound {
   content: string;
   /** Inbound attachment metadata (photos, PDFs, docs) — optional. */
   attachments?: Doc<"messages">["attachments"];
+  /** iOS thread id — scopes message persistence and SSE filtering. */
+  threadId?: string;
 }
 
 export interface Channel {

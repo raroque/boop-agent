@@ -201,6 +201,7 @@ interface HandleOpts {
   conversationId: string;
   content: string;
   attachments?: Doc<"messages">["attachments"];
+  threadId?: string;
   turnTag?: string;
   onThinking?: (chunk: string) => void;
   // "proactive" persists the inbound message with role=system instead of
@@ -224,6 +225,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     content: opts.content,
     attachments: opts.attachments,
     turnId,
+    ...(opts.threadId ? { threadId: opts.threadId as any } : {}),
   });
   broadcast(opts.kind === "proactive" ? "proactive_notice" : "user_message", {
     conversationId: opts.conversationId,

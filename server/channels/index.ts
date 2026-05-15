@@ -74,7 +74,7 @@ export function _registerChannel(ch: Channel): void {
  * Each channel's webhook does parse + dedup + allowlist, then calls this.
  */
 export async function runTurn(inbound: ParsedInbound): Promise<void> {
-  const { conversationId, content, from, attachments } = inbound;
+  const { conversationId, content, from, attachments, threadId } = inbound;
   const turnTag = Math.random().toString(36).slice(2, 8);
   const preview = content.length > 100 ? content.slice(0, 100) + "…" : content;
   console.log(`[turn ${turnTag}] ← ${from}: ${JSON.stringify(preview)}`);
@@ -92,6 +92,7 @@ export async function runTurn(inbound: ParsedInbound): Promise<void> {
       conversationId,
       content,
       attachments,
+      threadId,
       turnTag,
       onThinking: (t) => broadcast("thinking", { conversationId, t }),
     });
@@ -139,6 +140,7 @@ export async function runTurn(inbound: ParsedInbound): Promise<void> {
             conversationId,
             role: "assistant",
             content: reply,
+            ...(threadId ? { threadId: threadId as any } : {}),
           });
           sendErr = undefined;
           break;

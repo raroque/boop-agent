@@ -131,6 +131,69 @@ const STREAM_EVENTS = new Set([
 export function createIosRouter(): Router {
   const router = Router();
 
+  // GET /threads — list open threads for the authed device.
+  router.get("/threads", requireBearer, async (req: AuthedRequest, res) => {
+    try {
+      const threads = await convex.query(api.threads.listOpen, {
+        deviceId: req.deviceId!,
+      });
+      res.json({ threads });
+    } catch (err) {
+      console.error("[ios] threads:list failed", err);
+      res.status(500).json({ error: "list threads failed" });
+    }
+  });
+
+  // POST /threads/create — create a new open thread (max 4).
+  router.post("/threads/create", requireBearer, async (req: AuthedRequest, res) => {
+    try {
+      const { threadId } = await convex.mutation(api.threads.createThread, {
+        deviceId: req.deviceId!,
+      });
+      res.json({ threadId });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("no more than 4")) {
+        res.status(409).json({ error: "max open threads reached" });
+        return;
+      }
+      console.error("[ios] threads:create failed", err);
+      res.status(500).json({ error: "create thread failed" });
+    }
+  });
+
+  // POST /threads/:threadId/archive — archive a thread.
+  router.post("/threads/:threadId/archive", requireBearer, async (req: AuthedRequest, res) => {
+    try {
+      await convex.mutation(api.threads.archive, {
+        threadId: req.params.threadId as any,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[ios] threads:archive failed", err);
+      res.status(500).json({ error: "archive thread failed" });
+    }
+  });
+
+  // PATCH /threads/:threadId/icon — set the thread icon.
+  router.patch("/threads/:threadId/icon", requireBearer, async (req: AuthedRequest, res) => {
+    const { icon } = (req.body ?? {}) as { icon?: string };
+    if (!icon || typeof icon !== "string") {
+      res.status(400).json({ error: "icon required" });
+      return;
+    }
+    try {
+      await convex.mutation(api.threads.setIcon, {
+        threadId: req.params.threadId as any,
+        icon,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[ios] threads:setIcon failed", err);
+      res.status(500).json({ error: "set icon failed" });
+    }
+  });
+
   // POST /pair/create — phone-initiated, no auth, rate-limited per IP.
   // 10/hour is enough for ~3 reinstall-and-pair iterations during dev
   // without sliding into a hard wall, while still keeping brute force
@@ -222,19 +285,27 @@ export function createIosRouter(): Router {
 
   // POST /inbound — authed.
   router.post("/inbound", requireBearer, async (req: AuthedRequest, res) => {
-    const { text } = (req.body ?? {}) as { text?: string };
+    const { text, threadId } = (req.body ?? {}) as { text?: string; threadId?: string };
     if (!text || typeof text !== "string") {
       res.status(400).json({ error: "text required" });
       return;
     }
     const deviceId = req.deviceId!;
-    const conversationId = `ios:${deviceId}` as ConversationId;
+
+    let effectiveThreadId = threadId;
+    if (!effectiveThreadId) {
+      const { threadId: defaultId } = await convex.mutation(api.threads.ensureDefault, { deviceId });
+      effectiveThreadId = defaultId;
+    }
+
+    const conversationId = `ios:${deviceId}:${effectiveThreadId}` as ConversationId;
     runTurn({
       conversationId,
       from: `ios:${deviceId}`,
       content: text,
+      threadId: effectiveThreadId,
     }).catch((err) => console.error("[ios] runTurn failed", err));
-    res.json({ ok: true, conversationId });
+    res.json({ ok: true, conversationId, threadId: effectiveThreadId });
   });
 
   // GET /messages — authed history fetch. Returns newest-first, like
@@ -242,31 +313,35 @@ export function createIosRouter(): Router {
   // chat-order display.
   router.get("/messages", requireBearer, async (req: AuthedRequest, res) => {
     const deviceId = req.deviceId!;
-    const conversationId = `ios:${deviceId}`;
     const limit = Math.min(Number(req.query.limit ?? 50) || 50, 200);
+    const queryThreadId = typeof req.query.threadId === "string" ? req.query.threadId : null;
+
     try {
-      const messages = await convex.query(api.messages.list, {
-        conversationId,
+      let threadId = queryThreadId;
+      if (!threadId) {
+        const r = await convex.mutation(api.threads.ensureDefault, { deviceId });
+        threadId = r.threadId;
+      }
+      const messages = await convex.query(api.messages.listForThread, {
+        threadId: threadId as any,
         limit,
       });
-      res.json({ conversationId, messages });
+      res.json({ threadId, messages });
     } catch (err) {
-      console.error("[ios] messages.list failed", err);
+      console.error("[ios] messages:list failed", err);
       res.status(500).json({ error: "history fetch failed" });
     }
   });
 
-  // GET /stream — authed SSE.
+  // GET /stream — authed SSE. Requires ?threadId=<id>.
   router.get("/stream", requireBearer, (req: AuthedRequest, res) => {
     const deviceId = req.deviceId!;
-    const conversationId = `ios:${deviceId}`;
-    // Sanity: the phone may also pass conversationId for clarity,
-    // but we always derive it from the authenticated deviceId.
-    const requested = String(req.query.conversationId ?? conversationId);
-    if (requested !== conversationId) {
-      res.status(403).json({ error: "conversationId mismatch" });
+    const threadId = typeof req.query.threadId === "string" ? req.query.threadId : null;
+    if (!threadId) {
+      res.status(400).json({ error: "threadId required" });
       return;
     }
+    const conversationId = `ios:${deviceId}:${threadId}`;
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
