@@ -8,6 +8,37 @@ Format:
 
 ---
 
+## Unreleased — iOS redesign Plan A (multi-thread + new visual system)
+
+Foundation of the redesigned iOS client. After Plan A: up to 4 concurrent threads per device, each with an agent-picked Lucide icon and deterministic per-thread color tint; native Markdown rendering in chat bubbles; full-screen .md/.pdf file preview; bottom-sheet menu with 2×2 cards; full dark-mode design system (Inter + JetBrains Mono, color tokens, ~60 bundled Lucide icons). See the design brief at `docs/superpowers/specs/2026-05-15-ios-redesign-brief.md` and the implementation plan at `docs/superpowers/plans/2026-05-15-ios-redesign-plan-a-foundation.md`.
+
+**Server**
+- Added: `threads` Convex table (deviceId, icon, label, archived, createdAt, lastMessageAt). Max 4 open threads per device, enforced via `.take()` for bounded reads. Plus 6 CRUD helpers including `ensureDefault` for back-compat with M1 single-thread devices.
+- Added: `messages.threadId` optional field + `by_thread` index + `listForThread` query. Existing M1 rows without a `threadId` continue to read.
+- Added: `parseIosConversationId` + `iosConversationId` helpers in `server/channels/types.ts`. Conversation IDs are now `ios:<deviceId>:<threadId>` for new threads, with `ios:<deviceId>` (M1) still parsing as default-thread.
+- Added: `/channels/ios/threads`, `/threads/create`, `/threads/:id/archive`, `/threads/:id/icon` endpoints. `/inbound`, `/messages`, `/stream` now accept (or require, for SSE) a `threadId`; missing `threadId` on `/inbound` and `/messages` falls back to `ensureDefault`.
+- Added: `set_thread_icon` self-tool — the dispatcher picks a Lucide icon (from a curated set of ~40) on the first reply in a new thread, via a per-turn `currentTurnThreadId` ref plumbed from `handleUserMessage`. Dispatcher prompt updated with the threading guidance.
+- Added: `tests/threads.test.ts` + `tests/ios-thread-routes.test.ts` — node:test smoke covering the Convex CRUD + the HTTP routes against a running dev server.
+
+**iOS**
+- Changed: `ChannelId` is unchanged at the type level (still `"sms" | "tg" | "ios"`) but conversation IDs now embed `threadId` for iOS. iOS app must always pass `threadId` on `/inbound` and `/stream` going forward.
+- Added: `ios/Boop/Resources/Fonts/` — Inter (Regular/Medium/SemiBold) + JetBrains Mono (Regular/Medium), bundled and registered at launch via `CTFontManagerRegisterFontsForURL`.
+- Added: design-system tokens — `BoopColor` (dark-mode primary), `BoopFont` (Inter + JetBrains Mono scale), `BoopSpacing` + `BoopRadius` constants. Match the design brief 1:1.
+- Added: `ThreadTints` — 8-color palette (amber/sky/emerald/violet/pink/citrine/mint/crimson) with `.solid`/`.fill`/`.border`/`.text` accessors and a deterministic FNV-1a hash from `threadId`. Same thread → same tint forever.
+- Added: ~60 Lucide icons bundled as vector PDF imagesets under `Resources/Assets.xcassets/Lucide`. `LucideName` enum + `LucideIcon` view; the agent picks from the curated set via `set_thread_icon`.
+- Added: `BoopThread` + `ServerThread` + `ThreadsResponse` + `CreateThreadResponse` shapes. `ThreadsStore` manages the list of open threads, active selection, unread flags, and integrates with `ChatStore.switchTo(threadId:)`.
+- Changed: `BoopClient` gains `listThreads()` / `createThread()` / `archiveThread(threadId:)`; existing `sendInbound` / `fetchMessages` / `SSEConnection` now require a `threadId`. SSE URL appends `?threadId=...` so the server can scope events per-thread.
+- Changed: `ChatStore` is keyed off `switchTo(threadId:)`. Switching cancels the current stream, clears messages, fetches new history, restarts the stream — clean break instead of trying to fan out one SSE across threads.
+- Added: components — `TypingBubble` (three-dot animation), `MarkdownView` (one-pass line parser + `AttributedString` inline), `MessageBubble` (Markdown for assistant, plain for user), `FileCard` (chat + files-screen row), `SubAgentPill` (live agent-running indicator), `Dock` (composer + thread bar in one glass surface).
+- Added: `MenuSheet` — bottom sheet, 2×2 cards (Files / Live agents / Archived / Settings). Triggered by the new dot-grid header button.
+- Added: `FilePreviewScreen` — full-screen viewer for `.md` and `.txt` (rendered via `MarkdownView` in sheet mode), with header (back/share/more), file-info card, and a bottom action bar (Open in Thread / Download). `.pdf` is a placeholder for M2.
+- Changed: `ChatView` is now `BoopColor.bg` + dot-grid header + scrolling message list + floating glass `Dock` + error-banner. `RootView` wires up `ThreadsStore` + auto-creates the first thread on a fresh device + presents `MenuSheet` + nested `SettingsView`. `PairingView` and `SettingsView` restyled with the new tokens.
+- Known build blocker: bundling the Lucide imagesets triggers `actool` to demand a simulator runtime matching the SDK version. On a Mac running Xcode 26.5 with only the iOS 26.4 simulator runtime installed, the build fails at asset compilation. Workarounds: install the iOS 26.5 simulator runtime via Xcode → Settings → Platforms, or build for a real iPhone (which uses the device's installed OS, not the simulator runtime). Every Swift file in the new code typechecks cleanly via `swiftc -typecheck`.
+
+**Out of scope for Plan A (lands in Plan B)**
+- Files browser screen and Live agents watcher screen (their menu cards in MenuSheet currently dispatch to placeholders).
+- iOS-side SSE fan-out for unread badges on inactive threads (server fires per-thread events, client only listens on the active one for now).
+
 ## Unreleased — Native iOS channel
 
 - Added: `ios` channel — a third channel alongside Sendblue (iMessage) and Telegram, designed for a native iOS app that pairs with the server over HTTP/SSE. Conversation IDs are `ios:<deviceId>`. Endpoints live under `/channels/ios`: `pair/create` + `pair/check` + `pair/consume` for the bearer-token pairing flow, `inbound` for user messages, `messages` for cold-start history, and `stream` for SSE.
