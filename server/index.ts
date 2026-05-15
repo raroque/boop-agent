@@ -13,6 +13,8 @@ import { startHeartbeatLoop } from "./heartbeat.js";
 import { startConsolidationLoop } from "./consolidation.js";
 import { cancelAgent, retryAgent } from "./execution-agent.js";
 import { createComposioRouter } from "./composio-routes.js";
+import { createNativeIntegrationsRouter } from "./native-integrations-routes.js";
+import { createFileProxyRouter, FILE_PROXY_MOUNT } from "./file-proxy.js";
 import { ensureProactiveWatcher } from "./proactive-email.js";
 import { resolveActiveChannel } from "./runtime-config.js";
 
@@ -66,6 +68,8 @@ async function main() {
   }
 
   app.use("/composio", createComposioRouter());
+  app.use("/native-integrations", createNativeIntegrationsRouter());
+  app.use(FILE_PROXY_MOUNT, createFileProxyRouter());
 
   app.post("/agents/:id/cancel", (req, res) => {
     const ok = cancelAgent(req.params.id);

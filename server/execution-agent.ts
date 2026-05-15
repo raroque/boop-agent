@@ -51,7 +51,10 @@ Your job:
 3. Return a concise, well-structured answer — not a data dump.
 
 Research discipline:
-- Prefer WebSearch for fresh/factual questions. WebFetch when you need the content of a known URL.
+- When an integration is loaded for this spawn, prefer it over WebSearch for the data it specializes in. WebSearch returns snippets; integrations return structured data. Examples:
+  - apify: use search_actors → get_actor → run_actor for listings, prices, availability, profiles (hotels, flights, real estate, Airbnb, Booking, Zillow, LinkedIn, Instagram). Don't scrape these from search snippets.
+  - gmail / googlecalendar / googledrive / googlesheets / github / confluence / granola: query the integration directly for that user's data — never guess from the web.
+- Use WebSearch for fresh/factual questions where no integration fits. WebFetch when you need the content of a known URL.
 - Cite real URLs only — NEVER invent sources. If a page failed to load, say so.
 - Cross-check when it matters: one search is rarely enough for a claim.
 
@@ -116,37 +119,40 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   });
   broadcast("agent_spawned", { agentId, name, task: opts.task });
 
-  await convex.mutation(api.agents.update, { agentId, status: "running" });
-
-  const integrationServers = await buildMcpServersForIntegrations(
-    opts.integrations,
-    opts.conversationId,
-  );
-  const draftServer = opts.conversationId
-    ? createDraftStagingMcp(opts.conversationId)
-    : undefined;
-  const pdfServer = opts.conversationId
-    ? createPdfMcp(opts.conversationId, agentId)
-    : undefined;
-  const mcpServers = {
-    ...integrationServers,
-    ...(draftServer ? { "boop-drafts": draftServer } : {}),
-    ...(pdfServer ? { "boop-pdf": pdfServer } : {}),
-  };
-  const allowedTools = [
-    "WebSearch",
-    "WebFetch",
-    "Skill",
-    ...Object.keys(mcpServers).flatMap((n) => [`mcp__${n}__*`]),
-  ];
-
   let buffer = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
   let status: "completed" | "failed" | "cancelled" = "completed";
   let errorMsg: string | undefined;
 
-  const requestedModel = await getRuntimeModel();
   try {
+    // Inside the try so a transient Convex failure here flows through the same
+    // error path that marks the agent failed — otherwise the record gets stuck
+    // at "spawned" forever (the heartbeat sweeper only reaps "running" rows).
+    await convex.mutation(api.agents.update, { agentId, status: "running" });
+
+    const integrationServers = await buildMcpServersForIntegrations(
+      opts.integrations,
+      opts.conversationId,
+    );
+    const draftServer = opts.conversationId
+      ? createDraftStagingMcp(opts.conversationId)
+      : undefined;
+    const pdfServer = opts.conversationId
+      ? createPdfMcp(opts.conversationId, agentId)
+      : undefined;
+    const mcpServers = {
+      ...integrationServers,
+      ...(draftServer ? { "boop-drafts": draftServer } : {}),
+      ...(pdfServer ? { "boop-pdf": pdfServer } : {}),
+    };
+    const allowedTools = [
+      "WebSearch",
+      "WebFetch",
+      "Skill",
+      ...Object.keys(mcpServers).flatMap((n) => [`mcp__${n}__*`]),
+    ];
+
+    const requestedModel = await getRuntimeModel();
     for await (const msg of query({
       prompt: opts.task,
       options: {
@@ -278,4 +284,8 @@ export async function retryAgent(agentId: string): Promise<SpawnResult | null> {
 
 export function availableIntegrations(): string[] {
   return listIntegrations().map((i) => i.name);
+}
+
+export function describeIntegrations(): string[] {
+  return listIntegrations().map((i) => `${i.name} — ${i.description}`);
 }

@@ -8,6 +8,7 @@ import type { Channel, ChannelId, ConversationId, ParsedInbound, SendOpts } from
 import { channelIdOf } from "./types.js";
 import { sendblueChannel } from "./sendblue.js";
 import { telegramChannel } from "./telegram.js";
+import { publicizeStorageUrl } from "../file-proxy.js";
 
 const registry: Partial<Record<ChannelId, Channel>> = {
   sms: sendblueChannel,
@@ -98,11 +99,32 @@ export async function runTurn(inbound: ParsedInbound): Promise<void> {
       console.log(
         `[turn ${turnTag}] → reply (${elapsed}s, ${reply.length} chars): ${JSON.stringify(replyPreview)}`,
       );
-      const artifact = await convex.query(api.pdfArtifacts.latestForConversation, {
-        conversationId,
-        since: start,
-      });
-      await dispatch(conversationId, reply, artifact ? { mediaUrl: artifact.signedUrl } : {});
+      const [pdfArtifact, imageArtifact] = await Promise.all([
+        convex.query(api.pdfArtifacts.latestForConversation, {
+          conversationId,
+          since: start,
+        }),
+        convex.query(api.imageArtifacts.latestForConversation, {
+          conversationId,
+          since: start,
+        }),
+      ]);
+      // If both produced (rare), attach the most recent.
+      const pickImage =
+        imageArtifact &&
+        (!pdfArtifact || imageArtifact._creationTime >= pdfArtifact._creationTime);
+      const sendOpts: SendOpts = pickImage
+        ? {
+            mediaUrl: publicizeStorageUrl(imageArtifact!.signedUrl),
+            mediaKind: "image",
+          }
+        : pdfArtifact
+          ? {
+              mediaUrl: publicizeStorageUrl(pdfArtifact.signedUrl),
+              mediaKind: "document",
+            }
+          : {};
+      await dispatch(conversationId, reply, sendOpts);
       await convex.mutation(api.messages.send, {
         conversationId,
         role: "assistant",

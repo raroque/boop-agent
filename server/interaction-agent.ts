@@ -5,7 +5,7 @@ import type { Doc } from "../convex/_generated/dataModel.js";
 import { convex } from "./convex-client.js";
 import { createMemoryMcp } from "./memory/tools.js";
 import { extractAndStore } from "./memory/extract.js";
-import { availableIntegrations, spawnExecutionAgent } from "./execution-agent.js";
+import { availableIntegrations, describeIntegrations, spawnExecutionAgent } from "./execution-agent.js";
 import { createAutomationMcp } from "./automation-tools.js";
 import { createDraftDecisionMcp } from "./draft-tools.js";
 import { createSelfMcp } from "./self-tools.js";
@@ -293,7 +293,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
 
   const systemPrompt = INTERACTION_SYSTEM.replace(
     "{{INTEGRATIONS}}",
-    integrations.join(", ") || "(no integrations configured yet)",
+    describeIntegrations().map((d) => `- ${d}`).join("\n") || "(no integrations configured yet)",
   );
 
   const prompt = historyBlock

@@ -231,6 +231,22 @@ export default defineSchema({
     .index("by_automation", ["automationId"])
     .index("by_run_id", ["runId"]),
 
+  imageArtifacts: defineTable({
+    artifactId: v.string(),
+    conversationId: v.optional(v.string()),
+    prompt: v.string(),
+    source: v.union(v.literal("generate"), v.literal("edit")),
+    model: v.string(),
+    mimeType: v.string(),
+    storageId: v.id("_storage"),
+    fileSizeBytes: v.number(),
+    signedUrl: v.optional(v.string()),
+    agentId: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_artifact_id", ["artifactId"])
+    .index("by_conversation_and_createdAt", ["conversationId", "createdAt"]),
+
   pdfArtifacts: defineTable({
     artifactId: v.string(),
     conversationId: v.optional(v.string()),

@@ -43,8 +43,28 @@ async function isAllowed(chatId: number): Promise<boolean> {
   }
 }
 
+// Telegram's edge can be flaky (occasional ETIMEDOUT on connect). Bound each
+// request and retry transient failures so the user actually gets the reply.
+async function tgFetch(url: string, init: RequestInit, attempts = 3): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
+      if (res.status >= 500 || res.status === 429) {
+        lastErr = new Error(`telegram ${res.status}`);
+      } else {
+        return res;
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * 2 ** i));
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("telegram fetch failed");
+}
+
 async function sendDocument(token: string, chatId: string, mediaUrl: string): Promise<void> {
-  const res = await fetch(`${TELEGRAM_API}/bot${token}/sendDocument`, {
+  const res = await tgFetch(`${TELEGRAM_API}/bot${token}/sendDocument`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, document: mediaUrl }),
@@ -55,11 +75,27 @@ async function sendDocument(token: string, chatId: string, mediaUrl: string): Pr
       `[telegram bot${redactToken(token)}/sendDocument] failed ${res.status}: ${body}`,
     );
     // Fallback: append URL as text
-    await fetch(`${TELEGRAM_API}/bot${token}/sendMessage`, {
+    await tgFetch(`${TELEGRAM_API}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text: `📎 ${mediaUrl}` }),
     });
+  }
+}
+
+async function sendPhoto(token: string, chatId: string, mediaUrl: string): Promise<void> {
+  const res = await tgFetch(`${TELEGRAM_API}/bot${token}/sendPhoto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, photo: mediaUrl }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.error(
+      `[telegram bot${redactToken(token)}/sendPhoto] failed ${res.status}: ${body}`,
+    );
+    // Photo upload failed — try as document so the user still gets the bytes.
+    await sendDocument(token, chatId, mediaUrl);
   }
 }
 
@@ -278,7 +314,7 @@ export const telegramChannel: Channel = {
 
     for (let i = 0; i < parts.length; i++) {
       const isFirst = i === 0;
-      const res = await fetch(`${TELEGRAM_API}/bot${tk}/sendMessage`, {
+      const res = await tgFetch(`${TELEGRAM_API}/bot${tk}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -296,8 +332,12 @@ export const telegramChannel: Channel = {
         console.log(`[telegram] → sent ${parts[i].length} chars to ${chatId}`);
       }
       if (isFirst && opts.mediaUrl) {
-        await sendDocument(tk, chatId, opts.mediaUrl).catch((err) =>
-          console.error("[telegram] sendDocument unhandled error", err),
+        const sendMedia = opts.mediaKind === "image" ? sendPhoto : sendDocument;
+        await sendMedia(tk, chatId, opts.mediaUrl).catch((err) =>
+          console.error(
+            `[telegram] ${opts.mediaKind === "image" ? "sendPhoto" : "sendDocument"} unhandled error`,
+            err,
+          ),
         );
       }
     }
