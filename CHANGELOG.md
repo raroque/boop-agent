@@ -8,6 +8,14 @@ Format:
 
 ---
 
+## Unreleased — MMS image viewing + cross-runtime image spawning
+
+- Added: inbound Sendblue MMS images are downloaded, MIME/size validated, uploaded to Convex storage, and passed as image blocks to the dispatcher. Direct image Q&A was validated on both Codex (`gpt-5.4-mini`) and Claude (`claude-opus-4-7`) with persisted `imageStorageIds` and no `mediaError`.
+- Added: current-turn image refs now propagate into spawned execution agents for both runtime paths. The dispatcher passes image refs through `spawn_agent`, execution-agent prompts include image blocks, and the shared runtime adapters convert them for Claude Agent SDK and Codex.
+- Fixed: image + external lookup/shop intents, such as "Where can I buy this product?", now deterministically spawn an execution agent with the attached image instead of letting the dispatcher answer directly from vision. This follow-up was caught while validating PR #52.
+- Added: image storage count in the Dashboard, image markers in Memory records, and cleanup for raw image bytes after configurable retention unless anchored by memory.
+- Test note: validated direct vision and forced image lookup spawning across Claude Agent SDK and Codex, including live MMS turns and local `handleUserMessage` reproductions.
+
 ## Unreleased — Cross-runtime slash-command upgrade workflow
 
 - Changed: `/upgrade-boop` is the single documented upgrade path. The upstream reminder printed by `npm run dev` now points users to open Codex or Claude in the repo and run `/upgrade-boop`.

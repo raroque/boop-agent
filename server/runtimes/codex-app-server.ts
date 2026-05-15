@@ -25,6 +25,7 @@ import type { ThreadStartParams } from "./codex-app-server-protocol/v2/ThreadSta
 import type { ThreadStartResponse } from "./codex-app-server-protocol/v2/ThreadStartResponse.js";
 import type { TurnStartParams } from "./codex-app-server-protocol/v2/TurnStartParams.js";
 import type { TurnStartResponse } from "./codex-app-server-protocol/v2/TurnStartResponse.js";
+import type { UserInput } from "./codex-app-server-protocol/v2/UserInput.js";
 import type { RuntimeRunRequest, RuntimeRunResult, RuntimeTool } from "./types.js";
 import { EMPTY_USAGE, estimateOpenAiCostUsd, type UsageTotals } from "../usage.js";
 import { formatError } from "../error-format.js";
@@ -202,6 +203,21 @@ function asJsonValue(value: unknown): JsonValue {
   return value as JsonValue;
 }
 
+function codexInputForPrompt(prompt: RuntimeRunRequest["prompt"]): UserInput[] {
+  if (typeof prompt === "string") {
+    return [{ type: "text", text: prompt, text_elements: [] }];
+  }
+  return prompt.map((block) => {
+    if (block.type === "text") {
+      return { type: "text", text: block.text, text_elements: [] };
+    }
+    return {
+      type: "image",
+      url: `data:${block.source.media_type};base64,${block.source.data}`,
+    };
+  });
+}
+
 function isJsonRpcResponse(message: CodexServerMessage): message is JsonRpcResponse {
   return typeof (message as { id?: unknown }).id === "number" && !("method" in message);
 }
@@ -308,7 +324,7 @@ class CodexAppServerClient {
       const turnCompletion = this.turnCompletion;
       const turnResponse = await this.call("turn/start", {
         threadId,
-        input: [{ type: "text", text: request.prompt, text_elements: [] }],
+        input: codexInputForPrompt(request.prompt),
         approvalPolicy: "never",
         sandboxPolicy: codexSandboxForMode(request.mode),
         model: request.model,

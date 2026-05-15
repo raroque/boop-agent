@@ -5,6 +5,13 @@ export type RuntimeName = "claude" | "codex";
 export type RuntimeReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 export type RuntimeMode = "dispatcher" | "execution" | "background";
 
+export type RuntimeImageBlock = {
+  type: "image";
+  source: { type: "base64"; media_type: string; data: string };
+};
+export type RuntimeTextBlock = { type: "text"; text: string };
+export type RuntimePrompt = string | Array<RuntimeImageBlock | RuntimeTextBlock>;
+
 export interface RuntimeTool {
   namespace: string;
   name: string;
@@ -20,7 +27,7 @@ export interface RuntimeToolResult {
 }
 
 export interface RuntimeRunRequest {
-  prompt: string;
+  prompt: RuntimePrompt;
   systemPrompt: string;
   model: string;
   reasoningEffort?: RuntimeReasoningEffort;

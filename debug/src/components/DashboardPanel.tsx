@@ -31,6 +31,7 @@ function fmtTokens(n: number): string {
 
 export function DashboardPanel({ isDark }: { isDark: boolean }) {
   const data = useQuery(api.dashboard.metrics, {});
+  const imageStats = useQuery(api.dashboard.imageStorageStats, {});
   const [range, setRange] = useState<TimeRange>("all");
 
   const filtered = useMemo(() => {
@@ -201,6 +202,11 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
                 : "text-rose-600"
               : undefined
           }
+          c={c}
+        />
+        <StatCard
+          label="Image Storage"
+          value={imageStats ? `${imageStats.count} files` : "—"}
           c={c}
         />
       </div>

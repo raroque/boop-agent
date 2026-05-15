@@ -3,6 +3,7 @@ import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { handleUserMessage } from "./interaction-agent.js";
 import { broadcast } from "./broadcast.js";
+import { validateImageHeader, MAX_IMAGE_BYTES, type ImageMediaType } from "./images/mime.js";
 
 const API_BASE = "https://api.sendblue.com/api";
 const MAX_CHUNK = 2900;
@@ -119,12 +120,100 @@ export function startTypingLoop(toNumber: string): () => void {
   return () => clearInterval(timer);
 }
 
+type IngestedImage = { storageId: string; mediaType: ImageMediaType };
+
+export async function ingestSendblueImage(
+  url: string,
+): Promise<{ ok: true; image: IngestedImage } | { ok: false; reason: string }> {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (err) {
+    return { ok: false, reason: `download failed: ${String(err)}` };
+  }
+  if (!res.ok) {
+    return { ok: false, reason: `download failed: HTTP ${res.status}` };
+  }
+  const lenHeader = res.headers.get("content-length");
+  const contentLength = lenHeader ? Number(lenHeader) : undefined;
+  const check = validateImageHeader({
+    contentType: res.headers.get("content-type") ?? undefined,
+    contentLength,
+  });
+  if (!check.ok) {
+    res.body?.cancel().catch(() => undefined);
+    return { ok: false, reason: check.reason };
+  }
+  // Stream the body so we can abort early when the running total exceeds
+  // MAX_IMAGE_BYTES — content-length is often absent on CDN/redirect
+  // responses, and `await res.arrayBuffer()` would otherwise buffer the
+  // entire payload before any cap check fires.
+  let buf: ArrayBuffer;
+  try {
+    const reader = res.body?.getReader();
+    if (!reader) return { ok: false, reason: "download failed: no body" };
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_IMAGE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return {
+          ok: false,
+          reason: `image too large: >${MAX_IMAGE_BYTES} bytes`,
+        };
+      }
+      chunks.push(value);
+    }
+    buf = new ArrayBuffer(total);
+    const view = new Uint8Array(buf);
+    let offset = 0;
+    for (const c of chunks) {
+      view.set(c, offset);
+      offset += c.byteLength;
+    }
+  } catch (err) {
+    return { ok: false, reason: `download failed: ${String(err)}` };
+  }
+
+  try {
+    const uploadUrl = await convex.mutation(api.messages.generateUploadUrl, {});
+    const upload = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": check.mediaType },
+      body: buf,
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!upload.ok) {
+      return { ok: false, reason: `upload failed: HTTP ${upload.status}` };
+    }
+    const { storageId } = (await upload.json()) as { storageId: string };
+    return { ok: true, image: { storageId, mediaType: check.mediaType } };
+  } catch (err) {
+    return { ok: false, reason: `upload failed: ${String(err)}` };
+  }
+}
+
 export function createSendblueRouter(): express.Router {
   const router = express.Router();
 
   router.post("/webhook", async (req, res) => {
-    const { content, from_number, is_outbound, message_handle } = req.body ?? {};
-    if (is_outbound || !content || !from_number) {
+    const { content, from_number, is_outbound, message_handle, media_url, media_urls } =
+      req.body ?? {};
+    const rawUrls: string[] = [];
+    if (Array.isArray(media_urls)) {
+      for (const u of media_urls) {
+        if (typeof u === "string" && u.length > 0) rawUrls.push(u);
+      }
+    } else if (typeof media_url === "string" && media_url.length > 0) {
+      rawUrls.push(media_url);
+    }
+    if (is_outbound || !from_number || (!content && rawUrls.length === 0)) {
       res.json({ ok: true, skipped: true });
       return;
     }
@@ -139,9 +228,18 @@ export function createSendblueRouter(): express.Router {
       }
     }
 
+    const ingestResults = await Promise.all(rawUrls.map(ingestSendblueImage));
+    const ingested: IngestedImage[] = [];
+    const ingestErrors: string[] = [];
+    for (const r of ingestResults) {
+      if (r.ok) ingested.push(r.image);
+      else ingestErrors.push(r.reason);
+    }
+
     const conversationId = `sms:${from_number}`;
     const turnTag = Math.random().toString(36).slice(2, 8);
-    const preview = content.length > 100 ? content.slice(0, 100) + "…" : content;
+    const textForLog = typeof content === "string" ? content : "";
+    const preview = textForLog.length > 100 ? textForLog.slice(0, 100) + "…" : textForLog;
     console.log(`[turn ${turnTag}] ← ${from_number}: ${JSON.stringify(preview)}`);
     const start = Date.now();
 
@@ -152,8 +250,10 @@ export function createSendblueRouter(): express.Router {
     try {
       const reply = await handleUserMessage({
         conversationId,
-        content,
+        content: textForLog,
         turnTag,
+        images: ingested,
+        mediaError: ingestErrors.length > 0 ? ingestErrors.join("; ") : undefined,
         onThinking: (t) => broadcast("thinking", { conversationId, t }),
       });
       if (reply) {

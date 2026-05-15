@@ -10,6 +10,7 @@ import { createDraftStagingTools } from "./draft-tools.js";
 import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
 import { getRuntimeConfig, type RuntimeConfig } from "./runtime-config.js";
 import { runAgentRuntime } from "./runtimes/index.js";
+import { buildPromptWithImages, fetchStoredBytes } from "./images/content-blocks.js";
 
 const running = new Map<string, AbortController>();
 
@@ -86,7 +87,10 @@ export interface SpawnOptions {
   conversationId?: string;
   name?: string;
   runtimeConfig?: RuntimeConfig;
+  imageStorageIds?: string[];
 }
+
+export type SpawnExecutionAgentOpts = SpawnOptions;
 
 export interface SpawnResult {
   agentId: string;
@@ -94,7 +98,7 @@ export interface SpawnResult {
   status: "completed" | "failed" | "cancelled";
 }
 
-export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResult> {
+export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promise<SpawnResult> {
   const agentId = randomId("agent");
   const name = opts.name ?? (opts.integrations.join("+") || "general");
   const abort = new AbortController();
@@ -105,7 +109,7 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   const taskPreview =
     opts.task.length > 120 ? opts.task.slice(0, 120) + "…" : opts.task;
   logAgent(
-    `spawn: ${name} [${opts.integrations.join(", ") || "no integrations"}] — ${JSON.stringify(taskPreview)}`,
+    `spawn: ${name} [${opts.integrations.join(", ") || "no integrations"}] images=${opts.imageStorageIds?.length ?? 0} — ${JSON.stringify(taskPreview)}`,
   );
   const agentStart = Date.now();
   const runtimeConfig = opts.runtimeConfig ?? (await getRuntimeConfig());
@@ -151,10 +155,14 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
   let status: "completed" | "failed" | "cancelled" = "completed";
   let errorMsg: string | undefined;
 
-  const requestedModel = runtimeConfig.model;
   try {
+    const executionPrompt = await buildPromptWithImages({
+      text: opts.task,
+      imageStorageIds: opts.imageStorageIds,
+      fetchBytes: fetchStoredBytes,
+    });
     const result = await runAgentRuntime(runtimeConfig, {
-      prompt: opts.task,
+      prompt: executionPrompt,
       systemPrompt: EXECUTION_SYSTEM,
       claudeMcpServers: mcpServers,
       tools: runtimeTools,
@@ -267,6 +275,9 @@ export async function retryAgent(agentId: string): Promise<SpawnResult | null> {
           billingMode: originalRuntime.billingMode,
         }
       : undefined;
+  // V1 limitation: image refs are not persisted to executionAgents and
+  // therefore are not replayed on retry. Re-trigger from the original
+  // turn if you need the image inputs.
   return await spawnExecutionAgent({
     task: existing.task,
     integrations: existing.mcpServers,

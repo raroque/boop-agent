@@ -14,6 +14,7 @@ import { defineRuntimeTool } from "./runtimes/tool.js";
 import { runAgentRuntime } from "./runtimes/index.js";
 import { runtimeText } from "./runtimes/types.js";
 import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
+import { buildPromptWithImages, fetchStoredBytes } from "./images/content-blocks.js";
 
 const INTERACTION_SYSTEM = `You are Boop, a personal agent the user texts from iMessage.
 
@@ -166,6 +167,16 @@ before saving.
 
 Available integrations for spawn_agent: {{INTEGRATIONS}}
 
+Images:
+When the user texts a photo or screenshot, you'll see it directly as
+input — treat it as part of the message. Describe it, answer questions
+about it, or extract info from it the same way you'd handle text. If
+the user's request depends on the image AND requires a sub-agent (e.g.
+"search the web for this product I'm photographing"), pass the relevant
+storage IDs to spawn_agent's imageRefs parameter so the sub-agent can
+see the image too. If the user sends a photo with no caption, ask a
+short clarifying question rather than guessing what they want.
+
 Format: Plain iMessage-friendly text. Markdown sparingly. Keep replies under ~400 chars when you can.`;
 
 interface HandleOpts {
@@ -181,10 +192,33 @@ interface HandleOpts {
   // transport succeeds. Local chat callers still need the assistant turn in
   // Convex so conversation views reflect the full exchange.
   persistAssistantReply?: boolean;
+  images?: Array<{ storageId: string; mediaType: string }>;
+  mediaError?: string;
 }
 
 function randomId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function shouldForceImageLookupSpawn(args: {
+  content: string;
+  imageStorageIds: string[];
+  kind?: "user" | "proactive";
+}): boolean {
+  if (args.kind === "proactive" || args.imageStorageIds.length === 0) return false;
+  const text = args.content.toLowerCase();
+  return /\b(where can i buy|where to buy|buy this|buy it|purchase|shopping|shop for|for sale|seller|store|price|cost|amazon|etsy|ebay|link to buy|find (?:this|it|one|a|an)|search (?:the )?web|look (?:this|it) up)\b/.test(
+    text,
+  );
+}
+
+export function buildImageLookupTask(userText: string): string {
+  return [
+    "Use the attached image(s) to answer the user's request.",
+    `User request: ${userText || "(no caption)"}`,
+    "If this is a shopping, product-identification, availability, price, or web lookup request, use web search/fetch and cite concrete URLs.",
+    "If the image appears AI-generated, edited, generic, or not a real purchasable item, say that clearly and then suggest the closest real alternatives when useful.",
+  ].join("\n");
 }
 
 export async function handleUserMessage(opts: HandleOpts): Promise<string> {
@@ -192,11 +226,18 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const integrations = availableIntegrations();
 
   const inboundRole = opts.kind === "proactive" ? "system" : "user";
+  const inboundImageStorageIds = (opts.images ?? []).map((i) => i.storageId);
+  const inboundImageStorageIdsForPrompt = inboundImageStorageIds;
   await convex.mutation(api.messages.send, {
     conversationId: opts.conversationId,
     role: inboundRole,
     content: opts.content,
     turnId,
+    // TODO(codegen): drop cast once schema push regenerates Convex API.
+    imageStorageIds: inboundImageStorageIds.length > 0
+      ? (inboundImageStorageIds as never)
+      : undefined,
+    mediaError: opts.mediaError,
   });
   broadcast(opts.kind === "proactive" ? "proactive_notice" : "user_message", {
     conversationId: opts.conversationId,
@@ -220,12 +261,15 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     integrations.join(", ") || "(no integrations configured yet)",
   );
 
-  const prompt =
+  const userText = opts.mediaError
+    ? `[user sent images but they couldn't be downloaded: ${opts.mediaError}]\n${opts.content}`
+    : opts.content;
+  const promptText =
     opts.kind === "proactive"
-      ? `Standalone proactive notice. Write a concise user-facing iMessage from this notice only. Do not research, spawn agents, or continue any prior conversation.\n\n${opts.content}`
+      ? `Standalone proactive notice. Write a concise user-facing iMessage from this notice only. Do not research, spawn agents, or continue any prior conversation.\n\n${userText}`
       : historyBlock
-        ? `Prior turns:\n${historyBlock}\n\nCurrent message:\n${opts.content}`
-        : opts.content;
+        ? `Prior turns:\n${historyBlock}\n\nCurrent message:\n${userText}`
+        : userText;
 
   const tag = opts.turnTag ?? turnId.slice(-6);
   const log = (msg: string) => console.log(`[turn ${tag}] ${msg}`);
@@ -235,6 +279,25 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   // changes do not split the dispatcher and any spawned execution agent.
   const runtimeConfig = await getRuntimeConfig();
   const requestedModel = runtimeConfig.model;
+  const sendAck = async (message: string): Promise<void> => {
+    const text = message.trim();
+    if (!text) return;
+    if (opts.conversationId.startsWith("sms:") && opts.kind !== "proactive") {
+      const number = opts.conversationId.slice(4);
+      await sendImessage(number, text);
+    }
+    await convex.mutation(api.messages.send, {
+      conversationId: opts.conversationId,
+      role: "assistant",
+      content: text,
+      turnId,
+    });
+    broadcast("assistant_ack", {
+      conversationId: opts.conversationId,
+      content: text,
+    });
+    log(`→ ack: ${text}`);
+  };
   const tools = [
     ...createMemoryTools(opts.conversationId),
     ...createAutomationTools(opts.conversationId),
@@ -250,33 +313,14 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
       async (args) => {
         const text = args.message.trim();
         if (!text) return runtimeText("Empty ack skipped.");
-        // Skip the iMessage send for proactive turns — those go out as a
-        // single self-contained notice from dispatchProactiveNotice. If the
-        // IA calls send_ack here on a proactive turn, the user would get
-        // two iMessages (the ack + the final reply). Still persist + log
-        // so the debug UI sees it.
-        if (opts.conversationId.startsWith("sms:") && opts.kind !== "proactive") {
-          const number = opts.conversationId.slice(4);
-          await sendImessage(number, text);
-        }
-        await convex.mutation(api.messages.send, {
-          conversationId: opts.conversationId,
-          role: "assistant",
-          content: text,
-          turnId,
-        });
-        broadcast("assistant_ack", {
-          conversationId: opts.conversationId,
-          content: text,
-        });
-        log(`→ ack: ${text}`);
+        await sendAck(text);
         return runtimeText("Ack sent to user.");
       },
     ),
     defineRuntimeTool(
       "boop-spawn",
       "spawn_agent",
-      "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use for anything requiring lookups, drafting, or actions in the user's integrations.",
+      "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use for anything requiring lookups, drafting, or actions in the user's integrations. If the current user message includes images and the sub-agent's task depends on them, pass the relevant storage IDs in imageRefs.",
       {
         task: z
           .string()
@@ -285,14 +329,28 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           .array(z.string())
           .describe(`Which integrations to give the agent. Available: ${integrations.join(", ") || "(none)"}`),
         name: z.string().optional().describe("Short label for the agent."),
+        imageRefs: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Convex storage IDs from the user's current message. Available in this turn: " +
+              (inboundImageStorageIdsForPrompt.length > 0
+                ? inboundImageStorageIdsForPrompt.join(", ")
+                : "(none)"),
+          ),
       },
       async (args) => {
+        const allowedRefs = args.imageRefs?.filter((id) =>
+          inboundImageStorageIds.includes(id),
+        );
         const res = await spawnExecutionAgent({
           task: args.task,
           integrations: args.integrations,
           conversationId: opts.conversationId,
           name: args.name,
           runtimeConfig,
+          imageStorageIds:
+            allowedRefs && allowedRefs.length > 0 ? allowedRefs : undefined,
         });
         return runtimeText(`[agent ${res.agentId} ${res.status}]\n\n${res.result}`);
       },
@@ -301,61 +359,91 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   let reply = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
   try {
-    const result = await runAgentRuntime(runtimeConfig, {
-      prompt,
-      systemPrompt,
-      tools,
-      mode: "dispatcher",
-      allowedTools:
+    if (
+      shouldForceImageLookupSpawn({
+        content: userText,
+        imageStorageIds: inboundImageStorageIds,
+        kind: opts.kind,
+      })
+    ) {
+      log(
+        `forced image lookup spawn (${runtimeConfig.runtime}, images=${inboundImageStorageIds.length})`,
+      );
+      await sendAck("Checking the image and web now.");
+      const res = await spawnExecutionAgent({
+        task: buildImageLookupTask(userText),
+        integrations: [],
+        conversationId: opts.conversationId,
+        name: "image lookup",
+        runtimeConfig,
+        imageStorageIds: inboundImageStorageIds,
+      });
+      reply = res.result;
+    } else {
+      const prompt =
         opts.kind === "proactive"
-          ? []
-          : [
-              "mcp__boop-memory__write_memory",
-              "mcp__boop-memory__recall",
-              "mcp__boop-spawn__spawn_agent",
-              "mcp__boop-automations__create_automation",
-              "mcp__boop-automations__list_automations",
-              "mcp__boop-automations__toggle_automation",
-              "mcp__boop-automations__delete_automation",
-              "mcp__boop-draft-decisions__list_drafts",
-              "mcp__boop-draft-decisions__send_draft",
-              "mcp__boop-draft-decisions__reject_draft",
-              "mcp__boop-ack__send_ack",
-              "mcp__boop-self__get_config",
-              "mcp__boop-self__set_runtime",
-              "mcp__boop-self__set_model",
-              "mcp__boop-self__set_codex_reasoning_effort",
-              "mcp__boop-self__set_timezone",
-              "mcp__boop-self__list_integrations",
-              "mcp__boop-self__search_composio_catalog",
-              "mcp__boop-self__inspect_toolkit",
-            ],
-      // Belt-and-suspenders: even with bypassPermissions the SDK can leak
-      // its built-ins if we only whitelist. Explicitly block them on the
-      // dispatcher so it MUST spawn a sub-agent for external work.
-      disallowedTools: [
-        "WebSearch",
-        "WebFetch",
-        "Bash",
-        "Read",
-        "Write",
-        "Edit",
-        "Glob",
-        "Grep",
-        "Agent",
-        "Skill",
-      ],
-      onText: (chunk) => opts.onThinking?.(chunk),
-      onToolUse: (toolName, input) => {
-        const name = toolName.replace(/^mcp__boop-[a-z-]+__/, "");
-        const inputPreview = JSON.stringify(input);
-        log(
-          `tool: ${name}(${inputPreview.length > 90 ? inputPreview.slice(0, 90) + "…" : inputPreview})`,
-        );
-      },
-    });
-    reply = result.text;
-    usage = result.usage;
+          ? promptText
+          : await buildPromptWithImages({
+              text: promptText,
+              imageStorageIds: inboundImageStorageIds,
+              fetchBytes: fetchStoredBytes,
+            });
+      const result = await runAgentRuntime(runtimeConfig, {
+        prompt,
+        systemPrompt,
+        tools,
+        mode: "dispatcher",
+        allowedTools:
+          opts.kind === "proactive"
+            ? []
+            : [
+                "mcp__boop-memory__write_memory",
+                "mcp__boop-memory__recall",
+                "mcp__boop-spawn__spawn_agent",
+                "mcp__boop-automations__create_automation",
+                "mcp__boop-automations__list_automations",
+                "mcp__boop-automations__toggle_automation",
+                "mcp__boop-automations__delete_automation",
+                "mcp__boop-draft-decisions__list_drafts",
+                "mcp__boop-draft-decisions__send_draft",
+                "mcp__boop-draft-decisions__reject_draft",
+                "mcp__boop-ack__send_ack",
+                "mcp__boop-self__get_config",
+                "mcp__boop-self__set_runtime",
+                "mcp__boop-self__set_model",
+                "mcp__boop-self__set_codex_reasoning_effort",
+                "mcp__boop-self__set_timezone",
+                "mcp__boop-self__list_integrations",
+                "mcp__boop-self__search_composio_catalog",
+                "mcp__boop-self__inspect_toolkit",
+              ],
+        // Belt-and-suspenders: even with bypassPermissions the SDK can leak
+        // its built-ins if we only whitelist. Explicitly block them on the
+        // dispatcher so it MUST spawn a sub-agent for external work.
+        disallowedTools: [
+          "WebSearch",
+          "WebFetch",
+          "Bash",
+          "Read",
+          "Write",
+          "Edit",
+          "Glob",
+          "Grep",
+          "Agent",
+          "Skill",
+        ],
+        onText: (chunk) => opts.onThinking?.(chunk),
+        onToolUse: (toolName, input) => {
+          const name = toolName.replace(/^mcp__boop-[a-z-]+__/, "");
+          const inputPreview = JSON.stringify(input);
+          log(
+            `tool: ${name}(${inputPreview.length > 90 ? inputPreview.slice(0, 90) + "…" : inputPreview})`,
+          );
+        },
+      });
+      reply = result.text;
+      usage = result.usage;
+    }
   } catch (err) {
     console.error(`[turn ${tag}] query failed`, err);
     reply = "Sorry — I hit an error processing that. Try again in a moment.";
@@ -424,6 +512,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
       assistantReply: reply,
       turnId,
       runtimeConfig,
+      imageStorageIds: inboundImageStorageIds,
     }).catch((err) => console.error("[interaction] extraction error", err));
   }
 

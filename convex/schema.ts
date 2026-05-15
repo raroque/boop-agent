@@ -9,9 +9,12 @@ export default defineSchema({
     agentId: v.optional(v.string()),
     turnId: v.optional(v.string()),
     createdAt: v.number(),
+    imageStorageIds: v.optional(v.array(v.id("_storage"))),
+    mediaError: v.optional(v.string()),
   })
     .index("by_conversation", ["conversationId"])
-    .index("by_conversation_turn", ["conversationId", "turnId"]),
+    .index("by_conversation_turn", ["conversationId", "turnId"])
+    .index("by_createdAt", ["createdAt"]),
 
   conversations: defineTable({
     conversationId: v.string(),
@@ -48,6 +51,7 @@ export default defineSchema({
     // schema churn.
     metadata: v.optional(v.string()),
     createdAt: v.number(),
+    imageStorageIds: v.optional(v.array(v.id("_storage"))),
   })
     .index("by_memory_id", ["memoryId"])
     .index("by_tier", ["tier"])

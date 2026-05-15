@@ -25,6 +25,7 @@ import {
   setRuntimeModel,
   setRuntimeProvider,
 } from "./runtime-config.js";
+import { startImageCleanup } from "./images/clean.js";
 
 async function main() {
   await loadIntegrations();
@@ -32,6 +33,7 @@ async function main() {
   startAutomationLoop();
   startHeartbeatLoop();
   startConsolidationLoop();
+  startImageCleanup();
   // No-op when a paid embedding key is set; otherwise downloads/loads the
   // local BGE-large model in the background so the first user-facing
   // recall() doesn't pay the model-load cost.

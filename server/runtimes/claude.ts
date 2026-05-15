@@ -8,6 +8,27 @@ import {
 import type { RuntimeRunRequest, RuntimeRunResult, RuntimeTool } from "./types.js";
 import { aggregateUsageFromResult, EMPTY_USAGE } from "../usage.js";
 
+type ClaudePrompt =
+  | string
+  | AsyncIterable<{
+      type: "user";
+      session_id: string;
+      message: { role: "user"; content: unknown };
+      parent_tool_use_id: null;
+    }>;
+
+function toClaudePrompt(prompt: RuntimeRunRequest["prompt"]): ClaudePrompt {
+  if (typeof prompt === "string") return prompt;
+  return (async function* () {
+    yield {
+      type: "user" as const,
+      session_id: "",
+      message: { role: "user" as const, content: prompt },
+      parent_tool_use_id: null,
+    };
+  })();
+}
+
 export function createClaudeMcpServer(
   name: string,
   tools: RuntimeTool[],
@@ -54,7 +75,7 @@ export async function runClaudeAgent(request: RuntimeRunRequest): Promise<Runtim
   let usage = { ...EMPTY_USAGE, model: request.model };
 
   for await (const msg of query({
-    prompt: request.prompt,
+    prompt: toClaudePrompt(request.prompt),
     options: {
       systemPrompt: request.systemPrompt,
       model: request.model,
