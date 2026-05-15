@@ -11,6 +11,7 @@ Format:
 ## Unreleased — Cross-runtime slash-command upgrade workflow
 
 - Changed: `/upgrade-boop` is the single documented upgrade path. The upstream reminder printed by `npm run dev` now points users to open Codex or Claude in the repo and run `/upgrade-boop`.
+- Changed: README/package metadata now lead with the runtime choice: Claude Code subscription via the Claude Agent SDK, or Codex / ChatGPT subscription via the local Codex runtime.
 - Changed: upgrade and contribution docs now make the cross-runtime skill convention explicit: migration skills referenced from `[BREAKING]` CHANGELOG entries should be mirrored in both `.claude/skills/` and `.agents/skills/` unless intentionally provider-specific.
 
 ## Unreleased — Local embeddings fallback + mandatory recall

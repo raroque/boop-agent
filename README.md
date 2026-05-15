@@ -4,7 +4,14 @@
 
 # Boop
 
-An iMessage-based personal agent built on top of the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview), with an optional local Codex runtime.
+An iMessage-based personal agent you can run with either your Claude Code subscription or your Codex / ChatGPT subscription.
+
+Choose your runtime during setup:
+
+- **Claude** — powered by the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview) and your local Claude Code login.
+- **Codex** — powered by the local Codex app-server runtime and your local `codex login`.
+
+No Anthropic or OpenAI API key is required for the agent runtime when using subscription auth.
 
 📺 **Watch the walkthrough:** [YouTube — How I built Boop](https://youtu.be/ZpmKjDDbqHs)
 
@@ -25,7 +32,7 @@ An iMessage-based personal agent built on top of the [Claude Agent SDK](https://
 ```
 
 Built on:
-- [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript) + local Codex runtime — the loop, tool use, sub-agents, MCP
+- [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript) or local Codex runtime — choose your provider during setup
 - [Composio](https://composio.dev/?utm_source=chris&utm_medium=youtube&utm_campaign=collab) — integrations layer. One API key = Gmail, Slack, GitHub, Linear, Notion, Stripe, Supabase, + ~1000 more with hosted OAuth
 - [Sendblue](https://sendblue.com/?utm_source=raroque) — iMessage in/out (free on their agent plan)
 - [Convex](https://convex.link/chrisraroque) — real-time database for memory, agents, drafts
