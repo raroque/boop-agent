@@ -30,6 +30,35 @@ export function getImageRetentionDays(): number {
 // per-tick scan stops if we hit this even when more pages are available — the
 // next interval picks up where we left off thanks to ascending createdAt.
 const MAX_SCAN_PAGES = 50;
+const MEMORY_REF_PAGE_SIZE = 50;
+
+async function findAnchoredStorageIds(storageIds: string[]): Promise<Set<string>> {
+  const wanted = [...new Set(storageIds)];
+  const found = new Set<string>();
+  if (wanted.length === 0) return found;
+
+  let cursor: string | null = null;
+  for (;;) {
+    // TODO(codegen): drop cast once schema push regenerates Convex API.
+    const result = (await convex.query(api.memoryRecords.findImageRefsPage, {
+      storageIds: wanted as never,
+      cursor,
+      pageSize: MEMORY_REF_PAGE_SIZE,
+    } as never)) as {
+      foundStorageIds: string[];
+      isDone: boolean;
+      continueCursor: string | null;
+    };
+    for (const id of result.foundStorageIds) found.add(id);
+    if (found.size === wanted.length || result.isDone) break;
+    if (result.continueCursor === cursor) {
+      console.warn("[image-cleanup] memory ref cursor did not advance; keeping unresolved refs");
+      break;
+    }
+    cursor = result.continueCursor;
+  }
+  return found;
+}
 
 export async function runImageCleanup(): Promise<{ deleted: number; kept: number }> {
   const retention = getImageRetentionDays();
@@ -55,26 +84,35 @@ export async function runImageCleanup(): Promise<{ deleted: number; kept: number
     const pairs = result.rows.flatMap((msg) =>
       (msg.imageStorageIds ?? []).map((storageId) => ({ messageId: msg._id, storageId })),
     );
-    // TODO(codegen): drop casts once schema push regenerates Convex API.
-    const anchored = await Promise.all(
-      pairs.map((p) =>
-        convex.query(api.memoryRecords.hasImageRef, { storageId: p.storageId as never }),
-      ),
-    );
-    const toDelete = pairs.filter((_, i) => !anchored[i]);
+    let anchoredStorageIds: Set<string>;
+    try {
+      anchoredStorageIds = await findAnchoredStorageIds(pairs.map((p) => p.storageId));
+    } catch (err) {
+      console.warn("[image-cleanup] anchor scan failed; keeping page", err);
+      kept += pairs.length;
+      if (!result.hasMore) break;
+      if (result.nextAfterMs <= afterMs) break;
+      afterMs = result.nextAfterMs;
+      continue;
+    }
+    const toDelete = pairs.filter((p) => !anchoredStorageIds.has(p.storageId));
     kept += pairs.length - toDelete.length;
     await Promise.all(
       toDelete.map(async (p) => {
-        await convex.mutation(api.messages.deleteImageBytes, {
-          storageId: p.storageId as never,
-        });
         await convex.mutation(api.messages.clearMessageImage, {
           messageId: p.messageId as never,
           storageId: p.storageId as never,
         });
+        try {
+          await convex.mutation(api.messages.deleteImageBytes, {
+            storageId: p.storageId as never,
+          });
+          deleted += 1;
+        } catch (err) {
+          console.warn(`[image-cleanup] failed to delete image bytes ${p.storageId}`, err);
+        }
       }),
     );
-    deleted += toDelete.length;
 
     if (!result.hasMore) break;
     if (result.nextAfterMs <= afterMs) break;

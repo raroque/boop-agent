@@ -286,16 +286,34 @@ export const countsByTier = query({
   },
 });
 
-export const hasImageRef = query({
-  args: { storageId: v.id("_storage") },
+export const findImageRefsPage = query({
+  args: {
+    storageIds: v.array(v.id("_storage")),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    pageSize: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
-    // Linear scan is fine while memory volume is small; for large user
-    // bases, add an index on imageStorageIds via a secondary join table.
-    const all = await ctx.db.query("memoryRecords").collect();
-    return all.some(
-      (r) =>
-        Array.isArray(r.imageStorageIds) &&
-        r.imageStorageIds.includes(args.storageId),
-    );
+    if (args.storageIds.length === 0) {
+      return { foundStorageIds: [], isDone: true, continueCursor: null };
+    }
+    const wanted = new Set(args.storageIds);
+    const result = await ctx.db
+      .query("memoryRecords")
+      .order("desc")
+      .paginate({
+        cursor: args.cursor ?? null,
+        numItems: args.pageSize ?? 50,
+      });
+    const found = new Set<string>();
+    for (const record of result.page) {
+      for (const storageId of record.imageStorageIds ?? []) {
+        if (wanted.has(storageId)) found.add(storageId);
+      }
+    }
+    return {
+      foundStorageIds: [...found],
+      isDone: result.isDone,
+      continueCursor: result.continueCursor,
+    };
   },
 });

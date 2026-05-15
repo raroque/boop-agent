@@ -244,7 +244,6 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
 
   const inboundRole = opts.kind === "proactive" ? "system" : "user";
   const inboundImageStorageIds = (opts.images ?? []).map((i) => i.storageId);
-  const inboundImageStorageIdsForPrompt = inboundImageStorageIds;
   await convex.mutation(api.messages.send, {
     conversationId: opts.conversationId,
     role: inboundRole,
@@ -373,8 +372,8 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           .optional()
           .describe(
             "Convex storage IDs from the user's current message. Available in this turn: " +
-              (inboundImageStorageIdsForPrompt.length > 0
-                ? inboundImageStorageIdsForPrompt.join(", ")
+              (inboundImageStorageIds.length > 0
+                ? inboundImageStorageIds.join(", ")
                 : "(none)"),
           ),
       },
