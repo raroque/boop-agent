@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { IntegrationLogo } from "../lib/branding.js";
 
 type AuthMode = "managed" | "byo";
@@ -77,6 +77,20 @@ interface NeedsAuthConfigInfo {
   slug: string;
   message: string;
   setupUrl: string;
+}
+
+interface RequiredField {
+  name: string;
+  displayName: string;
+  description: string;
+  type: string;
+  required: boolean;
+  default?: string | null;
+}
+
+interface RequiredFieldsResponse {
+  authScheme: string;
+  fields: RequiredField[];
 }
 
 // Per-toolkit guidance for BYO OAuth setup. Composio doesn't host a shared OAuth
@@ -274,12 +288,28 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
     fetchToolkits();
   }, [fetchToolkits]);
 
-  const connect = useCallback(
-    async (slug: string) => {
+  const [pendingFields, setPendingFields] = useState<Record<string, RequiredField[]>>({});
+  const cancelPendingFields = useCallback((slug: string) => {
+    setPendingFields((prev) => {
+      if (!(slug in prev)) return prev;
+      const next = { ...prev };
+      delete next[slug];
+      return next;
+    });
+  }, []);
+
+  // Fires the actual OAuth initiate + popup. Separated from connect() so the
+  // required-fields form can call it after collecting values.
+  const runAuthorize = useCallback(
+    async (slug: string, fields?: Record<string, string>) => {
       setBusy(slug);
       setNeedsAuthConfig(null);
       try {
-        const r = await fetch(`/api/composio/toolkits/${slug}/authorize`, { method: "POST" });
+        const body = fields ? JSON.stringify({ fields }) : undefined;
+        const r = await fetch(`/api/composio/toolkits/${slug}/authorize`, {
+          method: "POST",
+          ...(body ? { headers: { "Content-Type": "application/json" }, body } : {}),
+        });
         if (!r.ok) {
           const err = await r.json().catch(() => ({}));
           if (err?.needsAuthConfig) {
@@ -295,6 +325,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
           setBusy(null);
           return;
         }
+        cancelPendingFields(slug);
         const { redirectUrl } = await r.json();
         if (!redirectUrl) {
           showToast("Composio did not return a redirect URL.");
@@ -332,7 +363,28 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
         setBusy(null);
       }
     },
-    [fetchToolkits, showToast],
+    [fetchToolkits, showToast, cancelPendingFields],
+  );
+
+  const connect = useCallback(
+    async (slug: string) => {
+      setBusy(slug);
+      try {
+        const r = await fetch(`/api/composio/toolkits/${slug}/required-fields`);
+        if (r.ok) {
+          const { fields } = (await r.json()) as RequiredFieldsResponse;
+          if (fields && fields.length > 0) {
+            setPendingFields((prev) => ({ ...prev, [slug]: fields }));
+            setBusy(null);
+            return;
+          }
+        }
+      } catch {
+        // Non-fatal — fall through and let runAuthorize surface the real error.
+      }
+      await runAuthorize(slug);
+    },
+    [runAuthorize],
   );
 
   const disconnect = useCallback(
@@ -499,7 +551,10 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
                       isDark={isDark}
                       expanded={!!expanded[t.slug]}
                       tools={toolsBySlug[t.slug]}
+                      pendingFields={pendingFields[t.slug]}
                       onConnect={connect}
+                      onSubmitFields={runAuthorize}
+                      onCancelFields={cancelPendingFields}
                       onDisconnect={disconnect}
                       onRename={rename}
                       onToggleTools={toggleTools}
@@ -523,7 +578,10 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
                       isDark={isDark}
                       expanded={!!expanded[t.slug]}
                       tools={toolsBySlug[t.slug]}
+                      pendingFields={pendingFields[t.slug]}
                       onConnect={connect}
+                      onSubmitFields={runAuthorize}
+                      onCancelFields={cancelPendingFields}
                       onDisconnect={disconnect}
                       onRename={rename}
                       onToggleTools={toggleTools}
@@ -548,7 +606,10 @@ function ToolkitCard({
   isDark,
   expanded,
   tools,
+  pendingFields,
   onConnect,
+  onSubmitFields,
+  onCancelFields,
   onDisconnect,
   onRename,
   onToggleTools,
@@ -560,7 +621,10 @@ function ToolkitCard({
   isDark: boolean;
   expanded: boolean;
   tools: ToolSummary[] | "loading" | "error" | undefined;
+  pendingFields: RequiredField[] | undefined;
   onConnect: (slug: string) => void;
+  onSubmitFields: (slug: string, fields: Record<string, string>) => Promise<void>;
+  onCancelFields: (slug: string) => void;
   onDisconnect: (slug: string, connectionId: string) => void;
   onRename: (connectionId: string, alias: string) => Promise<boolean>;
   onToggleTools: (slug: string) => void;
@@ -635,6 +699,18 @@ function ToolkitCard({
       </div>
 
       {needsSetup && <ByoSetupSteps slug={t.slug} isDark={isDark} muted={muted} onConnect={onConnect} />}
+
+      {pendingFields && pendingFields.length > 0 && (
+        <RequiredFieldsForm
+          slug={t.slug}
+          fields={pendingFields}
+          submitting={connectBusy}
+          isDark={isDark}
+          muted={muted}
+          onSubmit={onSubmitFields}
+          onCancel={onCancelFields}
+        />
+      )}
 
       {hasConnections && (
         <div className="mt-3 space-y-1.5">
@@ -822,6 +898,95 @@ function ConnectionRow({
         {busy ? "…" : "Disconnect"}
       </button>
     </div>
+  );
+}
+
+function RequiredFieldsForm({
+  slug,
+  fields,
+  submitting,
+  isDark,
+  muted,
+  onSubmit,
+  onCancel,
+}: {
+  slug: string;
+  fields: RequiredField[];
+  submitting: boolean;
+  isDark: boolean;
+  muted: string;
+  onSubmit: (slug: string, fields: Record<string, string>) => Promise<void>;
+  onCancel: (slug: string) => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(fields.map((f) => [f.name, f.default ?? ""])),
+  );
+  const wrapClass = `mt-3 pt-3 border-t ${isDark ? "border-slate-800" : "border-slate-200"}`;
+  const inputClass = `text-sm px-2 py-1 rounded border outline-none w-full ${
+    isDark
+      ? "bg-slate-950 border-slate-700 text-slate-100 focus:border-sky-400"
+      : "bg-white border-slate-300 text-slate-800 focus:border-sky-500"
+  }`;
+  const allRequiredFilled = fields.every((f) => !f.required || values[f.name]?.trim());
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!allRequiredFilled || submitting) return;
+    await onSubmit(slug, values);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className={wrapClass}>
+      <div className={`text-[11px] font-medium mb-2 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+        This toolkit needs a few details before OAuth:
+      </div>
+      <div className="space-y-2.5">
+        {fields.map((f) => (
+          <label key={f.name} className="block">
+            <div className="flex items-baseline gap-2 mb-1">
+              <span className={`text-xs font-medium ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                {f.displayName}
+                {f.required && <span className="text-rose-500 ml-0.5">*</span>}
+              </span>
+              <span className={`text-[10px] mono ${muted}`}>{f.name}</span>
+            </div>
+            {f.description && (
+              <div className={`text-[11px] ${muted} mb-1 leading-snug`}>{f.description}</div>
+            )}
+            <input
+              type="text"
+              value={values[f.name] ?? ""}
+              onChange={(e) => setValues((prev) => ({ ...prev, [f.name]: e.target.value }))}
+              disabled={submitting}
+              autoFocus={f === fields[0]}
+              required={f.required}
+              className={inputClass}
+            />
+          </label>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 mt-3">
+        <button
+          type="submit"
+          disabled={!allRequiredFilled || submitting}
+          className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+            !allRequiredFilled || submitting
+              ? "bg-slate-600 text-slate-300 cursor-not-allowed"
+              : "bg-sky-600 hover:bg-sky-500 text-white"
+          }`}
+        >
+          {submitting ? "Connecting…" : "Continue to OAuth"}
+        </button>
+        <button
+          type="button"
+          onClick={() => onCancel(slug)}
+          disabled={submitting}
+          className={`text-[11px] underline ${muted} hover:text-rose-500 disabled:opacity-50`}
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 

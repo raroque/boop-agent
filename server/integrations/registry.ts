@@ -28,6 +28,16 @@ export function getIntegration(name: string): IntegrationModule | undefined {
 export async function loadIntegrations(): Promise<void> {
   const { registerComposioToolkits } = await import("./composio-loader.js");
   await registerComposioToolkits();
+  const { registerGranolaIntegration } = await import("./granola.js");
+  registerGranolaIntegration();
+  const { registerApifyIntegration } = await import("./apify.js");
+  registerApifyIntegration();
+  const { registerWebIntegration } = await import("./web.js");
+  registerWebIntegration();
+  const { registerGeminiIntegration } = await import("./gemini.js");
+  registerGeminiIntegration();
+  const { registerBrowserIntegration } = await import("./browser.js");
+  registerBrowserIntegration();
   const loaded = [...registry.keys()];
   console.log(
     `[integrations] loaded: ${loaded.join(", ") || "(none — connect a toolkit from the Debug UI's Connections tab)"}`,

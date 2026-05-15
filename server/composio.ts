@@ -1,4 +1,4 @@
-import { Composio } from "@composio/core";
+import { Composio, AuthScheme } from "@composio/core";
 import { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
 import { createSdkMcpServer, type McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { IntegrationModule } from "./integrations/registry.js";
@@ -40,7 +40,9 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
   { slug: "dropbox", displayName: "Dropbox", authMode: "managed" },
   { slug: "stripe", displayName: "Stripe", authMode: "managed" },
   { slug: "supabase", displayName: "Supabase", authMode: "managed" },
-  { slug: "granola_mcp", displayName: "Granola", authMode: "managed" },
+  // Granola is handled by the native integration in server/integrations/granola.ts
+  // (Composio's granola_mcp toolkit is MCP-only and doesn't work with the standard
+  // OAuth Connect flow). Set GRANOLA_API_TOKEN in .env.local to enable it.
   { slug: "salesforce", displayName: "Salesforce", authMode: "managed" },
   { slug: "twitter", displayName: "Twitter / X", authMode: "byo" },
   { slug: "linkedin", displayName: "LinkedIn", authMode: "managed" },
@@ -460,50 +462,105 @@ export class ComposioNeedsAuthConfigError extends Error {
   }
 }
 
+// Some toolkits (Atlassian Confluence/Jira, Shopify, etc.) require fields like
+// `subdomain` BEFORE Composio can build the OAuth redirect. authorizeToolkit
+// would fail with code 612 ("Missing required field") if we didn't pass them.
+type AuthSchemeName = "OAUTH2" | "OAUTH1" | "API_KEY" | "BASIC" | "BEARER_TOKEN" | "NO_AUTH";
+
+export interface RequiredField {
+  name: string;
+  displayName: string;
+  description: string;
+  type: string;
+  required: boolean;
+  default?: string | null;
+}
+
+export interface RequiredInitiationFields {
+  authScheme: AuthSchemeName;
+  fields: RequiredField[];
+}
+
+async function ensureAuthConfigId(
+  composio: NonNullable<ReturnType<typeof getComposio>>,
+  slug: string,
+): Promise<{ id: string; authScheme: AuthSchemeName }> {
+  const existing = (await composio.authConfigs.list({ toolkit: slug })).items[0];
+  if (existing) return { id: existing.id, authScheme: existing.authScheme as AuthSchemeName };
+  try {
+    const created = await composio.authConfigs.create(slug, {
+      type: "use_composio_managed_auth",
+      name: `${displayNameFor(slug)} Auth Config`,
+    });
+    return { id: created.id, authScheme: (created.authScheme ?? "OAUTH2") as AuthSchemeName };
+  } catch (err) {
+    // 400 here means Composio doesn't host a managed OAuth app for this toolkit —
+    // user has to register their own at the toolkit's dev portal and add it via
+    // the Composio Dashboard (Toolkits → search → Add to project).
+    const status = (err as { status?: number })?.status;
+    if (status === 400) throw new ComposioNeedsAuthConfigError(slug, String(err));
+    throw err;
+  }
+}
+
+export async function getRequiredInitiationFields(
+  slug: string,
+): Promise<RequiredInitiationFields | null> {
+  const composio = getComposio();
+  if (!composio) return null;
+  const { authScheme } = await ensureAuthConfigId(composio, slug);
+  const fields = await composio.toolkits.getConnectedAccountInitiationFields(
+    slug,
+    authScheme,
+    { requiredOnly: true },
+  );
+  return { authScheme, fields: fields as RequiredField[] };
+}
+
+function buildConnectionConfig(
+  authScheme: AuthSchemeName,
+  fields: Record<string, string>,
+): ReturnType<typeof AuthScheme.OAuth2> | undefined {
+  if (Object.keys(fields).length === 0) return undefined;
+  // BaseConnectionFields is permissive (z.objectInputType with strip + ZodUnknown),
+  // so unknown keys like "subdomain" / "shop" / "your-domain" pass through.
+  switch (authScheme) {
+    case "OAUTH2":
+      return AuthScheme.OAuth2(fields as Parameters<typeof AuthScheme.OAuth2>[0]);
+    case "OAUTH1":
+      return AuthScheme.OAuth1(fields as Parameters<typeof AuthScheme.OAuth1>[0]);
+    case "API_KEY":
+      return AuthScheme.APIKey(fields as Parameters<typeof AuthScheme.APIKey>[0]);
+    case "BEARER_TOKEN":
+      return AuthScheme.BearerToken(fields as Parameters<typeof AuthScheme.BearerToken>[0]);
+    case "BASIC":
+      return AuthScheme.Basic(fields as Parameters<typeof AuthScheme.Basic>[0]);
+    default:
+      // Unknown scheme: fall back to OAuth2 shape — fields still pass through.
+      return AuthScheme.OAuth2(fields as Parameters<typeof AuthScheme.OAuth2>[0]);
+  }
+}
+
 export async function authorizeToolkit(
   slug: string,
-  opts?: { callbackUrl?: string; alias?: string },
+  opts?: { callbackUrl?: string; alias?: string; fields?: Record<string, string> },
 ): Promise<{ redirectUrl: string | null; connectionId: string }> {
   const composio = getComposio();
   if (!composio) throw new Error("COMPOSIO_API_KEY not set");
 
-  // 1. Find or create an auth config for the toolkit. session.authorize doesn't
-  //    auto-discover or auto-create — we have to pass an authConfigId explicitly
-  //    to connectedAccounts.initiate. That's why a manually-added BYO config in
-  //    the dashboard would still trip "require auth configs but none exist" on
-  //    the previous session.authorize-based code path.
-  let authConfigId: string;
-  const existingConfig = (await composio.authConfigs.list({ toolkit: slug })).items[0];
-  if (existingConfig) {
-    authConfigId = existingConfig.id;
-  } else {
-    try {
-      const created = await composio.authConfigs.create(slug, {
-        type: "use_composio_managed_auth",
-        name: `${displayNameFor(slug)} Auth Config`,
-      });
-      authConfigId = created.id;
-    } catch (err) {
-      // 400 here means Composio doesn't host a managed OAuth app for this toolkit —
-      // user has to register their own at the toolkit's dev portal and add it via
-      // the Composio Dashboard (Toolkits → search → Add to project).
-      const status = (err as { status?: number })?.status;
-      if (status === 400) {
-        throw new ComposioNeedsAuthConfigError(slug, String(err));
-      }
-      throw err;
-    }
-  }
+  const { id: authConfigId, authScheme } = await ensureAuthConfigId(composio, slug);
 
-  // 2. Initiate the connection. allowMultiple if there's already an active connection
-  //    so we add another account instead of replacing.
+  // allowMultiple if there's already an active connection so we add another
+  // account instead of replacing.
   const existing = (await listConnectedToolkits()).filter(
     (c) => c.slug === slug && c.status === "ACTIVE",
   );
+  const config = buildConnectionConfig(authScheme, opts?.fields ?? {});
   const conn = await composio.connectedAccounts.initiate(boopUserId(), authConfigId, {
     ...(existing.length > 0 ? { allowMultiple: true } : {}),
     ...(opts?.callbackUrl ? { callbackUrl: opts.callbackUrl } : {}),
     ...(opts?.alias ? { alias: opts.alias } : {}),
+    ...(config ? { config } : {}),
   });
   return { redirectUrl: conn.redirectUrl ?? null, connectionId: conn.id };
 }

@@ -8,8 +8,15 @@ export type ChannelId = "sms" | "tg";
 export type ConversationId = `${ChannelId}:${string}`;
 
 export interface SendOpts {
-  /** Optional URL of media to attach (PDFs from artifact pipeline). */
+  /** Optional URL of media to attach (PDFs or images from artifact pipeline). */
   mediaUrl?: string;
+  /**
+   * How to render the attached media. "document" sends as a file
+   * (PDF behavior); "image" sends as an inline photo (Telegram sendPhoto,
+   * iMessage native image preview). Defaults to "document" so existing
+   * PDF callsites keep working unchanged.
+   */
+  mediaKind?: "document" | "image";
 }
 
 /** What every channel hands to runTurn after parsing its webhook payload. */

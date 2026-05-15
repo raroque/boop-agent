@@ -6,6 +6,7 @@ import {
   disconnectToolkit,
   displayNameFor,
   getComposio,
+  getRequiredInitiationFields,
   listConnectedToolkits,
   listToolkitMeta,
   listToolkitSlugsWithAuthConfig,
@@ -106,11 +107,35 @@ export function createComposioRouter(): express.Router {
     }
   });
 
+  router.get("/toolkits/:slug/required-fields", async (req, res) => {
+    try {
+      const result = await getRequiredInitiationFields(req.params.slug);
+      res.json(result ?? { authScheme: "OAUTH2", fields: [] });
+    } catch (err) {
+      if (err instanceof ComposioNeedsAuthConfigError) {
+        res.status(409).json({ error: err.message, needsAuthConfig: true });
+        return;
+      }
+      console.error(`[composio-routes] required-fields ${req.params.slug} failed`, err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
   router.post("/toolkits/:slug/authorize", async (req, res) => {
     const slug = req.params.slug;
     const alias = typeof req.body?.alias === "string" ? req.body.alias : undefined;
+    const fieldsRaw = req.body?.fields;
+    const fields: Record<string, string> = {};
+    if (fieldsRaw && typeof fieldsRaw === "object") {
+      for (const [k, v] of Object.entries(fieldsRaw as Record<string, unknown>)) {
+        if (typeof v === "string" && v.trim()) fields[k] = v.trim();
+      }
+    }
     try {
-      const result = await authorizeToolkit(slug, alias ? { alias } : undefined);
+      const result = await authorizeToolkit(slug, {
+        ...(alias ? { alias } : {}),
+        ...(Object.keys(fields).length > 0 ? { fields } : {}),
+      });
       res.json(result);
     } catch (err) {
       if (err instanceof ComposioNeedsAuthConfigError) {
