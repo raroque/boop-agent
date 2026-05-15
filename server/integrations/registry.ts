@@ -36,6 +36,8 @@ export async function loadIntegrations(): Promise<void> {
   registerWebIntegration();
   const { registerGeminiIntegration } = await import("./gemini.js");
   registerGeminiIntegration();
+  const { registerBrowserIntegration } = await import("./browser.js");
+  registerBrowserIntegration();
   const loaded = [...registry.keys()];
   console.log(
     `[integrations] loaded: ${loaded.join(", ") || "(none — connect a toolkit from the Debug UI's Connections tab)"}`,

@@ -14,6 +14,7 @@ import { startConsolidationLoop } from "./consolidation.js";
 import { cancelAgent, retryAgent } from "./execution-agent.js";
 import { createComposioRouter } from "./composio-routes.js";
 import { createNativeIntegrationsRouter } from "./native-integrations-routes.js";
+import { createCredentialRouter } from "./credential-routes.js";
 import { createFileProxyRouter, FILE_PROXY_MOUNT } from "./file-proxy.js";
 import { ensureProactiveWatcher } from "./proactive-email.js";
 import { resolveActiveChannel } from "./runtime-config.js";
@@ -69,6 +70,7 @@ async function main() {
 
   app.use("/composio", createComposioRouter());
   app.use("/native-integrations", createNativeIntegrationsRouter());
+  app.use("/credentials", createCredentialRouter());
   app.use(FILE_PROXY_MOUNT, createFileProxyRouter());
 
   app.post("/agents/:id/cancel", (req, res) => {
@@ -129,6 +131,28 @@ async function main() {
     console.log(`  sendblue    POST http://localhost:${port}/sendblue/webhook`);
     console.log(`  websocket   WS   ws://localhost:${port}/ws`);
   });
+
+  // Clean shutdown: release any live Steel browser sessions so they don't
+  // linger on the provider side burning idle minutes. systemd sends SIGTERM
+  // on `systemctl restart`; Ctrl-C sends SIGINT during local dev.
+  let shuttingDown = false;
+  const cleanup = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[shutdown] ${signal} received, closing browser sessions…`);
+    try {
+      const { closeAllSessions } = await import("./browser/session-manager.js");
+      await Promise.race([
+        closeAllSessions(),
+        new Promise((resolve) => setTimeout(resolve, 5000)),
+      ]);
+    } catch (err) {
+      console.error("[shutdown] closeAllSessions failed:", err);
+    }
+    process.exit(0);
+  };
+  process.on("SIGTERM", () => void cleanup("SIGTERM"));
+  process.on("SIGINT", () => void cleanup("SIGINT"));
 }
 
 main().catch((err) => {

@@ -235,7 +235,11 @@ export default defineSchema({
     artifactId: v.string(),
     conversationId: v.optional(v.string()),
     prompt: v.string(),
-    source: v.union(v.literal("generate"), v.literal("edit")),
+    source: v.union(
+      v.literal("generate"),
+      v.literal("edit"),
+      v.literal("screenshot"),
+    ),
     model: v.string(),
     mimeType: v.string(),
     storageId: v.id("_storage"),
@@ -291,4 +295,75 @@ export default defineSchema({
     chatId: v.number(),
     approvedAt: v.number(),
   }).index("by_chatId", ["chatId"]),
+
+  // Audit + telemetry trail for browser-action sessions. The live Stagehand
+  // instance is held in-process (server/browser/session-manager.ts); this
+  // table records the user-visible goal, status, cumulative cost, and the
+  // Steel live-view URL so anything that happens in a browser is auditable
+  // after the fact. Rows outlive the in-process session; closed sessions
+  // are not deleted.
+  browserSessions: defineTable({
+    sessionId: v.string(),
+    conversationId: v.optional(v.string()),
+    agentId: v.optional(v.string()),
+    provider: v.string(),
+    providerSessionId: v.string(),
+    goal: v.string(),
+    startUrl: v.optional(v.string()),
+    liveViewUrl: v.optional(v.string()),
+    status: v.union(
+      v.literal("active"),
+      v.literal("parked"),
+      v.literal("closed"),
+      v.literal("error"),
+      v.literal("timed_out"),
+    ),
+    errorMessage: v.optional(v.string()),
+    steps: v.number(),
+    totalCostUsd: v.number(),
+    // Park-and-resume bookkeeping (Phase 4). When the session is suspended
+    // waiting for user input (2FA / CAPTCHA / approval / disambiguation),
+    // these fields hold the question and where to put the answer on resume.
+    parkedReason: v.optional(
+      v.union(
+        v.literal("2fa"),
+        v.literal("captcha"),
+        v.literal("approval"),
+        v.literal("ambiguous"),
+        v.literal("other"),
+      ),
+    ),
+    parkedQuestion: v.optional(v.string()),
+    parkedAt: v.optional(v.number()),
+    pendingFieldTarget: v.optional(v.string()),
+    startedAt: v.number(),
+    endedAt: v.optional(v.number()),
+  })
+    .index("by_session_id", ["sessionId"])
+    .index("by_conversation", ["conversationId"])
+    .index("by_conversation_status", ["conversationId", "status"])
+    .index("by_status", ["status"]),
+
+  // Encrypted credential vault for the browser-action integration.
+  // Password + optional TOTP secret are AES-256-GCM encrypted server-side
+  // with BROWSER_CREDENTIAL_KEY (32-byte base64, in .env.local). Convex
+  // only ever sees ciphertext + nonce + auth tag. `username` is stored in
+  // the clear so list views can show "which github account" without
+  // forcing a decrypt.
+  userCredentials: defineTable({
+    label: v.string(),
+    host: v.string(),
+    username: v.string(),
+    ciphertext: v.bytes(),
+    iv: v.bytes(),
+    authTag: v.bytes(),
+    totpCiphertext: v.optional(v.bytes()),
+    totpIv: v.optional(v.bytes()),
+    totpAuthTag: v.optional(v.bytes()),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+    lastUsedAt: v.optional(v.number()),
+  })
+    .index("by_label", ["label"])
+    .index("by_host", ["host"]),
 });

@@ -26,6 +26,19 @@ const NATIVE_INTEGRATIONS: NativeIntegrationMeta[] = [
     ],
   },
   {
+    name: "browser",
+    displayName: "Browser (Steel.dev)",
+    description: "Headless browser sessions with natural-language Stagehand control — navigate, click, fill forms, extract data, screenshot.",
+    envVar: "STEEL_API_KEY",
+    docsUrl: "https://docs.steel.dev",
+    setupSteps: [
+      "Sign up at https://app.steel.dev — Steel accepts GitHub OAuth, no phone number required.",
+      "Settings → API Keys → create a key (starts with `ste_`).",
+      "Add `STEEL_API_KEY=ste_…` to .env.local. ANTHROPIC_API_KEY must also be set (Stagehand calls Anthropic directly).",
+      "Optional: tune via BROWSER_SESSION_TIMEOUT_MINUTES and BROWSER_DEFAULT_MODEL.",
+    ],
+  },
+  {
     name: "apify",
     displayName: "Apify",
     description: "Web-scraping marketplace — search and run actors for Airbnb, Booking, Zillow, LinkedIn, etc.",

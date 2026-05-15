@@ -186,6 +186,69 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     content: opts.content,
   });
 
+  // Phase 4 intercept: if there's a recently-parked browser session for this
+  // conversation, the user's reply is the answer to its pending question.
+  // Bypass the normal interaction agent and route directly to a focused
+  // resume execution agent. We skip this on proactive turns — those are
+  // synthetic notices from email triggers, not human replies.
+  if (opts.kind !== "proactive") {
+    const parkTimeoutMs =
+      Number(process.env.BROWSER_PARK_TIMEOUT_MINUTES ?? 15) * 60 * 1000;
+    const parked = await convex.query(api.browserSessions.findParked, {
+      conversationId: opts.conversationId,
+      maxAgeMs: parkTimeoutMs,
+    });
+    if (parked) {
+      const tag = opts.turnTag ?? turnId.slice(-6);
+      const logResume = (msg: string) => console.log(`[turn ${tag}] [resume] ${msg}`);
+      logResume(
+        `parked session ${parked.sessionId} (reason=${parked.parkedReason}, ageMs=${Date.now() - (parked.parkedAt ?? 0)})`,
+      );
+
+      const task = [
+        "You are resuming a parked browser session that was waiting for the user's reply.",
+        "",
+        `Browser session ID: ${parked.sessionId}`,
+        `Original goal: ${parked.goal}`,
+        `Question we asked the user: ${parked.parkedQuestion ?? "(unrecorded)"}`,
+        `Reason for park: ${parked.parkedReason ?? "other"}`,
+        `User's reply: ${opts.content}`,
+        parked.pendingFieldTarget
+          ? `Pending field on resume: ${parked.pendingFieldTarget}`
+          : "No pending field — interpret the reply and act accordingly.",
+        "",
+        "REQUIRED FIRST ACTION: call browser_resume with sessionId and (if pendingFieldTarget was set) userInput set to the user's reply. After that, the session is active again — call browser_act/extract/observe to continue toward the original goal. Call browser_close once done.",
+        "",
+        "If browser_resume fails because Steel timed out: apologize briefly to the user and offer to start a fresh attempt. Do not call other browser tools after that.",
+      ].join("\n");
+
+      const res = await spawnExecutionAgent({
+        task,
+        integrations: ["browser"],
+        conversationId: opts.conversationId,
+        name: "browser-resume",
+      });
+
+      const reply = res.result || "(resume agent returned no output)";
+      await dispatch(
+        opts.conversationId as `sms:${string}` | `tg:${string}`,
+        reply,
+      );
+      await convex.mutation(api.messages.send, {
+        conversationId: opts.conversationId,
+        role: "assistant",
+        content: reply,
+        turnId,
+      });
+      broadcast("assistant_message", {
+        conversationId: opts.conversationId,
+        content: reply,
+      });
+      logResume(`reply (${res.status}): ${reply.slice(0, 120)}`);
+      return reply;
+    }
+  }
+
   const memoryServer = createMemoryMcp(opts.conversationId);
   const automationServer = createAutomationMcp(opts.conversationId);
   const draftDecisionServer = createDraftDecisionMcp(opts.conversationId);
