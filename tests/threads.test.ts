@@ -55,3 +55,15 @@ test("archive hides thread from listOpen", async () => {
   const open = await c.query(api.threads.listOpen, { deviceId });
   assert.equal(open.length, 0);
 });
+
+test("touchLastMessageAt bumps the timestamp", async () => {
+  const c = client();
+  const deviceId = `test-${crypto.randomUUID()}`;
+  const { threadId } = await c.mutation(api.threads.createThread, { deviceId });
+  const before = (await c.query(api.threads.listOpen, { deviceId }))[0].lastMessageAt!;
+  // Wait at least 5ms so the new timestamp must differ.
+  await new Promise((r) => setTimeout(r, 5));
+  await c.mutation(api.threads.touchLastMessageAt, { threadId });
+  const after = (await c.query(api.threads.listOpen, { deviceId }))[0].lastMessageAt!;
+  assert.ok(after > before, `expected after (${after}) > before (${before})`);
+});
