@@ -13,6 +13,7 @@ import { getRuntimeModel } from "./runtime-config.js";
 import { getChannelPrimary } from "./runtime-config.js";
 import { broadcast } from "./broadcast.js";
 import { dispatch } from "./channels/index.js";
+import type { ConversationId } from "./channels/types.js";
 import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "./usage.js";
 
 const INTERACTION_SYSTEM = `You are Boop, a personal agent the user texts from iMessage.
@@ -273,10 +274,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
       });
 
       const reply = res.result || "(resume agent returned no output)";
-      await dispatch(
-        opts.conversationId as `sms:${string}` | `tg:${string}`,
-        reply,
-      );
+      await dispatch(opts.conversationId as ConversationId, reply);
       await convex.mutation(api.messages.send, {
         conversationId: opts.conversationId,
         role: "assistant",
@@ -320,7 +318,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           // two iMessages (the ack + the final reply). Still persist + log
           // so the debug UI sees it.
           if (opts.kind !== "proactive") {
-            await dispatch(opts.conversationId as `sms:${string}` | `tg:${string}`, text);
+            await dispatch(opts.conversationId as ConversationId, text);
           }
           await convex.mutation(api.messages.send, {
             conversationId: opts.conversationId,
@@ -380,6 +378,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const channelPrimaries = await Promise.all([
     getChannelPrimary("sms"),
     getChannelPrimary("tg"),
+    getChannelPrimary("ios"),
   ]);
   const conversationIds = Array.from(
     new Set(

@@ -121,6 +121,7 @@ async function requireBearer(req: AuthedRequest, res: Response, next: NextFuncti
 const STREAM_EVENTS = new Set([
   "assistant_delta",
   "assistant_message",
+  "assistant_ack",
   "thinking",
   "error",
 ]);

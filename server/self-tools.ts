@@ -150,25 +150,35 @@ this only affects unsolicited messages. Returns an error if the target
 channel is not configured or the user has not texted it yet.`,
         {
           channel: z
-            .enum(["sms", "tg", "imessage", "telegram"])
-            .describe('Channel to make active. "sms"/"imessage" and "tg"/"telegram" are aliases.'),
+            .enum(["sms", "tg", "ios", "imessage", "telegram", "iphone"])
+            .describe(
+              'Channel to make active. "sms"/"imessage", "tg"/"telegram", and "ios"/"iphone" are aliases.',
+            ),
         },
         async (args) => {
           const target = (args.channel === "imessage"
             ? "sms"
             : args.channel === "telegram"
               ? "tg"
-              : args.channel) as "sms" | "tg";
+              : args.channel === "iphone"
+                ? "ios"
+                : args.channel) as "sms" | "tg" | "ios";
 
           const channel = getChannelById(target);
           if (!channel || !channel.isConfigured()) {
+            const setupHint =
+              target === "tg"
+                ? "Set TELEGRAM_BOT_TOKEN in .env.local and restart."
+                : target === "ios"
+                  ? "Pair an iPhone from the Connections panel first."
+                  : "Set SENDBLUE_API_KEY in .env.local and restart.";
+            const channelName =
+              target === "tg" ? "Telegram" : target === "ios" ? "iOS" : "iMessage";
             return {
               content: [
                 {
                   type: "text" as const,
-                  text:
-                    `${target === "tg" ? "Telegram" : "iMessage"} is not configured on this server. ` +
-                    `Set ${target === "tg" ? "TELEGRAM_BOT_TOKEN" : "SENDBLUE_API_KEY"} in .env.local and restart.`,
+                  text: `${channelName} is not configured on this server. ${setupHint}`,
                 },
               ],
             };
@@ -176,16 +186,14 @@ channel is not configured or the user has not texted it yet.`,
 
           const primary = await getChannelPrimary(target);
           if (!primary) {
+            const hint =
+              target === "tg"
+                ? `I haven't received a message from you on Telegram yet. Text @${process.env.TELEGRAM_BOT_USERNAME ?? "<bot_username>"} once, then try again.`
+                : target === "ios"
+                  ? `No paired iPhone has texted yet. Open the Boop iOS app, send any message, then try again.`
+                  : `I haven't received a message from you on iMessage yet. Text the Boop number once, then try again.`;
             return {
-              content: [
-                {
-                  type: "text" as const,
-                  text:
-                    target === "tg"
-                      ? `I haven't received a message from you on Telegram yet. Text @${process.env.TELEGRAM_BOT_USERNAME ?? "<bot_username>"} once, then try again.`
-                      : `I haven't received a message from you on iMessage yet. Text the Boop number once, then try again.`,
-                },
-              ],
+              content: [{ type: "text" as const, text: hint }],
             };
           }
 

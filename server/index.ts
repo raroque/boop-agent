@@ -16,7 +16,6 @@ import { createComposioRouter } from "./composio-routes.js";
 import { createNativeIntegrationsRouter } from "./native-integrations-routes.js";
 import { createCredentialRouter } from "./credential-routes.js";
 import { createFileProxyRouter, FILE_PROXY_MOUNT } from "./file-proxy.js";
-import { createIosRouter } from "./ios/router.js";
 import { ensureProactiveWatcher } from "./proactive-email.js";
 import { resolveActiveChannel } from "./runtime-config.js";
 import { preloadLocalModel } from "./embeddings.js";
@@ -80,7 +79,6 @@ async function main() {
   app.use("/credentials", createCredentialRouter());
   app.use(FILE_PROXY_MOUNT, createFileProxyRouter());
   app.use("/memory", createMemoryRouter());
-  app.use("/channels/ios", createIosRouter());
 
   app.post("/agents/:id/cancel", (req, res) => {
     const ok = cancelAgent(req.params.id);

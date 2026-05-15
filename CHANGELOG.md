@@ -8,6 +8,23 @@ Format:
 
 ---
 
+## Unreleased — Native iOS channel
+
+- Added: `ios` channel — a third channel alongside Sendblue (iMessage) and Telegram, designed for a native iOS app that pairs with the server over HTTP/SSE. Conversation IDs are `ios:<deviceId>`. Endpoints live under `/channels/ios`: `pair/create` + `pair/check` + `pair/consume` for the bearer-token pairing flow, `inbound` for user messages, `messages` for cold-start history, and `stream` for SSE.
+- Added: `server/channels/ios.ts` — implements the `Channel` interface so iOS is a first-class registry member. `send()` is a defensive `assistant_message` broadcast (the SSE stream is the real delivery path); `webhookRouter()` returns the iOS router; `isConfigured()` always true (no env vars). The router is now auto-mounted via `mountChannelRouters` instead of a direct `app.use` in `server/index.ts`.
+- Added: `convex/devices.ts` + `devices` table — stores `deviceId`, hashed pairing code, hashed bearer token, label, and `lastSeenAt`. Plaintext bearer never touches Convex; the dashboard consumes the 6-digit code and the phone polls `/pair/check` for one-shot bearer pickup from an in-memory delivery map.
+- Added: SSE allowlist on `/channels/ios/stream` — forwards only `assistant_delta`, `assistant_message`, `assistant_ack`, `thinking`, and `error` events, scoped to the authenticated device's `conversationId`.
+- Added: `server/broadcast.ts:subscribe` — internal `EventEmitter` API so SSE can tap broadcasts without pretending to be a WebSocket. Existing dashboard WS fan-out unchanged. Tests in `tests/broadcast.test.ts`.
+- Added: `assistant_delta` event emitted per text block in `server/interaction-agent.ts` with a per-turn `seq` counter, so the iOS UI can render streaming replies in order.
+- Added: F5-style retry-with-backoff on the final `messages.send` write in `runTurn`. SSE already streamed the reply, so a silent persist failure used to leave an orphan (visible live, gone on cold reload). Three attempts with 100ms × 3^n backoff, then an `error` broadcast so iOS clients can flag the lost row.
+- Added: iOS pairing UI in the dashboard (`debug/src/components/DevicesSection.tsx`) — live device list (Convex `useQuery`) with last-seen relative time, 6-digit pair input + label, revoke button with confirm. Surfaced as the first card in the Connections panel.
+- Added: `set_active_channel` now accepts `"ios"` / `"iphone"` so the user can route proactive nudges and automation results to their iPhone over SSE.
+- Added: dispatcher's recent-history window now unions across SMS + Telegram + iOS primaries, so cross-channel context continuity follows the user onto the iPhone.
+- Changed: `ChannelId` type widened to `"sms" | "tg" | "ios"`. `channelIdOf()` recognizes the `ios:` prefix. Narrow type casts in `interaction-agent.ts` widened to `ConversationId` since iOS-sourced turns now hit `send_ack` / browser-resume dispatch paths.
+- Rate limits (in-process, single-process server): pair/create 3 per IP per hour; pair/consume 20 per IP per hour. Pairing-code TTL: 10 min. Bearer-delivery pickup TTL: 10 min.
+- End-to-end verified via curl: pair create → dashboard consume → phone bearer pickup → authed inbound → SSE stream with delta/message → history persists to Convex → bad-bearer 401 → one-shot bearer delivery.
+- Upgrade note: the Xcode app that consumes these endpoints lives in a separate branch and is still in progress.
+
 ## Unreleased — Inbound file attachments
 
 - Added: **Telegram and iMessage (Sendblue) now accept inbound photos**

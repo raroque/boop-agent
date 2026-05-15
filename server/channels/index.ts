@@ -8,11 +8,13 @@ import type { Channel, ChannelId, ConversationId, ParsedInbound, SendOpts } from
 import { channelIdOf } from "./types.js";
 import { sendblueChannel } from "./sendblue.js";
 import { telegramChannel } from "./telegram.js";
+import { iosChannel } from "./ios.js";
 import { publicizeStorageUrl } from "../file-proxy.js";
 
 const registry: Partial<Record<ChannelId, Channel>> = {
   sms: sendblueChannel,
   tg: telegramChannel,
+  ios: iosChannel,
 };
 
 export function getChannel(conversationId: string): Channel | null {
