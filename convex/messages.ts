@@ -9,6 +9,7 @@ export const send = mutation({
     content: v.string(),
     agentId: v.optional(v.string()),
     turnId: v.optional(v.string()),
+    threadId: v.optional(v.id("threads")),
     attachments: attachmentsFieldValidator,
   },
   handler: async (ctx, args) => {
@@ -34,6 +35,11 @@ export const send = mutation({
         lastActivityAt: now,
       });
     }
+
+    if (args.threadId) {
+      await ctx.db.patch(args.threadId, { lastMessageAt: now });
+    }
+
     return id;
   },
 });
@@ -80,5 +86,17 @@ export const recentAcrossChannels = query({
     const merged = perConvo.flat();
     merged.sort((a, b) => a._creationTime - b._creationTime);
     return merged.slice(-limit);
+  },
+});
+
+export const listForThread = query({
+  args: { threadId: v.id("threads"), limit: v.optional(v.number()) },
+  handler: async (ctx, { threadId, limit }) => {
+    const cap = Math.min(limit ?? 50, 200);
+    return await ctx.db
+      .query("messages")
+      .withIndex("by_thread", (q) => q.eq("threadId", threadId))
+      .order("desc")
+      .take(cap);
   },
 });

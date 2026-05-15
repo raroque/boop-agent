@@ -9,11 +9,13 @@ export default defineSchema({
     content: v.string(),
     agentId: v.optional(v.string()),
     turnId: v.optional(v.string()),
+    threadId: v.optional(v.id("threads")),
     createdAt: v.number(),
     attachments: attachmentsFieldValidator,
   })
     .index("by_conversation", ["conversationId"])
-    .index("by_conversation_turn", ["conversationId", "turnId"]),
+    .index("by_conversation_turn", ["conversationId", "turnId"])
+    .index("by_thread", ["threadId"]),
 
   conversations: defineTable({
     conversationId: v.string(),
