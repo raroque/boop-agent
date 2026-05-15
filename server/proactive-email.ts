@@ -16,6 +16,8 @@ import { ensureWebhookSubscription } from "./composio-webhook.js";
 import { describeUserNow } from "./timezone-config.js";
 
 const TRIGGER_SLUG = "GMAIL_NEW_GMAIL_MESSAGE";
+const CLASSIFIER_MODEL = process.env.BOOP_CLASSIFIER_MODEL ?? "claude-haiku-4-5-20251001";
+const CODEX_CLASSIFIER_MODEL = process.env.BOOP_CODEX_CLASSIFIER_MODEL;
 
 // First event per connection since process boot is treated as warmup —
 // classification is skipped to avoid noise from any backfill behavior on
@@ -185,8 +187,11 @@ export async function classifyEmailImportance(
 ): Promise<{ important: boolean; summary?: string; usage: UsageTotals }> {
   const started = Date.now();
   const baseRuntimeConfig = options.runtimeConfig ?? (await getRuntimeConfig());
-  const runtimeConfig = options.model
-    ? { ...baseRuntimeConfig, model: options.model }
+  const classifierModel =
+    options.model ??
+    (baseRuntimeConfig.runtime === "claude" ? CLASSIFIER_MODEL : CODEX_CLASSIFIER_MODEL);
+  const runtimeConfig = classifierModel
+    ? { ...baseRuntimeConfig, model: classifierModel }
     : baseRuntimeConfig;
   const recordUsage = options.recordUsage ?? true;
   const userIdentities = await getUserGmailIdentities();

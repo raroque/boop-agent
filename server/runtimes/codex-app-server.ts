@@ -29,7 +29,7 @@ type Pending = {
   reject: (reason?: unknown) => void;
 };
 
-function createIsolatedCodexHome(): string | null {
+function createIsolatedCodexHome(): string {
   const sourceHome = process.env.BOOP_CODEX_AUTH_HOME ?? process.env.CODEX_HOME ?? join(homedir(), ".codex");
   const sourceAuth = join(sourceHome, "auth.json");
   if (!existsSync(sourceAuth)) {
@@ -60,10 +60,10 @@ function createIsolatedCodexHome(): string | null {
 
 function spawnCodexAppServer(): {
   child: ChildProcessWithoutNullStreams;
-  codexHome: string | null;
+  codexHome: string;
 } {
   const codexHome = createIsolatedCodexHome();
-  const env = codexHome ? { ...process.env, CODEX_HOME: codexHome } : process.env;
+  const env = { ...process.env, CODEX_HOME: codexHome };
   const args = [
     "app-server",
     "--listen",
@@ -231,9 +231,9 @@ class CodexAppServerClient {
       this.notify("initialized", {});
       const threadResponse = await this.call("thread/start", {
         model: request.model,
-        cwd: request.cwd ?? (this.codexHome ? join(this.codexHome, "workspace") : process.cwd()),
+        cwd: request.cwd ?? join(spawned.codexHome, "workspace"),
         approvalPolicy: "never",
-        sandbox: request.mode === "execution" ? "read-only" : "read-only",
+        sandbox: "read-only",
         config: codexConfigForMode(request.mode),
         developerInstructions: developerInstructionsForRequest(request),
         ephemeral: true,
