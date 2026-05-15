@@ -136,12 +136,14 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
       : [];
   const mcpServers = integrationServers;
   const runtimeTools = [...draftTools, ...integrationTools];
+  const runtimeToolNamespaces = [...new Set(integrationTools.map((tool) => tool.namespace))];
   const allowedTools = [
     "WebSearch",
     "WebFetch",
     "Skill",
     ...Object.keys(mcpServers).flatMap((n) => [`mcp__${n}__*`]),
     ...(draftTools.length ? ["mcp__boop-drafts__*"] : []),
+    ...runtimeToolNamespaces.flatMap((n) => [`mcp__${n}__*`]),
   ];
 
   let buffer = "";
