@@ -374,6 +374,17 @@ export default defineSchema({
     .index("by_pairing", ["pairingCodeHash"])
     .index("by_bearer", ["bearerTokenHash"]),
 
+  threads: defineTable({
+    deviceId: v.string(),
+    icon: v.optional(v.string()),       // e.g. "calendar", "lightbulb" — name in Lucide subset
+    label: v.optional(v.string()),      // optional human-readable label (M2; agent may also set this)
+    archived: v.boolean(),
+    createdAt: v.number(),
+    lastMessageAt: v.optional(v.number()),
+  })
+    .index("by_device", ["deviceId", "archived"])
+    .index("by_device_lastMessageAt", ["deviceId", "lastMessageAt"]),
+
   userCredentials: defineTable({
     label: v.string(),
     host: v.string(),

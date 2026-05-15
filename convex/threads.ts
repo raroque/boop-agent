@@ -1,0 +1,80 @@
+import { mutation, query } from "./_generated/server";
+import { v } from "convex/values";
+
+/** Maximum number of OPEN threads per device. Older ones must be archived
+ *  before a new one can be created. Matches the spec. */
+const MAX_OPEN_THREADS = 4;
+
+export const createThread = mutation({
+  args: { deviceId: v.string() },
+  handler: async (ctx, { deviceId }) => {
+    const open = await ctx.db
+      .query("threads")
+      .withIndex("by_device", (q) => q.eq("deviceId", deviceId).eq("archived", false))
+      .collect();
+    if (open.length >= MAX_OPEN_THREADS) {
+      throw new Error(`Cannot create: no more than ${MAX_OPEN_THREADS} open threads allowed`);
+    }
+    const now = Date.now();
+    const id = await ctx.db.insert("threads", {
+      deviceId,
+      archived: false,
+      createdAt: now,
+      lastMessageAt: now,
+    });
+    return { threadId: id };
+  },
+});
+
+export const listOpen = query({
+  args: { deviceId: v.string() },
+  handler: async (ctx, { deviceId }) => {
+    return await ctx.db
+      .query("threads")
+      .withIndex("by_device", (q) => q.eq("deviceId", deviceId).eq("archived", false))
+      .order("asc")
+      .collect();
+  },
+});
+
+export const setIcon = mutation({
+  args: { threadId: v.id("threads"), icon: v.string() },
+  handler: async (ctx, { threadId, icon }) => {
+    await ctx.db.patch(threadId, { icon });
+  },
+});
+
+export const archive = mutation({
+  args: { threadId: v.id("threads") },
+  handler: async (ctx, { threadId }) => {
+    await ctx.db.patch(threadId, { archived: true });
+  },
+});
+
+/** Returns an id for the default thread of this device. Creates one if none exist.
+ *  Used to backfill the M1 single-thread conversations into the new schema. */
+export const ensureDefault = mutation({
+  args: { deviceId: v.string() },
+  handler: async (ctx, { deviceId }) => {
+    const existing = await ctx.db
+      .query("threads")
+      .withIndex("by_device", (q) => q.eq("deviceId", deviceId).eq("archived", false))
+      .first();
+    if (existing) return { threadId: existing._id };
+    const now = Date.now();
+    const id = await ctx.db.insert("threads", {
+      deviceId,
+      archived: false,
+      createdAt: now,
+      lastMessageAt: now,
+    });
+    return { threadId: id };
+  },
+});
+
+export const touchLastMessageAt = mutation({
+  args: { threadId: v.id("threads"), at: v.number() },
+  handler: async (ctx, { threadId, at }) => {
+    await ctx.db.patch(threadId, { lastMessageAt: at });
+  },
+});
