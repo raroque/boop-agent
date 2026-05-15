@@ -1,45 +1,53 @@
 import SwiftUI
 
 struct PairingView: View {
-    @Binding var showSettings: Bool
+    @Binding var showMenu: Bool
     @Environment(PairingStore.self) private var pairing
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
+        ZStack {
+            BoopColor.bg.ignoresSafeArea()
+            VStack(spacing: 0) {
+                header
                 Spacer()
-                Image(systemName: "iphone.gen3.radiowaves.left.and.right")
-                    .font(.system(size: 64, weight: .light))
-                    .foregroundStyle(.tint)
-                Text("Pair this iPhone")
-                    .font(.title.weight(.semibold))
-                Text("Tap **Start pairing**, then enter the 6-digit code in your Boop dashboard's Devices panel.")
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 32)
+                VStack(spacing: 24) {
+                    Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                        .font(.system(size: 64, weight: .light))
+                        .foregroundStyle(BoopColor.accent)
+                    Text("Pair this iPhone")
+                        .font(BoopFont.semibold(22))
+                        .foregroundStyle(BoopColor.textPrimary)
+                    Text("Tap **Start pairing**, then enter the 6-digit code in your Boop dashboard's Devices panel.")
+                        .font(BoopFont.bodyLarge)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(BoopColor.textSecondary)
+                        .padding(.horizontal, 32)
 
-                content
-                    .frame(maxWidth: .infinity)
-
-                Spacer()
-
-                Text("Server: \(settings.serverURL)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .padding(.bottom, 8)
-            }
-            .padding()
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
+                    content
+                        .frame(maxWidth: .infinity)
                 }
+                Spacer()
+                Text("Server: \(settings.serverURL)")
+                    .font(BoopFont.meta)
+                    .foregroundStyle(BoopColor.textTertiary)
+                    .padding(.bottom, 16)
             }
         }
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Boop")
+                .font(BoopFont.semibold(17))
+                .foregroundStyle(BoopColor.textPrimary)
+            Spacer()
+            Button(action: { showMenu = true }) {
+                DotGrid().foregroundStyle(BoopColor.textPrimary).frame(width: 32, height: 32)
+            }
+        }
+        .padding(.horizontal, BoopSpacing.edge)
+        .padding(.top, 14).padding(.bottom, 10)
     }
 
     @ViewBuilder
@@ -49,8 +57,8 @@ struct PairingView: View {
             VStack(spacing: 12) {
                 if case .error(let message) = pairing.phase {
                     Text(message)
-                        .font(.subheadline)
-                        .foregroundStyle(.red)
+                        .font(BoopFont.bodyMedium)
+                        .foregroundStyle(BoopColor.error)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
                 }
@@ -58,32 +66,45 @@ struct PairingView: View {
                     Task { await pairing.beginPairing() }
                 } label: {
                     Text("Start pairing")
-                        .font(.headline)
+                        .font(BoopFont.semibold(16))
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 14)
+                        .background(BoopColor.accent, in: RoundedRectangle(cornerRadius: BoopRadius.card))
                 }
-                .buttonStyle(.borderedProminent)
                 .padding(.horizontal, 32)
             }
 
         case .requesting:
             ProgressView("Asking the server for a code…")
+                .foregroundStyle(BoopColor.textSecondary)
+                .tint(BoopColor.accent)
 
         case .awaitingCode(let code, let expiresAt):
             VStack(spacing: 12) {
                 Text(code)
-                    .font(.system(size: 56, weight: .bold, design: .monospaced))
+                    .font(BoopFont.mono(56))
                     .tracking(8)
+                    .foregroundStyle(BoopColor.textPrimary)
                     .padding(.horizontal, 32)
                     .padding(.vertical, 18)
-                    .background(Color.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+                    .background(
+                        BoopColor.surfaceElev,
+                        in: RoundedRectangle(cornerRadius: BoopRadius.card)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: BoopRadius.card)
+                            .strokeBorder(BoopColor.borderStrong, lineWidth: 1)
+                    )
                 Text("Enter this in the Boop dashboard → Devices.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(BoopFont.bodyMedium)
+                    .foregroundStyle(BoopColor.textSecondary)
                 ExpiryCountdown(expiresAt: expiresAt)
                 Button("Start over", role: .destructive) {
                     pairing.cancel()
                 }
+                .font(BoopFont.medium(14))
+                .foregroundStyle(BoopColor.error)
                 .padding(.top, 8)
             }
 
@@ -103,8 +124,8 @@ private struct ExpiryCountdown: View {
         let m = remaining / 60
         let s = remaining % 60
         Text(remaining > 0 ? "Expires in \(m):\(String(format: "%02d", s))" : "Expired")
-            .font(.footnote)
-            .foregroundStyle(.tertiary)
+            .font(BoopFont.meta)
+            .foregroundStyle(BoopColor.textTertiary)
             .onReceive(timer) { now = $0 }
     }
 }
