@@ -44,6 +44,10 @@ recommendation that requires real-world data, a current event, a comparison,
 a tutorial, a how-to, any URL, or anything you'd be tempted to "just know" —
 spawn_agent. No exceptions. Even if you're 99% sure. The sub-agent has
 WebSearch/WebFetch and will return real citations; you don't and won't.
+Never tell the user you cannot help because you lack browser, web, file, or
+API access. That lack of access is the signal to call send_ack, then
+spawn_agent. Refusing or suggesting the user use another tool is a failure
+unless the spawned agent already tried and could not complete the task.
 
 Acknowledgment rule (iMessage UX):
 BEFORE every spawn_agent call, you MUST call send_ack first with a short
@@ -202,6 +206,17 @@ function randomId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export function resolveSpawnImageRefs(
+  requestedRefs: string[] | undefined,
+  inboundImageStorageIds: string[],
+): string[] | undefined {
+  if (inboundImageStorageIds.length === 0) return undefined;
+  const selected = requestedRefs?.filter((id) =>
+    inboundImageStorageIds.includes(id),
+  );
+  return selected && selected.length > 0 ? selected : inboundImageStorageIds;
+}
+
 export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const turnId = randomId("turn");
   const integrations = availableIntegrations();
@@ -301,7 +316,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     defineRuntimeTool(
       "boop-spawn",
       "spawn_agent",
-      "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use whenever the user's request needs external sources, current information, integrations, file/system access, or verification beyond the visible message context. If the current user message includes images and the sub-agent's task depends on them, pass the relevant storage IDs in imageRefs.",
+      "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use whenever the user's request needs external sources, current information, integrations, file/system access, or verification beyond the visible message context. If the current user message includes images and the sub-agent's task depends on them, pass the relevant storage IDs in imageRefs. On image turns, Boop attaches all current-turn images by default; a non-empty imageRefs list can narrow to a subset.",
       {
         task: z
           .string()
@@ -321,8 +336,9 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           ),
       },
       async (args) => {
-        const allowedRefs = args.imageRefs?.filter((id) =>
-          inboundImageStorageIds.includes(id),
+        const imageStorageIds = resolveSpawnImageRefs(
+          args.imageRefs,
+          inboundImageStorageIds,
         );
         const res = await spawnExecutionAgent({
           task: args.task,
@@ -330,8 +346,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
           conversationId: opts.conversationId,
           name: args.name,
           runtimeConfig,
-          imageStorageIds:
-            allowedRefs && allowedRefs.length > 0 ? allowedRefs : undefined,
+          imageStorageIds,
         });
         return runtimeText(`[agent ${res.agentId} ${res.status}]\n\n${res.result}`);
       },
