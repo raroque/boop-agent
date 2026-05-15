@@ -8,6 +8,7 @@ struct Message: Identifiable, Equatable {
     }
 
     let id: String
+    let threadId: String              // ← NEW
     let role: Role
     var content: String
     let createdAt: Date
@@ -19,13 +20,15 @@ struct Message: Identifiable, Equatable {
 /// client reverses for chronological display.
 struct ServerMessage: Decodable {
     let _id: String
+    let threadId: String?             // ← NEW (optional for back-compat)
     let role: String
     let content: String
     let _creationTime: Double
 
-    func toMessage() -> Message {
+    func toMessage(defaultThreadId: String) -> Message {
         Message(
             id: _id,
+            threadId: threadId ?? defaultThreadId,
             role: Message.Role(rawValue: role) ?? .system,
             content: content,
             createdAt: Date(timeIntervalSince1970: _creationTime / 1000.0),
@@ -34,7 +37,7 @@ struct ServerMessage: Decodable {
 }
 
 struct MessagesResponse: Decodable {
-    let conversationId: String
+    let threadId: String              // ← NEW (was conversationId)
     let messages: [ServerMessage]
 }
 

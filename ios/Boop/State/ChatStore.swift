@@ -2,8 +2,9 @@ import Foundation
 import Observation
 
 /// Single source of truth for the chat screen — messages, streaming
-/// state, connection state. Owns the SSE subscription task and the
-/// HTTP client. Reconnects on stream drop with exponential backoff.
+/// state, connection state. Keyed off an active threadId set via
+/// switchTo(threadId:). Owns the SSE subscription task and the HTTP
+/// client. Reconnects on stream drop with exponential backoff.
 @MainActor
 @Observable
 final class ChatStore {
@@ -25,23 +26,21 @@ final class ChatStore {
 
     private let settings: AppSettings
     private var bearer: String?
+    private var threadId: String?
     private var streamTask: Task<Void, Never>?
     private var streamingMessageId: String?
 
-    init(settings: AppSettings) {
-        self.settings = settings
-    }
+    init(settings: AppSettings) { self.settings = settings }
 
     var isReady: Bool { bearer != nil }
 
-    func bind(bearer: String) {
-        self.bearer = bearer
-    }
+    func bind(bearer: String) { self.bearer = bearer }
 
     func unbind() {
         streamTask?.cancel()
         streamTask = nil
         bearer = nil
+        threadId = nil
         messages.removeAll()
         connectionState = .idle
         sendError = nil
@@ -49,15 +48,27 @@ final class ChatStore {
         isAwaitingReply = false
     }
 
+    /// Switch the active thread. Cancels the current stream, clears
+    /// messages, fetches history for the new thread, restarts the stream.
+    func switchTo(threadId: String) async {
+        guard threadId != self.threadId else { return }
+        streamTask?.cancel()
+        streamTask = nil
+        self.threadId = threadId
+        messages.removeAll()
+        streamingMessageId = nil
+        await loadHistory()
+        startStreaming()
+    }
+
     func loadHistory() async {
-        guard let bearer, let baseURL = settings.serverBaseURL else { return }
+        guard let bearer, let baseURL = settings.serverBaseURL, let threadId else { return }
         let client = BoopClient(baseURL: baseURL, bearer: bearer)
         do {
-            let response = try await client.fetchMessages(limit: 50)
-            // Server returns newest-first; flip for chronological display.
+            let response = try await client.fetchMessages(threadId: threadId, limit: 50)
             messages = response.messages
                 .reversed()
-                .map { $0.toMessage() }
+                .map { $0.toMessage(defaultThreadId: threadId) }
         } catch {
             sendError = "Couldn't load history: \(error.localizedDescription)"
         }
@@ -65,19 +76,20 @@ final class ChatStore {
 
     func startStreaming() {
         streamTask?.cancel()
-        guard let bearer, let baseURL = settings.serverBaseURL else { return }
+        guard let bearer, let baseURL = settings.serverBaseURL, let threadId else { return }
         let bearerCopy = bearer
+        let threadIdCopy = threadId
         connectionState = .connecting
         streamTask = Task { [weak self] in
-            await self?.streamLoop(baseURL: baseURL, bearer: bearerCopy)
+            await self?.streamLoop(baseURL: baseURL, bearer: bearerCopy, threadId: threadIdCopy)
         }
     }
 
-    private func streamLoop(baseURL: URL, bearer: String) async {
+    private func streamLoop(baseURL: URL, bearer: String, threadId: String) async {
         var backoff: UInt64 = 1_000_000_000 // 1s
         while !Task.isCancelled {
             connectionState = .connecting
-            let stream = SSEConnection(baseURL: baseURL, bearer: bearer).subscribe()
+            let stream = SSEConnection(baseURL: baseURL, bearer: bearer, threadId: threadId).subscribe()
             connectionState = .connected
             backoff = 1_000_000_000 // reset on successful connect
 
@@ -94,7 +106,7 @@ final class ChatStore {
     }
 
     private func handle(event: StreamEvent) {
-        let expected = "ios:\(settings.deviceId)"
+        let expected = "ios:\(settings.deviceId):\(threadId ?? "")"
         guard event.conversationId == expected else { return }
 
         // Any signal of life from the server means the dispatcher has
@@ -116,24 +128,19 @@ final class ChatStore {
     }
 
     private func appendDelta(_ chunk: String) {
+        guard let threadId else { return }
         if let id = streamingMessageId, let idx = messages.firstIndex(where: { $0.id == id }) {
             messages[idx].content.append(chunk)
         } else {
             let id = "stream-\(UUID().uuidString)"
             streamingMessageId = id
-            messages.append(
-                Message(
-                    id: id,
-                    role: .assistant,
-                    content: chunk,
-                    createdAt: Date(),
-                    isStreaming: true,
-                ),
-            )
+            messages.append(Message(id: id, threadId: threadId, role: .assistant,
+                                    content: chunk, createdAt: Date(), isStreaming: true))
         }
     }
 
     private func finalizeMessage(_ content: String) {
+        guard let threadId else { return }
         if let id = streamingMessageId, let idx = messages.firstIndex(where: { $0.id == id }) {
             messages[idx].content = content
             messages[idx].isStreaming = false
@@ -141,48 +148,30 @@ final class ChatStore {
             return
         }
         // Unsolicited (proactive nudges, automation results) — append fresh.
-        messages.append(
-            Message(
-                id: "final-\(UUID().uuidString)",
-                role: .assistant,
-                content: content,
-                createdAt: Date(),
-            ),
-        )
+        messages.append(Message(id: "final-\(UUID().uuidString)", threadId: threadId, role: .assistant,
+                                content: content, createdAt: Date()))
     }
 
     private func appendAck(_ content: String) {
-        messages.append(
-            Message(
-                id: "ack-\(UUID().uuidString)",
-                role: .assistant,
-                content: content,
-                createdAt: Date(),
-            ),
-        )
+        guard let threadId else { return }
+        messages.append(Message(id: "ack-\(UUID().uuidString)", threadId: threadId, role: .assistant,
+                                content: content, createdAt: Date()))
     }
 
     func send(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let bearer, let baseURL = settings.serverBaseURL else { return }
+        guard !trimmed.isEmpty, let bearer, let baseURL = settings.serverBaseURL, let threadId else { return }
 
         // Optimistic: clear any stale error banner the moment a send starts.
         sendError = nil
         isAwaitingReply = true
 
-        let localId = "local-\(UUID().uuidString)"
-        messages.append(
-            Message(
-                id: localId,
-                role: .user,
-                content: trimmed,
-                createdAt: Date(),
-            ),
-        )
+        messages.append(Message(id: "local-\(UUID().uuidString)", threadId: threadId, role: .user,
+                                content: trimmed, createdAt: Date()))
 
         let client = BoopClient(baseURL: baseURL, bearer: bearer)
         do {
-            _ = try await client.sendInbound(text: trimmed)
+            _ = try await client.sendInbound(text: trimmed, threadId: threadId)
         } catch {
             sendError = "Send failed: \(error.localizedDescription)"
             isAwaitingReply = false

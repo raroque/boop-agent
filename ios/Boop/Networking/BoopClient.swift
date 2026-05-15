@@ -59,26 +59,59 @@ struct BoopClient {
 
     // MARK: - Authed
 
-    func sendInbound(text: String) async throws -> InboundResponse {
+    func sendInbound(text: String, threadId: String) async throws -> InboundResponse {
         try await postJSON(
             path: "/channels/ios/inbound",
-            body: ["text": text],
+            body: ["text": text, "threadId": threadId],
             authorized: true,
         )
     }
 
-    func fetchMessages(limit: Int = 50) async throws -> MessagesResponse {
+    func fetchMessages(threadId: String, limit: Int = 50) async throws -> MessagesResponse {
         guard let bearer else { throw ClientError.bearerMissing }
         var components = URLComponents(
             url: baseURL.appendingPathComponent("/channels/ios/messages"),
             resolvingAgainstBaseURL: false,
         )!
-        components.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        components.queryItems = [
+            URLQueryItem(name: "threadId", value: threadId),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
         var req = URLRequest(url: components.url!)
         req.httpMethod = "GET"
         req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         return try await perform(req)
     }
+
+    // MARK: - Threads
+
+    func listThreads() async throws -> ThreadsResponse {
+        guard let bearer else { throw ClientError.bearerMissing }
+        var req = URLRequest(url: baseURL.appendingPathComponent("/channels/ios/threads"))
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        return try await perform(req)
+    }
+
+    func createThread() async throws -> CreateThreadResponse {
+        guard let bearer else { throw ClientError.bearerMissing }
+        var req = URLRequest(url: baseURL.appendingPathComponent("/channels/ios/threads/create"))
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        return try await perform(req)
+    }
+
+    func archiveThread(threadId: String) async throws {
+        guard let bearer else { throw ClientError.bearerMissing }
+        var req = URLRequest(
+            url: baseURL.appendingPathComponent("/channels/ios/threads/\(threadId)/archive"),
+        )
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let _: EmptyResponse = try await perform(req)
+    }
+
+    private struct EmptyResponse: Decodable { let ok: Bool? }
 
     // MARK: - Internals
 
@@ -155,10 +188,12 @@ enum StreamEvent: Sendable {
 struct SSEConnection {
     let baseURL: URL
     let bearer: String
+    let threadId: String     // ← NEW
 
     func subscribe() -> AsyncStream<StreamEvent> {
         let baseURL = self.baseURL
         let bearer = self.bearer
+        let threadId = self.threadId
         return AsyncStream<StreamEvent>(StreamEvent.self, bufferingPolicy: .unbounded) { continuation in
             let delegate = SSEDelegate(onEvent: { event in
                 continuation.yield(event)
@@ -178,7 +213,12 @@ struct SSEConnection {
             ]
             let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
 
-            var request = URLRequest(url: baseURL.appendingPathComponent("/channels/ios/stream"))
+            var components = URLComponents(
+                url: baseURL.appendingPathComponent("/channels/ios/stream"),
+                resolvingAgainstBaseURL: false,
+            )!
+            components.queryItems = [URLQueryItem(name: "threadId", value: threadId)]
+            var request = URLRequest(url: components.url!)
             request.httpMethod = "GET"
             request.networkServiceType = .responsiveData
             request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
