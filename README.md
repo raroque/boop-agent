@@ -317,13 +317,13 @@ Boop now has two runtime paths, so keep this distinction in mind:
 - Claude runtime: the Claude Agent SDK loads project skills from `.claude/skills/` when the execution agent boots.
 - Codex runtime: Boop keeps Codex-facing skills under `.agents/skills/`, while the core sub-agent loop, memory tools, draft tools, and integration tools are provided through Boop's runtime adapter.
 
-For capabilities that must work under both providers, keep the skill instructions mirrored in both directories or move the behavior into Boop's runtime tools/prompts. The dispatcher never loads skills directly; only spawned execution agents should do real work.
+For capabilities that must work under both providers, keep the skill instructions mirrored in both directories or move the behavior into Boop's runtime tools/prompts. This applies to both runtime skills and upgrade/migration skills referenced from `CHANGELOG.md`. The dispatcher never loads skills directly; only spawned execution agents should do real work.
 
 Wiring (in `server/execution-agent.ts`):
 - Claude runs with `settingSources: ["project"]` and `"Skill"` in `allowedTools`.
 - Codex runs through `codex app-server` with Boop's dynamic runtime tools.
 
-**To add a cross-runtime skill:** create matching files:
+**To add a cross-runtime skill or migration:** create matching files:
 
 - `.claude/skills/<kebab-name>/SKILL.md`
 - `.agents/skills/<kebab-name>/SKILL.md`
@@ -341,7 +341,7 @@ description: Write a tight, retention-focused YouTube script from a topic or out
 
 There's a soft budget (~15k chars by default, via `SLASH_COMMAND_TOOL_CHAR_BUDGET`) for the combined skill-description block in context — if you end up with many skills, keep descriptions sharp so none get truncated.
 
-Examples included: `.claude/skills/youtube-script-writer/` and `.agents/skills/youtube-script-writer/`.
+Examples included: `.claude/skills/youtube-script-writer/`, `.agents/skills/youtube-script-writer/`, and mirrored `/upgrade-boop` skills for agent-assisted updates.
 
 ---
 
@@ -470,7 +470,7 @@ If you deploy Boop in a higher-throughput setting, or hand it integrations that 
 
 Deeper dive — auth modes, toolkit scoping internals, multi-account flow, per-connection identity: [INTEGRATIONS.md](./INTEGRATIONS.md).
 
-Upgrade path when upstream ships changes: run `/upgrade-boop` from your agent CLI (Claude or Codex). The skill under `.agents/skills/upgrade-boop/` previews diffs, backs up, merges, and surfaces `[BREAKING]` CHANGELOG entries. See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution rules + the CHANGELOG / migration-skill conventions.
+Upgrade path when upstream ships changes: run `boop update` from your shell to preview incoming commits, file impact, and merge conflicts. For customized forks or any conflict-heavy upgrade, open Codex or Claude in the repo and run `/upgrade-boop`; the mirrored skills under `.agents/skills/upgrade-boop/` and `.claude/skills/upgrade-boop/` back up, merge, validate, and surface `[BREAKING]` CHANGELOG entries. See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution rules + the CHANGELOG / migration-skill conventions.
 
 ---
 
@@ -522,6 +522,7 @@ boop-agent/
 ├── debug/                         # Dashboard: Dashboard / Agents / Automations / Memory / Events / Connections
 ├── scripts/
 │   ├── setup.ts                   # Interactive setup CLI
+│   ├── boop.mjs                   # `boop update` preview / clean-merge wrapper
 │   ├── dev.mjs                    # One-command orchestrator (server + convex + vite + ngrok)
 │   ├── preflight.mjs              # Checks convex/_generated exists before booting
 │   ├── sendblue-sync.mjs          # Pulls phone number from `sendblue lines`
@@ -537,15 +538,28 @@ boop-agent/
 
 Boop is a fork-and-own template. You customize your copy freely — system prompts, memory thresholds, extra tools — and pull upstream fixes in on your own schedule.
 
-The intended path is **agent CLI-driven**, modeled on NanoClaw:
+The intended path is **shell preview first, agent-assisted when needed**:
 
 ```bash
-claude                 # inside your repo
-/upgrade-boop
-# or run the same skill from Codex in this repo
+boop update            # preview upstream commits, buckets, and conflicts
+# or, without a linked/global bin:
+npm run boop:update
 ```
 
-`/upgrade-boop` is a skill in `.agents/skills/upgrade-boop/SKILL.md`. It:
+`boop update` is intentionally conservative. It refuses to run on a dirty working tree, fetches `upstream/main` (or `origin/main` when you're on the canonical repo), previews incoming commits, buckets changed files by risk area, and dry-runs the merge. If the preview is clean, it can apply the merge, create a rollback tag, run `npm install`, and run `npm run typecheck`. If conflicts are expected, it points you to the agent skill instead of trying to resolve customized code with a blind shell script.
+
+For agent-assisted upgrades:
+
+```bash
+codex                  # inside your repo
+/upgrade-boop
+
+# or:
+claude
+/upgrade-boop
+```
+
+`/upgrade-boop` is mirrored in `.agents/skills/upgrade-boop/SKILL.md` and `.claude/skills/upgrade-boop/SKILL.md`. It:
 
 1. Refuses to run with a dirty working tree.
 2. Creates a timestamped rollback tag.
@@ -555,17 +569,19 @@ claude                 # inside your repo
 6. Parses `CHANGELOG.md` for `[BREAKING]` entries and offers to run the referenced migration skills.
 7. Prints a rollback hash + any env-var additions you should copy into `.env.local`.
 
+Upgrade commands are for your local shell / agent CLI operating on the repo. They are not exposed to the Boop SMS/web dispatcher. The Codex runtime used by Boop conversations runs with read-only sandboxing and no shell/file-write tools, so a text-message conversation cannot update the server.
+
 Plain git works too, if you'd rather:
 
 ```bash
-git remote add upstream https://github.com/chris/boop-agent.git    # one-time
+git remote add upstream https://github.com/raroque/boop-agent.git    # one-time
 git fetch upstream
 git merge upstream/main      # or: git rebase upstream/main
 ```
 
 ### New-version notifications
 
-Every time you run `npm run dev`, a small background check (`scripts/check-upstream.mjs`) asks your `upstream` remote if there are new commits. If there are, you'll see a banner up top with the count and a reminder to run `/upgrade-boop`. If you're up to date, or the check fails for any reason (offline, no `upstream` remote, timeout), it stays silent.
+Every time you run `npm run dev`, a small background check (`scripts/check-upstream.mjs`) asks your `upstream` remote if there are new commits. If there are, you'll see a banner up top with the count and a reminder to run `boop update`. If you're up to date, or the check fails for any reason (offline, no `upstream` remote, timeout), it stays silent.
 
 Behavior at a glance:
 

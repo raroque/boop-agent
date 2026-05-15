@@ -7,7 +7,7 @@
 //
 // Behavior matrix:
 //   - BOOP_UPSTREAM_CHECK=false → silent (disabled)
-//   - upstream remote + new commits → banner w/ count + /upgrade-boop instruction
+//   - upstream remote + new commits → banner w/ count + boop update instruction
 //   - upstream remote, up to date   → silent
 //   - no upstream + forked origin   → one-line hint on how to add upstream
 //   - no upstream + origin IS upstream (raroque/boop-agent) → silent
@@ -71,16 +71,15 @@ async function fetchUpstream() {
 function printBehindBanner(ahead) {
   const pad = (s, n) => s + " ".repeat(Math.max(0, n - stripAnsi(s).length));
   const line = `📦  ${ahead} new commit${ahead === 1 ? "" : "s"} upstream on raroque/boop-agent`;
-  const cmd = `${C.bold}/upgrade-boop${C.reset}${C.yellow}`;
+  const cmd = `${C.bold}boop update${C.reset}${C.yellow}`;
   console.log(`
 ${C.yellow}╭──────────────────────────────────────────────────────────────╮
 │ ${pad(line, 60)} │
 │                                                              │
-│ Open \`claude\` in this repo and run:                          │
+│ Preview safely from this repo with:                           │
 │   ${pad(cmd, 58)} │
 │                                                              │
-│ Previews diffs, tags a rollback, merges, surfaces [BREAKING] │
-│ entries in CHANGELOG.                                        │
+│ Or open Codex/Claude and run /upgrade-boop for conflicts.     │
 ╰──────────────────────────────────────────────────────────────╯${C.reset}
 `);
 }
@@ -93,7 +92,7 @@ function printNoUpstreamHint() {
   console.log(
     `${C.dim}  ℹ Tip: set up upstream for new-version checks on \`npm run dev\`:
      ${C.bold}git remote add upstream https://github.com/raroque/boop-agent.git${C.reset}${C.dim}
-     Then \`claude\` → \`/upgrade-boop\` whenever upstream has changes.${C.reset}
+     Then run \`boop update\` whenever upstream has changes.${C.reset}
 `,
   );
 }

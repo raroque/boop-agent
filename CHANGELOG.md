@@ -8,6 +8,12 @@ Format:
 
 ---
 
+## Unreleased — Cross-runtime upgrade workflow
+
+- Added: `boop update` CLI wrapper (`scripts/boop.mjs`, package `bin`, and `npm run boop:update`). It refuses dirty worktrees, fetches upstream, previews incoming commits, buckets changed files by risk area, dry-runs the merge, and can apply a clean merge with rollback tag + `npm install` + `npm run typecheck`.
+- Changed: `npm run dev` upstream reminder now points at `boop update` first, then `/upgrade-boop` from Codex or Claude for conflict-heavy/customized upgrades.
+- Changed: upgrade and contribution docs now make the cross-runtime skill convention explicit: migration skills referenced from `[BREAKING]` CHANGELOG entries should be mirrored in both `.claude/skills/` and `.agents/skills/` unless intentionally provider-specific.
+
 ## Unreleased — Local embeddings fallback + mandatory recall
 
 - Added: free local embedding fallback via `@huggingface/transformers` (`Xenova/bge-large-en-v1.5`, 1024-dim). `server/embeddings.ts` now tries Voyage → OpenAI → local in order. All three providers produce 1024-dim vectors so the existing Convex `vectorIndex("by_embedding", { dimensions: 1024 })` stays compatible — users running with a paid key see no change; users without one go from "recall silently degraded to literal substring match" to working semantic recall out of the box.
