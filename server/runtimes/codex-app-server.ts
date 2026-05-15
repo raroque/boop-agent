@@ -106,10 +106,10 @@ function spawnCodexAppServer(): {
 }
 
 function codexConfigForMode(mode: RuntimeRunRequest["mode"]): Record<string, unknown> {
-  if (mode === "dispatcher") {
-    return { web_search: "disabled" };
+  if (mode === "execution") {
+    return { web_search: "live" };
   }
-  return { web_search: "live" };
+  return { web_search: "disabled" };
 }
 
 function codexSandboxForMode(mode: RuntimeRunRequest["mode"]) {
