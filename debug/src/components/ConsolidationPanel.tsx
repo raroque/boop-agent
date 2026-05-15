@@ -422,8 +422,9 @@ function ConsolidationDetail({
           </div>
           {allPhases.length === 0 ? (
             <div className={`text-sm ${muted}`}>
-              No live phase events captured. Scroll down for the stored
-              proposals and decisions from this run.
+              {run.status === "completed" || run.status === "failed"
+                ? "Phase events stream live; this run already finished. The full result is preserved below."
+                : "Waiting for phase events…"}
             </div>
           ) : (
             <div className="space-y-0">
@@ -534,9 +535,25 @@ function ReasoningSection({ run, isDark }: { run: any; isDark: boolean }) {
 
   const decisions: any[] = details.decisions ?? [];
   const applied: any[] = details.applied ?? [];
+  const snapshots: Record<string, { content: string; segment: string; tier: string }> =
+    details.memorySnapshots ?? {};
   const decisionByIdx = new Map<number, any>();
   for (const d of decisions) decisionByIdx.set(d.proposalIndex, d);
   const appliedByIdx = new Set<number>(applied.map((a) => a.proposalIndex));
+
+  const renderRef = (id: string) => (
+    <MemoryRef id={id} snap={snapshots[id]} isDark={isDark} />
+  );
+  const renderRefList = (ids: string[]) =>
+    ids.length === 0 ? (
+      <span className={muted}>(none)</span>
+    ) : (
+      <div className="space-y-1 mt-0.5">
+        {ids.map((id) => (
+          <div key={id}>{renderRef(id)}</div>
+        ))}
+      </div>
+    );
 
   return (
     <section>
@@ -590,11 +607,12 @@ function ReasoningSection({ run, isDark }: { run: any; isDark: boolean }) {
                 {p.type === "merge" && (
                   <>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>keep:</span> {p.keep}
+                      <span className={muted}>keep:</span>
+                      <div className="mt-0.5">{p.keep && renderRef(p.keep)}</div>
                     </div>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>absorb:</span>{" "}
-                      {(p.absorb ?? []).join(", ")}
+                      <span className={muted}>absorb:</span>
+                      {renderRefList(p.absorb ?? [])}
                     </div>
                     {p.rewriteContent && (
                       <div
@@ -610,18 +628,20 @@ function ReasoningSection({ run, isDark }: { run: any; isDark: boolean }) {
                 {p.type === "supersede" && (
                   <>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>newer:</span> {p.newer}
+                      <span className={muted}>newer:</span>
+                      <div className="mt-0.5">{p.newer && renderRef(p.newer)}</div>
                     </div>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>older:</span>{" "}
-                      {(p.older ?? []).join(", ")}
+                      <span className={muted}>older:</span>
+                      {renderRefList(p.older ?? [])}
                     </div>
                   </>
                 )}
                 {p.type === "prune" && (
                   <>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>memoryId:</span> {p.memoryId}
+                      <span className={muted}>memoryId:</span>
+                      <div className="mt-0.5">{p.memoryId && renderRef(p.memoryId)}</div>
                     </div>
                     {p.reason && (
                       <div className={isDark ? "text-slate-400" : "text-slate-600"}>
@@ -682,6 +702,45 @@ function SummaryStat({
       <div className={`text-[10px] uppercase tracking-wider ${isDark ? "text-slate-500" : "text-slate-400"}`}>
         {label}
       </div>
+    </div>
+  );
+}
+
+function MemoryRef({
+  id,
+  snap,
+  isDark,
+}: {
+  id: string;
+  snap?: { content: string; segment: string; tier: string };
+  isDark: boolean;
+}) {
+  const muted = isDark ? "text-slate-500" : "text-slate-400";
+  const idColor = isDark ? "text-slate-500" : "text-slate-400";
+  const contentColor = isDark ? "text-slate-200" : "text-slate-800";
+  const tagColor = isDark ? "text-sky-400" : "text-sky-600";
+
+  if (!snap) {
+    return (
+      <span className={`text-[11px] mono ${idColor}`}>
+        {id} <span className={muted}>· (no snapshot)</span>
+      </span>
+    );
+  }
+
+  return (
+    <div
+      className={`rounded border px-2 py-1.5 ${
+        isDark ? "bg-slate-950/40 border-slate-800/80" : "bg-white border-slate-200"
+      }`}
+    >
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <span className={`text-[10px] mono ${idColor}`}>{id}</span>
+        <span className={`text-[9px] mono uppercase ${tagColor}`}>
+          {snap.tier}/{snap.segment}
+        </span>
+      </div>
+      <div className={`text-[11px] ${contentColor}`}>{snap.content}</div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import {
   listToolsForToolkit,
 } from "./composio.js";
 import { availableIntegrations } from "./execution-agent.js";
+import { activeProvider as activeEmbeddingProvider } from "./embeddings.js";
 import {
   KNOWN_MODELS,
   MODEL_ALIASES,
@@ -50,7 +51,11 @@ export function createSelfMcp() {
             integrationsLoaded: integrations,
             integrationCount: integrations.length,
             composioEnabled: Boolean(process.env.COMPOSIO_API_KEY),
-            embeddingsEnabled: Boolean(process.env.VOYAGE_API_KEY),
+            // Embeddings always available — local Transformers.js fallback
+            // kicks in when no paid key is set. Provider tells the user
+            // which one is actually running this turn.
+            embeddingsEnabled: true,
+            embeddingsProvider: activeEmbeddingProvider(),
             sendblueEnabled: Boolean(process.env.SENDBLUE_API_KEY),
             activeChannel,
             activeChannelTarget,

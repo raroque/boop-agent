@@ -470,6 +470,94 @@ Before you start:
     );
   }
 
+  // ---- Embedding provider --------------------------------------------------
+  banner("Memory search — embedding provider");
+  const existingVoyage = existing.VOYAGE_API_KEY ?? "";
+  const existingOpenai = existing.OPENAI_API_KEY ?? "";
+  const inferredCurrent = existingVoyage
+    ? "voyage"
+    : existingOpenai
+      ? "openai"
+      : "local";
+  console.log(`
+Boop's recall() searches your stored memories by semantic similarity. Pick
+how you want to generate embeddings:
+
+  • Local  — free, runs in-process via @huggingface/transformers
+            (Xenova/bge-large-en-v1.5, 1024-dim). First run downloads
+            ~440MB and caches forever. No API key.
+  • Voyage — paid, ~$0.06/M tokens. Slightly stronger English retrieval.
+  • OpenAI — paid, ~$0.13/M tokens. Comparable to Voyage.
+
+All three produce 1024-dim vectors (compatible with the same Convex index)
+so you can switch later by adding/removing the API key.
+`);
+  const { embeddingProvider } = await prompts(
+    {
+      type: "select",
+      name: "embeddingProvider",
+      message: "Which embedding provider should boop use?",
+      choices: [
+        { title: "Local (free, recommended)", value: "local" },
+        { title: "Voyage (paid — I have a key)", value: "voyage" },
+        { title: "OpenAI (paid — I have a key)", value: "openai" },
+      ],
+      initial:
+        inferredCurrent === "voyage" ? 1 : inferredCurrent === "openai" ? 2 : 0,
+    },
+    {
+      onCancel: () => {
+        console.log("Setup cancelled.");
+        process.exit(1);
+      },
+    },
+  );
+
+  if (embeddingProvider === "voyage") {
+    const { VOYAGE_API_KEY } = await prompts({
+      type: "password",
+      name: "VOYAGE_API_KEY",
+      message: "Paste your Voyage API key (https://dash.voyageai.com):",
+      initial: existingVoyage,
+    });
+    (answers as any).VOYAGE_API_KEY = VOYAGE_API_KEY || "";
+    (answers as any).OPENAI_API_KEY = "";
+  } else if (embeddingProvider === "openai") {
+    const { OPENAI_API_KEY } = await prompts({
+      type: "password",
+      name: "OPENAI_API_KEY",
+      message: "Paste your OpenAI API key:",
+      initial: existingOpenai,
+    });
+    (answers as any).OPENAI_API_KEY = OPENAI_API_KEY || "";
+    (answers as any).VOYAGE_API_KEY = "";
+  } else {
+    // Local — clear any stale paid keys so embeddings.ts falls through to
+    // the local provider on next start.
+    (answers as any).VOYAGE_API_KEY = "";
+    (answers as any).OPENAI_API_KEY = "";
+
+    const { preload } = await prompts({
+      type: "confirm",
+      name: "preload",
+      message:
+        "Pre-download the local model now? (~440MB, ~30s on broadband — saves the wait on first recall)",
+      initial: true,
+    });
+    if (preload) {
+      console.log("\nDownloading Xenova/bge-large-en-v1.5… (Ctrl+C to skip)\n");
+      try {
+        await runInherit("npx", ["tsx", "scripts/preload-embeddings.ts"]);
+        console.log("✓ Local model cached.");
+      } catch (err) {
+        console.warn(
+          "Preload failed — model will download on first recall instead.",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+
   // ---- Telegram (optional) ------------------------------------------------
   banner("Telegram — optional second messaging channel");
   console.log(`

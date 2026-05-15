@@ -34,6 +34,7 @@
     "@composio/core": "^0.6.10",
     "@hugeicons/core-free-icons": "^1.0.0",
     "@hugeicons/react": "^1.0.0",
+    "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@mozilla/readability": "^0.6.0",
     "@napi-rs/canvas": "^0.1.100",

@@ -182,6 +182,84 @@ export const setLifecycle = mutation({
 
 const COUNTS_SCAN_LIMIT = 5000;
 
+export const embeddingStats = query({
+  args: {},
+  handler: async (ctx) => {
+    const all = await ctx.db
+      .query("memoryRecords")
+      .withIndex("by_lifecycle", (q) => q.eq("lifecycle", "active"))
+      .order("desc")
+      .take(COUNTS_SCAN_LIMIT);
+    let withEmbedding = 0;
+    let withoutEmbedding = 0;
+    for (const m of all) {
+      if (m.embedding && m.embedding.length > 0) withEmbedding++;
+      else withoutEmbedding++;
+    }
+    return {
+      total: all.length,
+      withEmbedding,
+      withoutEmbedding,
+      truncated: all.length === COUNTS_SCAN_LIMIT,
+    };
+  },
+});
+
+// Cursor-based scan over active memories that yields the unembedded ones.
+// Returns at most `pageSize` rows from the underlying index, and the caller
+// is expected to walk pages via `continueCursor` until `isDone`. A given
+// page may contain fewer unembedded rows than were scanned (the rest had
+// embeddings and were filtered out).
+//
+// Why a cursor rather than a top-N sort by importance: the previous
+// implementation took 5,000 rows per call and filtered in-process, so each
+// pagination step was O(total memories). With the cursor each step is
+// O(pageSize). Re-embed throughput is unchanged (we still process every
+// unembedded row exactly once) but Convex query cost stays bounded as the
+// memory corpus grows.
+export const listUnembeddedPage = query({
+  args: {
+    cursor: v.optional(v.union(v.string(), v.null())),
+    pageSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const result = await ctx.db
+      .query("memoryRecords")
+      .withIndex("by_lifecycle", (q) => q.eq("lifecycle", "active"))
+      .order("desc")
+      .paginate({
+        cursor: args.cursor ?? null,
+        numItems: args.pageSize ?? 50,
+      });
+    return {
+      page: result.page
+        .filter((m) => !m.embedding || m.embedding.length === 0)
+        .map((m) => ({ memoryId: m.memoryId, content: m.content })),
+      isDone: result.isDone,
+      continueCursor: result.continueCursor,
+    };
+  },
+});
+
+// Patch just the embedding on an existing memory. Avoids re-running upsert
+// (which would touch lastAccessedAt + run supersedes processing) just to
+// back-fill a vector.
+export const setEmbedding = mutation({
+  args: {
+    memoryId: v.string(),
+    embedding: v.array(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    const mem = await ctx.db
+      .query("memoryRecords")
+      .withIndex("by_memory_id", (q) => q.eq("memoryId", args.memoryId))
+      .unique();
+    if (!mem) return null;
+    await ctx.db.patch(mem._id, { embedding: args.embedding });
+    return mem._id;
+  },
+});
+
 export const countsByTier = query({
   args: {},
   handler: async (ctx) => {

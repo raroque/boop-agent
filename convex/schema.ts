@@ -72,6 +72,7 @@ export default defineSchema({
       v.literal("completed"),
       v.literal("failed"),
       v.literal("cancelled"),
+      v.literal("paused"),
     ),
     result: v.optional(v.string()),
     error: v.optional(v.string()),

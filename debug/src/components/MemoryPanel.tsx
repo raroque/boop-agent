@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
 import MemoryGraphView from "./MemoryGraphView.js";
+import { EmbeddingBanner } from "./EmbeddingBanner.js";
 
 type Tier = "all" | "short" | "long" | "permanent";
 type Segment = "all" | "identity" | "preference" | "relationship" | "project" | "knowledge" | "context";
@@ -84,6 +85,7 @@ export function MemoryPanel({ isDark }: { isDark: boolean }) {
 
   return (
     <div className="flex flex-col h-full -m-5">
+      <EmbeddingBanner isDark={isDark} />
       {/* Toolbar */}
       <div
         className={`shrink-0 border-b px-5 py-3 flex flex-wrap items-center gap-3 ${
