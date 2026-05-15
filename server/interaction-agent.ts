@@ -170,12 +170,14 @@ Available integrations for spawn_agent: {{INTEGRATIONS}}
 Images:
 When the user texts a photo or screenshot, you'll see it directly as
 input — treat it as part of the message. Describe it, answer questions
-about it, or extract info from it the same way you'd handle text. If
-the user's request depends on the image AND requires a sub-agent (e.g.
-"search the web for this product I'm photographing"), pass the relevant
-storage IDs to spawn_agent's imageRefs parameter so the sub-agent can
-see the image too. If the user sends a photo with no caption, ask a
-short clarifying question rather than guessing what they want.
+about it, or extract info from it the same way you'd handle text. Answer
+directly only when the request can be satisfied from the message and image
+alone. If satisfying the request requires any external source, current
+information, integration action, file/system access, or verification beyond
+what you can see in the image, call spawn_agent and pass the relevant storage
+IDs to its imageRefs parameter so the sub-agent can see the image too. If the
+user sends a photo with no caption, ask a short clarifying question rather
+than guessing what they want.
 
 Format: Plain iMessage-friendly text. Markdown sparingly. Keep replies under ~400 chars when you can.`;
 
@@ -198,27 +200,6 @@ interface HandleOpts {
 
 function randomId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export function shouldForceImageLookupSpawn(args: {
-  content: string;
-  imageStorageIds: string[];
-  kind?: "user" | "proactive";
-}): boolean {
-  if (args.kind === "proactive" || args.imageStorageIds.length === 0) return false;
-  const text = args.content.toLowerCase();
-  return /\b(where can i buy|where to buy|buy this|buy it|purchase|shopping|shop for|for sale|seller|store|price|cost|amazon|etsy|ebay|link to buy|find (?:this|it|one|a|an)|search (?:the )?web|look (?:this|it) up)\b/.test(
-    text,
-  );
-}
-
-export function buildImageLookupTask(userText: string): string {
-  return [
-    "Use the attached image(s) to answer the user's request.",
-    `User request: ${userText || "(no caption)"}`,
-    "If this is a shopping, product-identification, availability, price, or web lookup request, use web search/fetch and cite concrete URLs.",
-    "If the image appears AI-generated, edited, generic, or not a real purchasable item, say that clearly and then suggest the closest real alternatives when useful.",
-  ].join("\n");
 }
 
 export async function handleUserMessage(opts: HandleOpts): Promise<string> {
@@ -320,7 +301,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     defineRuntimeTool(
       "boop-spawn",
       "spawn_agent",
-      "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use for anything requiring lookups, drafting, or actions in the user's integrations. If the current user message includes images and the sub-agent's task depends on them, pass the relevant storage IDs in imageRefs.",
+      "Spawn a focused sub-agent to do real work using external tools. Returns the agent's final answer. Use whenever the user's request needs external sources, current information, integrations, file/system access, or verification beyond the visible message context. If the current user message includes images and the sub-agent's task depends on them, pass the relevant storage IDs in imageRefs.",
       {
         task: z
           .string()
@@ -359,91 +340,69 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   let reply = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
   try {
-    if (
-      shouldForceImageLookupSpawn({
-        content: userText,
-        imageStorageIds: inboundImageStorageIds,
-        kind: opts.kind,
-      })
-    ) {
-      log(
-        `forced image lookup spawn (${runtimeConfig.runtime}, images=${inboundImageStorageIds.length})`,
-      );
-      await sendAck("Checking the image and web now.");
-      const res = await spawnExecutionAgent({
-        task: buildImageLookupTask(userText),
-        integrations: [],
-        conversationId: opts.conversationId,
-        name: "image lookup",
-        runtimeConfig,
-        imageStorageIds: inboundImageStorageIds,
-      });
-      reply = res.result;
-    } else {
-      const prompt =
+    const prompt =
+      opts.kind === "proactive"
+        ? promptText
+        : await buildPromptWithImages({
+            text: promptText,
+            imageStorageIds: inboundImageStorageIds,
+            fetchBytes: fetchStoredBytes,
+          });
+    const result = await runAgentRuntime(runtimeConfig, {
+      prompt,
+      systemPrompt,
+      tools,
+      mode: "dispatcher",
+      allowedTools:
         opts.kind === "proactive"
-          ? promptText
-          : await buildPromptWithImages({
-              text: promptText,
-              imageStorageIds: inboundImageStorageIds,
-              fetchBytes: fetchStoredBytes,
-            });
-      const result = await runAgentRuntime(runtimeConfig, {
-        prompt,
-        systemPrompt,
-        tools,
-        mode: "dispatcher",
-        allowedTools:
-          opts.kind === "proactive"
-            ? []
-            : [
-                "mcp__boop-memory__write_memory",
-                "mcp__boop-memory__recall",
-                "mcp__boop-spawn__spawn_agent",
-                "mcp__boop-automations__create_automation",
-                "mcp__boop-automations__list_automations",
-                "mcp__boop-automations__toggle_automation",
-                "mcp__boop-automations__delete_automation",
-                "mcp__boop-draft-decisions__list_drafts",
-                "mcp__boop-draft-decisions__send_draft",
-                "mcp__boop-draft-decisions__reject_draft",
-                "mcp__boop-ack__send_ack",
-                "mcp__boop-self__get_config",
-                "mcp__boop-self__set_runtime",
-                "mcp__boop-self__set_model",
-                "mcp__boop-self__set_codex_reasoning_effort",
-                "mcp__boop-self__set_timezone",
-                "mcp__boop-self__list_integrations",
-                "mcp__boop-self__search_composio_catalog",
-                "mcp__boop-self__inspect_toolkit",
-              ],
-        // Belt-and-suspenders: even with bypassPermissions the SDK can leak
-        // its built-ins if we only whitelist. Explicitly block them on the
-        // dispatcher so it MUST spawn a sub-agent for external work.
-        disallowedTools: [
-          "WebSearch",
-          "WebFetch",
-          "Bash",
-          "Read",
-          "Write",
-          "Edit",
-          "Glob",
-          "Grep",
-          "Agent",
-          "Skill",
-        ],
-        onText: (chunk) => opts.onThinking?.(chunk),
-        onToolUse: (toolName, input) => {
-          const name = toolName.replace(/^mcp__boop-[a-z-]+__/, "");
-          const inputPreview = JSON.stringify(input);
-          log(
-            `tool: ${name}(${inputPreview.length > 90 ? inputPreview.slice(0, 90) + "…" : inputPreview})`,
-          );
-        },
-      });
-      reply = result.text;
-      usage = result.usage;
-    }
+          ? []
+          : [
+              "mcp__boop-memory__write_memory",
+              "mcp__boop-memory__recall",
+              "mcp__boop-spawn__spawn_agent",
+              "mcp__boop-automations__create_automation",
+              "mcp__boop-automations__list_automations",
+              "mcp__boop-automations__toggle_automation",
+              "mcp__boop-automations__delete_automation",
+              "mcp__boop-draft-decisions__list_drafts",
+              "mcp__boop-draft-decisions__send_draft",
+              "mcp__boop-draft-decisions__reject_draft",
+              "mcp__boop-ack__send_ack",
+              "mcp__boop-self__get_config",
+              "mcp__boop-self__set_runtime",
+              "mcp__boop-self__set_model",
+              "mcp__boop-self__set_codex_reasoning_effort",
+              "mcp__boop-self__set_timezone",
+              "mcp__boop-self__list_integrations",
+              "mcp__boop-self__search_composio_catalog",
+              "mcp__boop-self__inspect_toolkit",
+            ],
+      // Belt-and-suspenders: even with bypassPermissions the SDK can leak
+      // its built-ins if we only whitelist. Explicitly block them on the
+      // dispatcher so it MUST spawn a sub-agent for external work.
+      disallowedTools: [
+        "WebSearch",
+        "WebFetch",
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Agent",
+        "Skill",
+      ],
+      onText: (chunk) => opts.onThinking?.(chunk),
+      onToolUse: (toolName, input) => {
+        const name = toolName.replace(/^mcp__boop-[a-z-]+__/, "");
+        const inputPreview = JSON.stringify(input);
+        log(
+          `tool: ${name}(${inputPreview.length > 90 ? inputPreview.slice(0, 90) + "…" : inputPreview})`,
+        );
+      },
+    });
+    reply = result.text;
+    usage = result.usage;
   } catch (err) {
     console.error(`[turn ${tag}] query failed`, err);
     reply = "Sorry — I hit an error processing that. Try again in a moment.";
