@@ -8,10 +8,9 @@ Format:
 
 ---
 
-## Unreleased — Cross-runtime upgrade workflow
+## Unreleased — Cross-runtime slash-command upgrade workflow
 
-- Added: `boop update` CLI wrapper (`scripts/boop.mjs`, package `bin`, and `npm run boop:update`). It refuses dirty worktrees, fetches upstream, previews incoming commits, buckets changed files by risk area, dry-runs the merge, and can apply a clean merge with rollback tag + `npm install` + `npm run typecheck`.
-- Changed: `npm run dev` upstream reminder now points at `boop update` first, then `/upgrade-boop` from Codex or Claude for conflict-heavy/customized upgrades.
+- Changed: `/upgrade-boop` is the single documented upgrade path. The upstream reminder printed by `npm run dev` now points users to open Codex or Claude in the repo and run `/upgrade-boop`.
 - Changed: upgrade and contribution docs now make the cross-runtime skill convention explicit: migration skills referenced from `[BREAKING]` CHANGELOG entries should be mirrored in both `.claude/skills/` and `.agents/skills/` unless intentionally provider-specific.
 
 ## Unreleased — Local embeddings fallback + mandatory recall

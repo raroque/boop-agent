@@ -7,7 +7,7 @@ description: Pull upstream Boop changes into a customized fork. Previews, backs 
 
 Your Boop fork drifts from upstream as you customize it — system prompts tweaked, new automations, tuned memory thresholds, etc. This skill brings upstream changes in without blowing away those edits.
 
-Run `boop update` from the shell for a safe preview. Run `/upgrade-boop` inside the repo from `Codex` when you want the agent to perform the merge, resolve conflicts, or run referenced migration skills.
+Run `/upgrade-boop` inside the repo from `Codex`. This is the supported upgrade path: the agent previews the diff, creates rollback points, performs the merge, resolves conflicts when needed, and runs referenced migration skills.
 
 ## How it works
 

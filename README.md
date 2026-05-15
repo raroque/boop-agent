@@ -470,7 +470,7 @@ If you deploy Boop in a higher-throughput setting, or hand it integrations that 
 
 Deeper dive — auth modes, toolkit scoping internals, multi-account flow, per-connection identity: [INTEGRATIONS.md](./INTEGRATIONS.md).
 
-Upgrade path when upstream ships changes: run `boop update` from your shell to preview incoming commits, file impact, and merge conflicts. For customized forks or any conflict-heavy upgrade, open Codex or Claude in the repo and run `/upgrade-boop`; the mirrored skills under `.agents/skills/upgrade-boop/` and `.claude/skills/upgrade-boop/` back up, merge, validate, and surface `[BREAKING]` CHANGELOG entries. See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution rules + the CHANGELOG / migration-skill conventions.
+Upgrade path when upstream ships changes: open Codex or Claude in the repo and run `/upgrade-boop`. The mirrored skills under `.agents/skills/upgrade-boop/` and `.claude/skills/upgrade-boop/` preview diffs, back up, merge, validate, and surface `[BREAKING]` CHANGELOG entries. See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution rules + the CHANGELOG / migration-skill conventions.
 
 ---
 
@@ -522,7 +522,6 @@ boop-agent/
 ├── debug/                         # Dashboard: Dashboard / Agents / Automations / Memory / Events / Connections
 ├── scripts/
 │   ├── setup.ts                   # Interactive setup CLI
-│   ├── boop.mjs                   # `boop update` preview / clean-merge wrapper
 │   ├── dev.mjs                    # One-command orchestrator (server + convex + vite + ngrok)
 │   ├── preflight.mjs              # Checks convex/_generated exists before booting
 │   ├── sendblue-sync.mjs          # Pulls phone number from `sendblue lines`
@@ -538,17 +537,7 @@ boop-agent/
 
 Boop is a fork-and-own template. You customize your copy freely — system prompts, memory thresholds, extra tools — and pull upstream fixes in on your own schedule.
 
-The intended path is **shell preview first, agent-assisted when needed**:
-
-```bash
-boop update            # preview upstream commits, buckets, and conflicts
-# or, without a linked/global bin:
-npm run boop:update
-```
-
-`boop update` is intentionally conservative. It refuses to run on a dirty working tree, fetches `upstream/main` (or `origin/main` when you're on the canonical repo), previews incoming commits, buckets changed files by risk area, and dry-runs the merge. If the preview is clean, it can apply the merge, create a rollback tag, run `npm install`, and run `npm run typecheck`. If conflicts are expected, it points you to the agent skill instead of trying to resolve customized code with a blind shell script.
-
-For agent-assisted upgrades:
+The intended path is **agent CLI-driven**:
 
 ```bash
 codex                  # inside your repo
@@ -569,19 +558,11 @@ claude
 6. Parses `CHANGELOG.md` for `[BREAKING]` entries and offers to run the referenced migration skills.
 7. Prints a rollback hash + any env-var additions you should copy into `.env.local`.
 
-Upgrade commands are for your local shell / agent CLI operating on the repo. They are not exposed to the Boop SMS/web dispatcher. The Codex runtime used by Boop conversations runs with read-only sandboxing and no shell/file-write tools, so a text-message conversation cannot update the server.
-
-Plain git works too, if you'd rather:
-
-```bash
-git remote add upstream https://github.com/raroque/boop-agent.git    # one-time
-git fetch upstream
-git merge upstream/main      # or: git rebase upstream/main
-```
+`/upgrade-boop` is for your local agent CLI operating on the repo. It is not exposed to the Boop SMS/web dispatcher. The Codex runtime used by Boop conversations runs with read-only sandboxing and no shell/file-write tools, so a text-message conversation cannot update the server.
 
 ### New-version notifications
 
-Every time you run `npm run dev`, a small background check (`scripts/check-upstream.mjs`) asks your `upstream` remote if there are new commits. If there are, you'll see a banner up top with the count and a reminder to run `boop update`. If you're up to date, or the check fails for any reason (offline, no `upstream` remote, timeout), it stays silent.
+Every time you run `npm run dev`, a small background check (`scripts/check-upstream.mjs`) asks your `upstream` remote if there are new commits. If there are, you'll see a banner up top with the count and a reminder to run `/upgrade-boop` from Codex or Claude. If you're up to date, or the check fails for any reason (offline, no `upstream` remote, timeout), it stays silent.
 
 Behavior at a glance:
 

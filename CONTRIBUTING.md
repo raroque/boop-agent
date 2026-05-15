@@ -33,7 +33,7 @@ Keep the diff focused — one concern per PR. A feature PR and a refactor PR sho
   [BREAKING] <description>. Run `/<skill-name>` to <action>.
   ```
 
-  `boop update` previews the release delta, and `/upgrade-boop` parses this format and offers to run the referenced skill during agent-assisted upgrades. The format is the only coupling — without a migration, just write `[BREAKING] <description>.` without the skill reference.
+  `/upgrade-boop` parses this format and offers to run the referenced skill during agent-assisted upgrades. The format is the only coupling — without a migration, just write `[BREAKING] <description>.` without the skill reference.
 
 ## Skills
 

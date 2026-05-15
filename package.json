@@ -5,12 +5,8 @@
   "description": "Text-an-agent starter: iMessage your Claude agent, it runs sub-agents, remembers you, and grows with integrations you add.",
   "license": "MIT",
   "type": "module",
-  "bin": {
-    "boop": "./scripts/boop.mjs"
-  },
   "scripts": {
     "setup": "tsx scripts/setup.ts",
-    "boop:update": "node scripts/boop.mjs update",
     "sendblue:sync": "node scripts/sendblue-sync.mjs",
     "sendblue:webhook": "node scripts/sendblue-webhook.mjs",
     "preflight": "node scripts/preflight.mjs",
