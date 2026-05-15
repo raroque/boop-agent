@@ -201,6 +201,8 @@ interface SendblueKeys {
   fromNumber?: string;
 }
 
+type SendblueImportResult = SendblueKeys | "skip" | null;
+
 function parseSendblueKeys(output: string): SendblueKeys {
   const clean = output.replace(/\x1b\[[0-9;]*m/g, "");
   const keys: SendblueKeys = {};
@@ -271,7 +273,7 @@ function parseSendbluePhones(output: string): string[] {
   return numbers;
 }
 
-async function importSendblueFromCli(): Promise<SendblueKeys | null> {
+async function importSendblueFromCli(): Promise<SendblueImportResult> {
   const { method } = await prompts(
     {
       type: "select",
@@ -293,7 +295,7 @@ async function importSendblueFromCli(): Promise<SendblueKeys | null> {
   );
 
   if (method === "manual") return null;
-  if (method === "skip") return { apiKey: "", apiSecret: "", fromNumber: "" };
+  if (method === "skip") return "skip";
 
   const { account } = await prompts({
     type: "select",
@@ -377,15 +379,17 @@ Before you start:
   const existing = readEnv(ENV_PATH);
   const runtimeDefault = runtimeFromEnv(existing.BOOP_RUNTIME);
   const cli = await importSendblueFromCli();
+  const sendblueSkipped = cli === "skip";
+  const cliKeys = cli && cli !== "skip" ? cli : null;
 
   const sendblueDefaults = {
-    SENDBLUE_API_KEY: cli?.apiKey ?? existing.SENDBLUE_API_KEY ?? "",
-    SENDBLUE_API_SECRET: cli?.apiSecret ?? existing.SENDBLUE_API_SECRET ?? "",
-    SENDBLUE_FROM_NUMBER: cli?.fromNumber ?? existing.SENDBLUE_FROM_NUMBER ?? "",
+    SENDBLUE_API_KEY: cliKeys?.apiKey ?? existing.SENDBLUE_API_KEY ?? "",
+    SENDBLUE_API_SECRET: cliKeys?.apiSecret ?? existing.SENDBLUE_API_SECRET ?? "",
+    SENDBLUE_FROM_NUMBER: cliKeys?.fromNumber ?? existing.SENDBLUE_FROM_NUMBER ?? "",
   };
 
   const sendbluePrompts = [] as any[];
-  if (!sendblueDefaults.SENDBLUE_API_KEY) {
+  if (!sendblueSkipped && !sendblueDefaults.SENDBLUE_API_KEY) {
     sendbluePrompts.push({
       type: "text",
       name: "SENDBLUE_API_KEY",
@@ -393,7 +397,7 @@ Before you start:
       initial: "",
     });
   }
-  if (!sendblueDefaults.SENDBLUE_API_SECRET) {
+  if (!sendblueSkipped && !sendblueDefaults.SENDBLUE_API_SECRET) {
     sendbluePrompts.push({
       type: "password",
       name: "SENDBLUE_API_SECRET",
@@ -401,7 +405,7 @@ Before you start:
       initial: "",
     });
   }
-  if (!sendblueDefaults.SENDBLUE_FROM_NUMBER) {
+  if (!sendblueSkipped && !sendblueDefaults.SENDBLUE_FROM_NUMBER) {
     sendbluePrompts.push({
       type: "text",
       name: "SENDBLUE_FROM_NUMBER",
