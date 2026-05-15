@@ -10,6 +10,11 @@ final class ChatStore {
     private(set) var messages: [Message] = []
     private(set) var connectionState: ConnectionState = .idle
     private(set) var sendError: String?
+    /// True from the moment the user taps send until the first reply
+    /// fragment (delta/ack/message/error) arrives. Drives the typing
+    /// bubble in the UI so the user doesn't stare at empty space while
+    /// the dispatcher is thinking.
+    private(set) var isAwaitingReply: Bool = false
 
     enum ConnectionState: Equatable {
         case idle
@@ -41,6 +46,7 @@ final class ChatStore {
         connectionState = .idle
         sendError = nil
         streamingMessageId = nil
+        isAwaitingReply = false
     }
 
     func loadHistory() async {
@@ -91,6 +97,10 @@ final class ChatStore {
         let expected = "ios:\(settings.deviceId)"
         guard event.conversationId == expected else { return }
 
+        // Any signal of life from the server means the dispatcher has
+        // started producing — hide the typing bubble.
+        isAwaitingReply = false
+
         switch event {
         case .delta(_, let text, _):
             appendDelta(text)
@@ -101,7 +111,7 @@ final class ChatStore {
         case .error(_, _, let message):
             sendError = message
         case .thinking:
-            break // surface later if we add a "thinking" indicator
+            break // signal of life handled above; visual indicator not needed yet
         }
     }
 
@@ -156,6 +166,10 @@ final class ChatStore {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let bearer, let baseURL = settings.serverBaseURL else { return }
 
+        // Optimistic: clear any stale error banner the moment a send starts.
+        sendError = nil
+        isAwaitingReply = true
+
         let localId = "local-\(UUID().uuidString)"
         messages.append(
             Message(
@@ -169,9 +183,9 @@ final class ChatStore {
         let client = BoopClient(baseURL: baseURL, bearer: bearer)
         do {
             _ = try await client.sendInbound(text: trimmed)
-            sendError = nil
         } catch {
             sendError = "Send failed: \(error.localizedDescription)"
+            isAwaitingReply = false
         }
     }
 }

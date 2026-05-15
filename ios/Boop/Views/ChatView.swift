@@ -68,12 +68,18 @@ private struct MessageListView: View {
                         MessageBubble(message: msg)
                             .id(msg.id)
                     }
+                    if chat.isAwaitingReply {
+                        TypingBubble()
+                            .id("typing")
+                            .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
+                    }
                     Color.clear
                         .frame(height: 1)
                         .id("bottom")
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
+                .animation(.easeInOut(duration: 0.15), value: chat.isAwaitingReply)
             }
             .onChange(of: chat.messages.count) {
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -81,9 +87,41 @@ private struct MessageListView: View {
             .onChange(of: chat.messages.last?.content) {
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
+            .onChange(of: chat.isAwaitingReply) { _, awaiting in
+                if awaiting {
+                    withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
+            }
             .onAppear {
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
+        }
+    }
+}
+
+/// Three-dot "agent is thinking" bubble. Plays a staggered opacity loop
+/// so the user has visible feedback the moment they tap send and through
+/// the 3–8s wait for Anthropic to respond.
+private struct TypingBubble: View {
+    @State private var phase: Int = 0
+    private let timer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(0..<3) { i in
+                Circle()
+                    .fill(Color.gray.opacity(phase == i ? 0.7 : 0.3))
+                    .frame(width: 7, height: 7)
+                    .animation(.easeInOut(duration: 0.3), value: phase)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.gray.opacity(0.18), in: RoundedRectangle(cornerRadius: 18))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 40)
+        .onReceive(timer) { _ in
+            phase = (phase + 1) % 3
         }
     }
 }

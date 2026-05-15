@@ -132,9 +132,12 @@ export function createIosRouter(): Router {
   const router = Router();
 
   // POST /pair/create — phone-initiated, no auth, rate-limited per IP.
+  // 10/hour is enough for ~3 reinstall-and-pair iterations during dev
+  // without sliding into a hard wall, while still keeping brute force
+  // expensive on the 6-digit code (~600K guesses needed).
   router.post("/pair/create", async (req, res) => {
     const ip = ipOf(req);
-    if (!rateLimit(`pair-create:${ip}`, 3, 60 * 60 * 1000)) {
+    if (!rateLimit(`pair-create:${ip}`, 10, 60 * 60 * 1000)) {
       res.status(429).json({ error: "too many pairing attempts" });
       return;
     }
@@ -271,7 +274,19 @@ export function createIosRouter(): Router {
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
+    // Disable Nagle's algorithm on the underlying TCP socket. Without
+    // this, small writes (single SSE events) sit in the OS send-buffer
+    // for up to ~200ms waiting to coalesce with more data — making
+    // every reply feel laggy on iOS.
+    req.socket.setNoDelay(true);
+    // Also disable the socket's read timeout so the long-lived SSE
+    // connection isn't killed mid-stream by Node's default.
+    req.socket.setTimeout(0);
+
     res.write(`: connected to ${conversationId}\n\n`);
+    // express-compress sometimes monkey-patches res to expose flush;
+    // if so, call it.
+    (res as { flush?: () => void }).flush?.();
 
     const unsubscribe = subscribe((msg: BroadcastMessage) => {
       if (!STREAM_EVENTS.has(msg.event)) return;
@@ -279,10 +294,12 @@ export function createIosRouter(): Router {
       if (!data || data.conversationId !== conversationId) return;
       res.write(`event: ${msg.event}\n`);
       res.write(`data: ${JSON.stringify(msg.data)}\n\n`);
+      (res as { flush?: () => void }).flush?.();
     });
 
     const heartbeat = setInterval(() => {
       res.write(`: ping\n\n`);
+      (res as { flush?: () => void }).flush?.();
     }, 25_000);
 
     req.on("close", () => {

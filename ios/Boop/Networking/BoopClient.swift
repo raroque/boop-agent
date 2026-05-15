@@ -1,5 +1,21 @@
 import Foundation
 
+/// Shared `URLSession` that bypasses the system proxy resolver.
+///
+/// macOS' and the iOS Simulator's network stack walks the system proxy
+/// settings on every URLRequest. When the resolver can't reach the
+/// configured PAC URL (common on corporate VPNs / dev networks) it
+/// blocks each request for up to ~60s before giving up. Bypassing
+/// proxies makes every request fly. See the side-by-side video against
+/// Telegram (which uses lower-level networking) for the prior 15-60s
+/// per-request bleed.
+private let httpSession: URLSession = {
+    let config = URLSessionConfiguration.default
+    config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+    config.connectionProxyDictionary = [:]  // empty = no proxy
+    return URLSession(configuration: config)
+}()
+
 /// HTTP + SSE client for the Boop iOS channel. All endpoints live at
 /// `<serverURL>/channels/ios/*`. Pairing endpoints are unauthenticated;
 /// everything else requires the bearer token.
@@ -86,7 +102,7 @@ struct BoopClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: req)
+            (data, response) = try await httpSession.data(for: req)
         } catch {
             throw ClientError.transport(error)
         }
@@ -130,10 +146,12 @@ enum StreamEvent: Sendable {
     }
 }
 
-/// AsyncStream of SSE events from `/channels/ios/stream`. Iterating the
-/// stream blocks until the next event or disconnect. The task is
-/// cancellable — call `.cancel()` on the for-await loop's Task to tear
-/// down the underlying URLSession stream.
+/// AsyncStream of SSE events from `/channels/ios/stream`.
+///
+/// Implementation uses `URLSessionDataDelegate.didReceive(_ data:)` so we
+/// get streaming chunks as the server flushes them. `URLSession.bytes(for:)`
+/// turned out unreliable for SSE — it tended to wait for "completion" and
+/// never yielded body chunks until the connection closed.
 struct SSEConnection {
     let baseURL: URL
     let bearer: String
@@ -141,67 +159,119 @@ struct SSEConnection {
     func subscribe() -> AsyncStream<StreamEvent> {
         let baseURL = self.baseURL
         let bearer = self.bearer
-        return AsyncStream<StreamEvent>(StreamEvent.self) { continuation in
-            let task = Task {
-                await Self.run(baseURL: baseURL, bearer: bearer) { event in
-                    continuation.yield(event)
-                }
+        return AsyncStream<StreamEvent>(StreamEvent.self, bufferingPolicy: .unbounded) { continuation in
+            let delegate = SSEDelegate(onEvent: { event in
+                continuation.yield(event)
+            }, onFinish: {
                 continuation.finish()
+            })
+            let configuration = URLSessionConfiguration.ephemeral  // no cache, no persistent cookies
+            configuration.timeoutIntervalForRequest = 0       // never time out per-request
+            configuration.timeoutIntervalForResource = 0      // never time out the whole resource
+            configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            configuration.networkServiceType = .responsiveData // prioritise low-latency delivery
+            configuration.httpMaximumConnectionsPerHost = 4
+            configuration.connectionProxyDictionary = [:]      // bypass system proxy (PAC) — see httpSession comment
+            configuration.httpAdditionalHeaders = [
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+            ]
+            let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+
+            var request = URLRequest(url: baseURL.appendingPathComponent("/channels/ios/stream"))
+            request.httpMethod = "GET"
+            request.networkServiceType = .responsiveData
+            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")  // disable gzip — kills SSE streaming
+
+            let task = session.dataTask(with: request)
+            task.resume()
+
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+                session.invalidateAndCancel()
             }
-            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
+    }
+}
+
+/// URLSession delegate that parses SSE on the fly from `didReceive data`
+/// callbacks and emits typed StreamEvents through a closure.
+private final class SSEDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let onEvent: @Sendable (StreamEvent) -> Void
+    private let onFinish: @Sendable () -> Void
+    private var lineBuffer = ""
+    private var eventName: String?
+    private var dataBuffer = ""
+
+    init(
+        onEvent: @escaping @Sendable (StreamEvent) -> Void,
+        onFinish: @escaping @Sendable () -> Void,
+    ) {
+        self.onEvent = onEvent
+        self.onFinish = onFinish
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void,
+    ) {
+        if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+            completionHandler(.allow)
+        } else {
+            completionHandler(.cancel)
         }
     }
 
-    private static func run(
-        baseURL: URL,
-        bearer: String,
-        yield: @Sendable (StreamEvent) -> Void,
-    ) async {
-        var req = URLRequest(url: baseURL.appendingPathComponent("/channels/ios/stream"))
-        req.httpMethod = "GET"
-        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        req.timeoutInterval = 0 // no client-side timeout — server pings every 25s
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard let chunk = String(data: data, encoding: .utf8) else { return }
+        lineBuffer.append(chunk)
 
-        let session = URLSession(configuration: .default)
-        let bytes: URLSession.AsyncBytes
-        let response: URLResponse
-        do {
-            (bytes, response) = try await session.bytes(for: req)
-        } catch {
+        // Process complete lines; keep any trailing partial line in the buffer.
+        while let newlineRange = lineBuffer.range(of: "\n") {
+            let line = String(lineBuffer[..<newlineRange.lowerBound])
+            lineBuffer.removeSubrange(..<newlineRange.upperBound)
+            handle(line: line)
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?,
+    ) {
+        onFinish()
+    }
+
+    private func handle(line rawLine: String) {
+        // SSE allows `\r\n`; strip a trailing CR if present.
+        let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
+
+        if line.isEmpty {
+            // End of one event — flush.
+            if let name = eventName, !dataBuffer.isEmpty,
+               let parsed = SSEDelegate.parseEvent(name: name, dataString: dataBuffer)
+            {
+                onEvent(parsed)
+            }
+            eventName = nil
+            dataBuffer = ""
             return
         }
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
+        if line.hasPrefix(":") { return } // comment / heartbeat
 
-        var eventName: String?
-        var dataBuffer = ""
-
-        do {
-            for try await line in bytes.lines {
-                if Task.isCancelled { break }
-                if line.isEmpty {
-                    if let name = eventName, !dataBuffer.isEmpty,
-                       let parsed = parseEvent(name: name, dataString: dataBuffer)
-                    {
-                        yield(parsed)
-                    }
-                    eventName = nil
-                    dataBuffer = ""
-                    continue
-                }
-                if line.hasPrefix(":") { continue } // comment / heartbeat
-                if line.hasPrefix("event:") {
-                    eventName = String(line.dropFirst("event:".count))
-                        .trimmingCharacters(in: .whitespaces)
-                } else if line.hasPrefix("data:") {
-                    let chunk = String(line.dropFirst("data:".count))
-                        .trimmingCharacters(in: .whitespaces)
-                    if !dataBuffer.isEmpty { dataBuffer.append("\n") }
-                    dataBuffer.append(chunk)
-                }
-            }
-        } catch {
-            // Stream dropped — caller decides whether to reconnect.
+        if line.hasPrefix("event:") {
+            eventName = String(line.dropFirst("event:".count))
+                .trimmingCharacters(in: .whitespaces)
+        } else if line.hasPrefix("data:") {
+            let chunk = String(line.dropFirst("data:".count))
+                .trimmingCharacters(in: .whitespaces)
+            if !dataBuffer.isEmpty { dataBuffer.append("\n") }
+            dataBuffer.append(chunk)
         }
     }
 
