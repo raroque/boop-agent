@@ -223,7 +223,12 @@ export async function launchLocalBrowser(
     if (context) await closeActiveContext();
 
     const profileDir = resolve(expandHome(settings.profileDir));
-    mkdirSync(profileDir, { recursive: true });
+    mkdirSync(profileDir, { recursive: true, mode: 0o700 });
+    try {
+      chmodSync(profileDir, 0o700);
+    } catch {
+      // Best-effort hardening for profile directories created by earlier runs.
+    }
 
     const launchArgs = {
       headless: !showUi,
