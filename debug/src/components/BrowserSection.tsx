@@ -49,6 +49,28 @@ const CHANNEL_KEY = "browser_channel";
 const EXECUTABLE_KEY = "browser_executable_path";
 const EXTRA_ARGS_KEY = "browser_extra_args";
 
+function validateBrowserSetting(settingKey: string, value: string): string | null {
+  if (settingKey !== START_URL_KEY || !value.trim()) return null;
+
+  try {
+    const trimmed = value.trim();
+    const withScheme = /^(https?:|about:)/i.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`;
+    const parsed = new URL(withScheme);
+    const isAboutBlank =
+      parsed.protocol === "about:" &&
+      parsed.pathname.toLowerCase() === "blank" &&
+      !parsed.search &&
+      !parsed.hash;
+    if (["http:", "https:"].includes(parsed.protocol) || isAboutBlank) return null;
+  } catch {
+    // Fall through to the shared validation message below.
+  }
+
+  return "Launch URL must be http(s) or about:blank.";
+}
+
 export function BrowserSection({ isDark }: { isDark: boolean }) {
   const [status, setStatus] = useState<BrowserStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -610,6 +632,11 @@ function BrowserTextSetting({
     setSaveError(null);
     try {
       const trimmed = draft.trim();
+      const validationError = validateBrowserSetting(settingKey, trimmed);
+      if (validationError) {
+        setSaveError(validationError);
+        return;
+      }
       if (trimmed) {
         const nextValue = multiline ? draft : trimmed;
         await setSetting({ key: settingKey, value: nextValue });
