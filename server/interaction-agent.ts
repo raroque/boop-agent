@@ -297,7 +297,6 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   // Snapshot runtime for this top-level turn so same-turn set_runtime/set_model
   // changes do not split the dispatcher and any spawned execution agent.
   const runtimeConfig = await getRuntimeConfig();
-  const requestedModel = runtimeConfig.model;
   const directRuntimeSwitch =
     opts.kind === "proactive" ? null : resolveDirectRuntimeSwitch(opts.content);
   if (directRuntimeSwitch) {
