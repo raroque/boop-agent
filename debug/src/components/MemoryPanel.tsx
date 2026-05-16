@@ -4,6 +4,14 @@ import { api } from "../../../convex/_generated/api.js";
 import type { Id } from "../../../convex/_generated/dataModel.js";
 import MemoryGraphView from "./MemoryGraphView.js";
 import { EmbeddingBanner } from "./EmbeddingBanner.js";
+import {
+  EmptyState,
+  HeaderPill,
+  PanelPage,
+  mutedTextClass,
+  panelCardClass,
+  subtlePanelClass,
+} from "./PanelPrimitives.js";
 
 type Tier = "all" | "short" | "long" | "permanent";
 type Segment = "all" | "identity" | "preference" | "relationship" | "project" | "knowledge" | "context";
@@ -94,33 +102,34 @@ export function MemoryPanel({ isDark }: { isDark: boolean }) {
   });
 
   const btnActive = isDark
-    ? "bg-slate-700 text-white font-medium"
-    : "bg-slate-200 text-slate-800 font-medium";
+    ? "bg-zinc-100 text-zinc-950 shadow-sm"
+    : "bg-white text-zinc-950 shadow-sm";
   const btnInactive = isDark
-    ? "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
-    : "text-slate-400 hover:text-slate-600 hover:bg-slate-100";
+    ? "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+    : "text-zinc-500 hover:bg-white/70 hover:text-zinc-800";
 
   return (
-    <div className="flex flex-col h-full -m-5">
+    <PanelPage
+      eyebrow="Store"
+      title="Memory"
+      description="Search, filter, and inspect the active memory store."
+      stat={<HeaderPill isDark={isDark}>{filtered.length}/{allRecords.length}</HeaderPill>}
+      maxWidth={viewMode === "graph" ? "max-w-none" : "max-w-[1040px]"}
+    >
       <EmbeddingBanner isDark={isDark} />
-      {/* Toolbar */}
-      <div
-        className={`shrink-0 border-b px-5 py-3 flex flex-wrap items-center gap-3 ${
-          isDark ? "border-slate-800" : "border-slate-200"
-        }`}
-      >
+      <div className={panelCardClass(isDark, "flex flex-wrap items-center gap-2 px-3 py-3")}>
         <div
-          className={`flex items-center rounded-md border ${
-            isDark ? "border-slate-700" : "border-slate-200"
+          className={`segmented-control flex items-center rounded-2xl border p-1 ${
+            isDark ? "border-white/10 bg-[#17171a]" : "border-zinc-200 bg-zinc-100"
           }`}
         >
           {(["table", "graph"] as const).map((mode) => (
             <button
               key={mode}
               onClick={() => setViewMode(mode)}
-              className={`px-2.5 py-1 text-xs capitalize transition-colors ${
+              className={`segmented-button px-2.5 py-1 text-xs capitalize ${
                 viewMode === mode ? btnActive : btnInactive
-              } ${mode === "table" ? "rounded-l-md" : "rounded-r-md"}`}
+              } rounded-xl`}
             >
               {mode}
             </button>
@@ -134,7 +143,7 @@ export function MemoryPanel({ isDark }: { isDark: boolean }) {
                 <button
                   key={t.value}
                   onClick={() => setTierFilter(t.value)}
-                  className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                  className={`segmented-button rounded-xl px-2.5 py-1 text-xs ${
                     tierFilter === t.value ? btnActive : btnInactive
                   }`}
                 >
@@ -146,10 +155,10 @@ export function MemoryPanel({ isDark }: { isDark: boolean }) {
             <select
               value={segmentFilter}
               onChange={(e) => setSegmentFilter(e.target.value as Segment)}
-              className={`text-xs rounded-md px-2.5 py-1.5 focus:outline-none border ${
+              className={`rounded-xl border px-2.5 py-1.5 text-xs focus:outline-none ${
                 isDark
-                  ? "bg-slate-800 border-slate-700 text-slate-300"
-                  : "bg-white border-slate-200 text-slate-700"
+                  ? "border-white/10 bg-[#17171a] text-zinc-300"
+                  : "border-zinc-200 bg-white text-zinc-700"
               }`}
             >
               {SEGMENT_OPTIONS.map((s) => (
@@ -164,55 +173,41 @@ export function MemoryPanel({ isDark }: { isDark: boolean }) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search memories…"
-              className={`flex-1 min-w-[200px] text-sm rounded-md px-3 py-1.5 focus:outline-none border ${
+              className={`min-w-[200px] flex-1 rounded-xl border px-3 py-1.5 text-sm focus:outline-none ${
                 isDark
-                  ? "bg-slate-800/50 border-slate-700 text-slate-300 placeholder:text-slate-600"
-                  : "bg-white border-slate-200 text-slate-700 placeholder:text-slate-400"
+                  ? "border-white/10 bg-[#17171a] text-zinc-300 placeholder:text-zinc-600"
+                  : "border-zinc-200 bg-white text-zinc-700 placeholder:text-zinc-400"
               }`}
             />
-
-            <span
-              className={`text-xs mono ${
-                isDark ? "text-slate-600" : "text-slate-400"
-              }`}
-            >
-              {filtered.length}/{allRecords.length}
-            </span>
           </>
         )}
       </div>
 
       {viewMode === "graph" && (
-        <div className="flex-1 min-h-0">
+        <div className={panelCardClass(isDark, "h-[calc(100vh-190px)] min-h-[520px] overflow-hidden")}>
           <MemoryGraphView records={allRecords as any} isDark={isDark} />
         </div>
       )}
 
       {viewMode === "table" && (
-        <div className="flex-1 overflow-y-auto debug-scroll">
+        <div className={panelCardClass(isDark, "overflow-hidden")}>
           {records === undefined ? (
             <div className="p-5 space-y-3">
               {Array.from({ length: 6 }, (_, i) => (
                 <div
                   key={i}
-                  className={`h-14 rounded-lg shimmer ${
-                    isDark ? "bg-slate-900/30" : "bg-slate-100"
-                  }`}
+                  className={subtlePanelClass(isDark, "h-14 shimmer")}
                 />
               ))}
             </div>
           ) : filtered.length === 0 ? (
-            <p
-              className={`text-sm text-center py-12 ${
-                isDark ? "text-slate-600" : "text-slate-400"
-              }`}
-            >
+            <EmptyState isDark={isDark}>
               No records match your filters
-            </p>
+            </EmptyState>
           ) : (
             <div
               className={`divide-y ${
-                isDark ? "divide-slate-800/40" : "divide-slate-100"
+                isDark ? "divide-white/10" : "divide-zinc-100"
               }`}
             >
               {filtered.map((r: any) => {
@@ -228,7 +223,7 @@ export function MemoryPanel({ isDark }: { isDark: boolean }) {
                   <div
                     key={r.memoryId}
                     className={`px-5 py-3 cursor-pointer transition-colors ${
-                      isDark ? "hover:bg-slate-900/40" : "hover:bg-slate-50"
+                      isDark ? "hover:bg-white/5" : "hover:bg-zinc-50"
                     }`}
                     onClick={() =>
                       setExpandedId(isExpanded ? null : r.memoryId)
@@ -251,14 +246,14 @@ export function MemoryPanel({ isDark }: { isDark: boolean }) {
                       </span>
                       <span
                         className={`text-[10px] mono ml-auto ${
-                          isDark ? "text-slate-600" : "text-slate-400"
+                          mutedTextClass(isDark)
                         }`}
                       >
                         {(r.importance ?? 0).toFixed(2)}
                       </span>
                       <span
                         className={`text-[10px] mono ${
-                          isDark ? "text-slate-700" : "text-slate-300"
+                          isDark ? "text-zinc-600" : "text-zinc-300"
                         }`}
                       >
                         {r.accessCount ?? 0}x
@@ -285,7 +280,7 @@ export function MemoryPanel({ isDark }: { isDark: boolean }) {
                       <div className="mt-3 space-y-2 text-xs slide-down">
                         <div
                           className={`grid grid-cols-2 gap-x-6 gap-y-1 ${
-                            isDark ? "text-slate-500" : "text-slate-400"
+                            mutedTextClass(isDark)
                           }`}
                         >
                           <div>
@@ -338,6 +333,6 @@ export function MemoryPanel({ isDark }: { isDark: boolean }) {
           )}
         </div>
       )}
-    </div>
+    </PanelPage>
   );
 }

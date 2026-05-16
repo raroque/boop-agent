@@ -1,43 +1,50 @@
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
+import {
+  EmptyState,
+  HeaderPill,
+  PanelPage,
+  mutedTextClass,
+  panelCardClass,
+} from "./PanelPrimitives.js";
 
 const EVENT_COLOR: Record<string, string> = {
   "memory.written": "bg-emerald-500/20 text-emerald-400",
   "memory.recalled": "bg-sky-500/20 text-sky-400",
   "memory.extracted": "bg-violet-500/20 text-violet-400",
   "memory.consolidated": "bg-amber-500/20 text-amber-400",
-  "memory.cleaned": "bg-slate-500/20 text-slate-400",
+  "memory.cleaned": "bg-zinc-500/20 text-zinc-400",
 };
 
 export function EventsPanel({ isDark }: { isDark: boolean }) {
   const events = useQuery(api.memoryEvents.recent, { limit: 200 });
-
-  const card = isDark
-    ? "bg-slate-900/40 border-slate-800"
-    : "bg-white border-slate-200";
-  const row = isDark
-    ? "bg-slate-900/50 border-slate-800"
-    : "bg-slate-50 border-slate-200";
-  const muted = isDark ? "text-slate-500" : "text-slate-400";
+  const muted = mutedTextClass(isDark);
+  const list = events ?? [];
 
   return (
-    <div className={`rounded-lg border p-4 ${card}`}>
-      <h2 className={`text-xs uppercase tracking-wider mb-3 ${muted}`}>
-        Recent events
-      </h2>
+    <PanelPage
+      eyebrow="Memory stream"
+      title="Events"
+      description="Recent memory writes, recalls, extraction, cleanup, and consolidation activity."
+      stat={<HeaderPill isDark={isDark}>{list.length} events</HeaderPill>}
+    >
       {!events ? (
-        <div className={`py-6 text-center text-sm ${muted}`}>Loading…</div>
-      ) : events.length === 0 ? (
-        <div className={`py-6 text-center text-sm ${muted}`}>
-          No events yet. Chat with the agent to see memory events stream in.
+        <div className="space-y-2">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className={panelCardClass(isDark, "h-12 shimmer")} />
+          ))}
         </div>
+      ) : events.length === 0 ? (
+        <EmptyState isDark={isDark}>
+          No events yet. Chat with the agent to see memory events stream in.
+        </EmptyState>
       ) : (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           {events.map((e) => (
-            <div key={e._id} className={`border rounded-lg p-2.5 ${row}`}>
+            <div key={e._id} className={panelCardClass(isDark, "px-3 py-2.5")}>
               <div className="flex items-center gap-2 text-[10px] mono">
                 <span
-                  className={`px-1.5 py-0.5 rounded ${EVENT_COLOR[e.eventType] ?? "bg-slate-800/50 text-slate-400"}`}
+                  className={`rounded-full px-1.5 py-0.5 ${EVENT_COLOR[e.eventType] ?? "bg-zinc-500/10 text-zinc-400"}`}
                 >
                   {e.eventType}
                 </span>
@@ -50,7 +57,7 @@ export function EventsPanel({ isDark }: { isDark: boolean }) {
               </div>
               {e.data && (
                 <div
-                  className={`text-[11px] mono mt-1 break-all ${isDark ? "text-slate-400" : "text-slate-600"}`}
+                  className={`mt-1 break-all text-[11px] mono ${isDark ? "text-zinc-400" : "text-zinc-600"}`}
                 >
                   {e.data}
                 </div>
@@ -59,6 +66,6 @@ export function EventsPanel({ isDark }: { isDark: boolean }) {
           ))}
         </div>
       )}
-    </div>
+    </PanelPage>
   );
 }

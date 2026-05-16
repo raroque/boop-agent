@@ -67,9 +67,9 @@ const STATUS_COLORS: Record<string, { dot: string; label: string; badge: string 
     badge: "bg-rose-400/10 text-rose-500",
   },
   INACTIVE: {
-    dot: "bg-slate-500",
+    dot: "bg-zinc-500",
     label: "Inactive",
-    badge: "bg-slate-400/10 text-slate-500",
+    badge: "bg-zinc-400/10 text-zinc-500",
   },
 };
 
@@ -80,7 +80,7 @@ interface NeedsAuthConfigInfo {
 }
 
 // Per-toolkit guidance for BYO OAuth setup. Composio doesn't host a shared OAuth
-// app for these — the user has to register one on the toolkit's developer portal,
+// app for these; the user has to register one on the toolkit's developer portal,
 // then paste the credentials into Composio's auth-configs page. Adding entries
 // here makes the setup flow self-explanatory; missing entries fall back to a
 // generic message and the Composio link.
@@ -88,7 +88,7 @@ const BYO_PORTALS: Record<string, { label: string; url: string; note?: string }>
   twitter: {
     label: "X (Twitter) Developer Portal",
     url: "https://developer.x.com/en/portal/dashboard",
-    note: "Create a Project → App, then grab the OAuth 2.0 Client ID + Secret.",
+    note: "Create a Project and App, then grab the OAuth 2.0 Client ID + Secret.",
   },
   linkedin: {
     label: "LinkedIn Developer Portal",
@@ -96,7 +96,7 @@ const BYO_PORTALS: Record<string, { label: string; url: string; note?: string }>
     note: "Create an App, request the scopes you need, copy the Client ID + Secret.",
   },
   salesforce: {
-    label: "Salesforce — Connected Apps",
+    label: "Salesforce - Connected Apps",
     url: "https://help.salesforce.com/s/articleView?id=connected_app_create.htm",
     note: "Create a Connected App in your org's Setup, copy the Consumer Key + Secret.",
   },
@@ -127,12 +127,12 @@ function Toast({
       ? "bg-rose-500/10 border-rose-500/30 text-rose-200"
       : "bg-rose-50 border-rose-200 text-rose-900"
     : isDark
-      ? "bg-slate-800/80 border-slate-700 text-slate-200"
-      : "bg-white border-slate-200 text-slate-700";
+      ? "border-white/10 bg-[#202024] text-zinc-200"
+      : "border-zinc-200 bg-white text-zinc-700";
   return (
     <div
       role="status"
-      className={`fixed bottom-4 right-4 z-50 max-w-sm rounded-lg border px-3 py-2 text-xs shadow-lg fade-in ${tone}`}
+      className={`fixed bottom-4 right-4 z-50 max-w-sm rounded-2xl border px-3 py-2 text-xs shadow-lg fade-in ${tone}`}
     >
       <div className="flex items-start gap-3">
         <span className="flex-1 leading-snug">{toast.message}</span>
@@ -150,27 +150,24 @@ function Toast({
 function IntroCard({ isDark, onDismiss }: { isDark: boolean; onDismiss: () => void }) {
   return (
     <div
-      className={`rounded-xl border px-4 py-4 mb-4 ${
+      className={`rounded-2xl border px-4 py-4 ${
         isDark
-          ? "bg-sky-500/5 border-sky-500/20 text-slate-300"
-          : "bg-sky-50/60 border-sky-200 text-slate-700"
+          ? "border-white/10 bg-white/5 text-zinc-300"
+          : "border-zinc-200 bg-white text-zinc-600 shadow-sm shadow-zinc-200/50"
       }`}
     >
       <div className="flex items-start gap-3">
         <div className="flex-1 text-xs leading-relaxed">
-          <div className={`font-semibold mb-1 ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+          <div className={`mb-1 text-sm font-semibold ${isDark ? "text-zinc-100" : "text-zinc-900"}`}>
             Connect your accounts
           </div>
           <p className="mb-2">
-            Each connected toolkit becomes a tool the agent can use when you ask it for things —
-            "what's on my calendar?" needs Google Calendar, "summarize my last 5 emails" needs
-            Gmail. The agent only loads the toolkits a given task needs, so connecting more here
-            doesn't slow down anything.
+            Each connected toolkit becomes available to the agent when a task needs it.
           </p>
           <ul className="space-y-1">
             <li>
               <span
-                className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded mr-2 ${
+                className={`mr-2 inline-block rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
                   isDark ? "bg-emerald-400/10 text-emerald-400" : "bg-emerald-50 text-emerald-700"
                 }`}
               >
@@ -180,7 +177,7 @@ function IntroCard({ isDark, onDismiss }: { isDark: boolean; onDismiss: () => vo
             </li>
             <li>
               <span
-                className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded mr-2 ${
+                className={`mr-2 inline-block rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
                   isDark ? "bg-amber-400/10 text-amber-400" : "bg-amber-50 text-amber-700"
                 }`}
               >
@@ -193,8 +190,8 @@ function IntroCard({ isDark, onDismiss }: { isDark: boolean; onDismiss: () => vo
         </div>
         <button
           onClick={onDismiss}
-          className={`text-[11px] underline shrink-0 ${
-            isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"
+          className={`shrink-0 rounded-xl px-2 py-1 text-[11px] ${
+            isDark ? "text-zinc-500 hover:bg-white/5 hover:text-zinc-300" : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
           }`}
         >
           Hide
@@ -218,7 +215,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
     try {
       window.localStorage.setItem(INTRO_DISMISSED_KEY, "1");
     } catch {
-      /* ignore — private mode etc. */
+      /* ignore private mode, etc. */
     }
   }, []);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -248,7 +245,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
     },
     [],
   );
-  // OAuth popup polling interval — kept in a ref so we can clear it on unmount
+  // OAuth popup polling interval, kept in a ref so we can clear it on unmount
   // (prevents an orphan interval firing fetches after the panel closes).
   const authPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(
@@ -310,7 +307,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
           "composio-auth",
           `width=${w},height=${h},left=${left},top=${top}`,
         );
-        // Replace any prior poll (defensive — you'd have to spam Connect for this to matter).
+        // Replace any prior poll. You'd have to spam Connect for this to matter.
         if (authPollRef.current) clearInterval(authPollRef.current);
         authPollRef.current = setInterval(async () => {
           if (!popup || popup.closed) {
@@ -401,26 +398,28 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
     [expanded, toolsBySlug],
   );
 
-  const cardBg = isDark ? "bg-slate-900/50 border-slate-800" : "bg-white border-slate-200";
-  const muted = isDark ? "text-slate-500" : "text-slate-400";
+  const cardBg = isDark
+    ? "border-white/10 bg-[#202024] shadow-black/20"
+    : "border-zinc-200 bg-white shadow-zinc-200/50";
+  const muted = isDark ? "text-zinc-500" : "text-zinc-400";
 
   const activeCount =
     data?.toolkits.reduce((n, t) => n + t.connections.filter((c) => c.status === "ACTIVE").length, 0) ?? 0;
 
   return (
-    <section>
+    <section className="mx-auto max-w-[1040px] space-y-5 pb-10">
       <SectionHeader
-        title="Composio toolkits"
+        title="Connections"
         count={activeCount}
         isDark={isDark}
-        hint={data?.enabled === false ? "Disabled — set COMPOSIO_API_KEY in .env.local" : undefined}
+        hint={data?.enabled === false ? "Set COMPOSIO_API_KEY in .env.local" : undefined}
       />
 
       {showIntro && data?.enabled !== false && <IntroCard isDark={isDark} onDismiss={dismissIntro} />}
 
       {needsAuthConfig && (
         <div
-          className={`rounded-xl border px-4 py-4 mb-4 text-sm ${
+          className={`rounded-2xl border px-4 py-4 text-sm ${
             isDark
               ? "bg-amber-500/5 border-amber-500/30 text-amber-200"
               : "bg-amber-50 border-amber-200 text-amber-900"
@@ -440,13 +439,13 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
               href={needsAuthConfig.setupUrl}
               target="_blank"
               rel="noreferrer"
-              className="text-xs underline text-amber-700 dark:text-amber-300"
+              className="rounded-xl px-2 py-1 text-xs font-medium text-amber-700 underline dark:text-amber-300"
             >
-              Open Composio Auth Configs →
+              Open Composio Auth Configs
             </a>
             <button
               onClick={() => setNeedsAuthConfig(null)}
-              className={`text-xs underline ${isDark ? "text-slate-400" : "text-slate-500"}`}
+              className={`rounded-xl px-2 py-1 text-xs ${isDark ? "text-zinc-400 hover:bg-white/5" : "text-zinc-500 hover:bg-amber-100"}`}
             >
               Dismiss
             </button>
@@ -455,14 +454,14 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
       )}
 
       {data?.enabled === false ? (
-        <div className={`rounded-xl border px-4 py-6 text-sm ${cardBg} ${muted}`}>
+        <div className={`rounded-2xl border px-4 py-6 text-sm shadow-sm ${cardBg} ${muted}`}>
           Add <code>COMPOSIO_API_KEY</code> to <code>.env.local</code> and restart the server to
           connect integrations like Gmail, Slack, GitHub, Linear, Notion, and more. Get a key at{" "}
           <a
             href="https://app.composio.dev/developers?utm_source=chris&utm_medium=youtube&utm_campaign=collab"
             target="_blank"
             rel="noreferrer"
-            className="text-sky-500 underline"
+            className={isDark ? "text-zinc-200 underline" : "text-zinc-700 underline"}
           >
             app.composio.dev/developers
           </a>
@@ -471,7 +470,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
       ) : !loaded ? (
         <div className="grid gap-3">
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className={`h-20 rounded-xl border ${cardBg} shimmer`} />
+            <div key={i} className={`h-20 rounded-2xl border shadow-sm ${cardBg} shimmer`} />
           ))}
         </div>
       ) : (
@@ -486,7 +485,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
               {ready.length > 0 && (
                 <SubsectionGrid
                   label="Ready to connect"
-                  hint="Composio-managed OAuth — click Connect"
+                  hint="Composio-managed OAuth, click Connect"
                   isDark={isDark}
                 >
                   {ready.map((t) => (
@@ -510,7 +509,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
               {needsSetup.length > 0 && (
                 <SubsectionGrid
                   label="Needs one-time auth config"
-                  hint="Toolkit doesn't allow a shared OAuth app — bring your own"
+                  hint="Toolkit requires your own OAuth app"
                   isDark={isDark}
                 >
                   {needsSetup.map((t) => (
@@ -570,14 +569,14 @@ function ToolkitCard({
   const connectBusy = busy === t.slug;
 
   return (
-    <div className={`border rounded-xl px-4 py-3 fade-in ${cardBg}`}>
+    <div className={`rounded-2xl border px-4 py-3.5 shadow-sm fade-in ${cardBg}`}>
       <div className="flex items-center gap-4">
         <IntegrationLogo raw={t.slug} logoUrl={t.logoUrl ?? undefined} size={32} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span
               className={`text-sm font-medium ${
-                isDark ? "text-slate-200" : "text-slate-800"
+                isDark ? "text-zinc-100" : "text-zinc-900"
               }`}
             >
               {t.displayName}
@@ -586,16 +585,16 @@ function ToolkitCard({
             {t.authMode === "byo" && t.hasAuthConfig && !hasConnections && (
               <span
                 className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                  isDark ? "bg-sky-400/10 text-sky-400" : "bg-sky-50 text-sky-700"
+                  isDark ? "bg-zinc-100/10 text-zinc-300" : "bg-zinc-100 text-zinc-700"
                 }`}
               >
-                BYO — configured
+                BYO configured
               </span>
             )}
             {t.toolCount != null && t.toolCount > 0 && (
               <button
                 onClick={() => onToggleTools(t.slug)}
-                className={`text-[10px] mono underline ${muted} hover:text-sky-500`}
+                className={`rounded-lg px-1 py-0.5 text-[10px] mono ${muted} ${isDark ? "hover:bg-white/5 hover:text-zinc-200" : "hover:bg-zinc-100 hover:text-zinc-700"}`}
               >
                 {expanded ? "Hide" : "Show"} {t.toolCount} tools
               </button>
@@ -616,8 +615,14 @@ function ToolkitCard({
           <button
             onClick={() => onConnect(t.slug)}
             disabled={connectBusy}
-            className={`px-3 py-1.5 text-xs rounded-md transition-colors shrink-0 ${
-              connectBusy ? "bg-slate-600 text-slate-300" : "bg-sky-600 hover:bg-sky-500 text-white"
+            className={`shrink-0 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors ${
+              connectBusy
+                ? isDark
+                  ? "bg-zinc-700 text-zinc-400"
+                  : "bg-zinc-200 text-zinc-500"
+                : isDark
+                  ? "bg-zinc-100 text-zinc-950 hover:bg-white"
+                  : "bg-zinc-950 text-white hover:bg-zinc-800"
             }`}
           >
             {connectBusy ? "Connecting…" : "Connect"}
@@ -654,10 +659,10 @@ function ToolkitCard({
           <button
             onClick={() => onConnect(t.slug)}
             disabled={connectBusy}
-            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${
+            className={`rounded-xl px-2.5 py-1.5 text-xs transition-colors ${
               isDark
-                ? "border border-slate-700 text-slate-300 hover:bg-slate-800"
-                : "border border-slate-300 text-slate-600 hover:bg-slate-100"
+                ? "border border-white/10 text-zinc-300 hover:bg-white/5"
+                : "border border-zinc-200 text-zinc-600 hover:bg-zinc-100"
             } ${connectBusy ? "opacity-50" : ""}`}
           >
             {connectBusy ? "Connecting…" : "+ Add another account"}
@@ -731,10 +736,10 @@ function ConnectionRow({
 
   return (
     <div
-      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 ${
+      className={`flex items-center gap-2 rounded-xl px-2.5 py-1.5 ${
         isDark
-          ? "bg-slate-900/40 border border-slate-800/80"
-          : "bg-slate-50 border border-slate-200"
+          ? "border border-white/10 bg-[#17171a]"
+          : "border border-zinc-200 bg-zinc-50"
       }`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
@@ -762,14 +767,14 @@ function ConnectionRow({
           maxLength={50}
           disabled={saving}
           aria-label="Account label"
-          className={`text-xs font-medium px-1.5 py-0.5 rounded border outline-none w-40 ${
+          className={`w-40 rounded-lg border px-1.5 py-0.5 text-xs font-medium outline-none ${
             isDark
-              ? "bg-slate-950 border-sky-500/40 text-slate-100 focus:border-sky-400"
-              : "bg-white border-sky-300 text-slate-800 focus:border-sky-500"
+              ? "border-white/10 bg-black/20 text-zinc-100 focus:border-zinc-400"
+              : "border-zinc-200 bg-white text-zinc-800 focus:border-zinc-400"
           }`}
         />
       ) : (
-        <span className={`text-xs font-medium ${isDark ? "text-slate-200" : "text-slate-700"} truncate max-w-[18rem]`}>
+        <span className={`max-w-[18rem] truncate text-xs font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}>
           {primary}
         </span>
       )}
@@ -788,7 +793,7 @@ function ConnectionRow({
             onClick={() => void submit()}
             disabled={saving}
             className={`text-[11px] underline ${
-              isDark ? "text-sky-400 hover:text-sky-300" : "text-sky-600 hover:text-sky-700"
+              isDark ? "text-zinc-300 hover:text-white" : "text-zinc-700 hover:text-zinc-950"
             } disabled:opacity-50`}
           >
             {saving ? "Saving…" : "Save"}
@@ -805,7 +810,7 @@ function ConnectionRow({
       ) : (
         <button
           onClick={startEdit}
-          className={`text-[11px] underline ${muted} hover:text-sky-500`}
+          className={`rounded-lg px-1.5 py-0.5 text-[11px] ${muted} ${isDark ? "hover:bg-white/5 hover:text-zinc-200" : "hover:bg-zinc-100 hover:text-zinc-800"}`}
         >
           Rename
         </button>
@@ -813,10 +818,10 @@ function ConnectionRow({
       <button
         onClick={() => onDisconnect(slug, conn.id)}
         disabled={busy || editing}
-        className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
+        className={`rounded-lg px-2 py-0.5 text-[11px] transition-colors ${
           isDark
-            ? "bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-50"
-            : "bg-slate-200 hover:bg-slate-300 text-slate-700 disabled:opacity-50"
+            ? "bg-white/5 text-zinc-300 hover:bg-white/10 disabled:opacity-50"
+            : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300 disabled:opacity-50"
         }`}
       >
         {busy ? "…" : "Disconnect"}
@@ -837,46 +842,46 @@ function ByoSetupSteps({
   onConnect: (slug: string) => void;
 }) {
   const portal = BYO_PORTALS[slug];
-  const wrapClass = `mt-3 pt-3 border-t ${isDark ? "border-slate-800" : "border-slate-200"}`;
+  const wrapClass = `mt-3 border-t pt-3 ${isDark ? "border-white/10" : "border-zinc-200"}`;
   const linkClass = isDark
-    ? "text-sky-400 hover:text-sky-300 underline"
-    : "text-sky-600 hover:text-sky-700 underline";
+    ? "text-zinc-200 hover:text-white underline"
+    : "text-zinc-700 hover:text-zinc-950 underline";
   const stepNumberClass = `inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-semibold mr-2 shrink-0 ${
     isDark ? "bg-amber-400/15 text-amber-300" : "bg-amber-100 text-amber-800"
   }`;
   return (
     <div className={wrapClass}>
-      <div className={`text-[11px] font-medium mb-2 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+      <div className={`mb-2 text-[11px] font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
         One-time setup (~5 min):
       </div>
       <ol className="space-y-1.5">
-        <li className={`text-xs flex items-start ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+        <li className={`flex items-start text-xs ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
           <span className={stepNumberClass}>1</span>
           <span className="leading-snug">
             {portal ? (
               <>
                 Register an OAuth app at{" "}
                 <a href={portal.url} target="_blank" rel="noreferrer" className={linkClass}>
-                  {portal.label} ↗
+                  {portal.label}
                 </a>
                 {portal.note && <span className={`block text-[11px] mt-0.5 ${muted}`}>{portal.note}</span>}
               </>
             ) : (
-              <>Register an OAuth app on this toolkit's developer portal — copy the Client ID + Secret.</>
+              <>Register an OAuth app on this toolkit's developer portal and copy the Client ID + Secret.</>
             )}
           </span>
         </li>
-        <li className={`text-xs flex items-start ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+        <li className={`flex items-start text-xs ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
           <span className={stepNumberClass}>2</span>
           <span className="leading-snug">
             In{" "}
             <a href={COMPOSIO_DASHBOARD_URL} target="_blank" rel="noreferrer" className={linkClass}>
-              Composio Dashboard ↗
+              Composio Dashboard
             </a>
-            : Toolkits → search <span className="mono">{slug}</span> → Add to project → paste those credentials.
+            : Toolkits, search <span className="mono">{slug}</span>, Add to project, then paste those credentials.
           </span>
         </li>
-        <li className={`text-xs flex items-start ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+        <li className={`flex items-start text-xs ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
           <span className={stepNumberClass}>3</span>
           <span className="leading-snug">
             Come back here and{" "}
@@ -903,7 +908,7 @@ function ToolList({
   isDark: boolean;
   muted: string;
 }) {
-  const wrapClass = `mt-3 pt-3 border-t ${isDark ? "border-slate-800" : "border-slate-200"}`;
+  const wrapClass = `mt-3 border-t pt-3 ${isDark ? "border-white/10" : "border-zinc-200"}`;
   if (!tools || tools === "loading") {
     return <div className={`${wrapClass} text-xs ${muted}`}>Loading tools…</div>;
   }
@@ -919,7 +924,7 @@ function ToolList({
         {tools.map((tool) => (
           <div
             key={tool.slug}
-            className={`text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}
+            className={`text-xs ${isDark ? "text-zinc-300" : "text-zinc-600"}`}
           >
             <span className="mono">{tool.slug}</span>
             {tool.description && (
@@ -950,16 +955,16 @@ function SubsectionGrid({
 }) {
   return (
     <div>
-      <div className="flex items-baseline gap-2 mb-2">
+      <div className="mb-2 flex items-baseline gap-2">
         <h3
-          className={`text-[11px] font-semibold uppercase tracking-wider ${
-            isDark ? "text-slate-400" : "text-slate-500"
+          className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${
+            isDark ? "text-zinc-400" : "text-zinc-500"
           }`}
         >
           {label}
         </h3>
         {hint && (
-          <span className={`text-[10px] ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+          <span className={`text-[10px] ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>
             {hint}
           </span>
         )}
@@ -981,28 +986,40 @@ function SectionHeader({
   isDark: boolean;
 }) {
   return (
-    <div className="flex items-center gap-2 mb-3">
-      <h2
-        className={`text-xs font-semibold uppercase tracking-wider ${
-          isDark ? "text-slate-500" : "text-slate-400"
-        }`}
-      >
-        {title}
-      </h2>
-      {count > 0 && (
-        <span
-          className={`text-xs mono font-medium ${
-            isDark ? "text-slate-600" : "text-slate-300"
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0">
+        <div
+          className={`text-[11px] font-medium uppercase tracking-[0.08em] ${
+            isDark ? "text-zinc-500" : "text-zinc-400"
           }`}
         >
-          {count}
-        </span>
-      )}
-      {hint && (
-        <span className={`text-[10px] ${isDark ? "text-slate-600" : "text-slate-400"}`}>
-          {hint}
-        </span>
-      )}
+          Integrations
+        </div>
+        <h2
+          className={`mt-1 text-[22px] font-semibold tracking-normal ${
+            isDark ? "text-zinc-50" : "text-zinc-950"
+          }`}
+        >
+          {title}
+        </h2>
+        <p className={`mt-1 text-sm ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+          Connect accounts the agent can use for delegated work.
+        </p>
+        {hint && (
+          <p className={`mt-1 text-xs ${isDark ? "text-amber-300" : "text-amber-700"}`}>
+            {hint}
+          </p>
+        )}
+      </div>
+      <span
+        className={`inline-flex w-fit items-center rounded-2xl border px-2.5 py-1 text-xs mono ${
+          isDark
+            ? "border-white/10 bg-white/5 text-zinc-400"
+            : "border-zinc-200 bg-white text-zinc-500"
+        }`}
+      >
+        {count} active
+      </span>
     </div>
   );
 }

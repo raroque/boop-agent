@@ -2,6 +2,14 @@ import { useState, type ReactNode } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
 import { IntegrationLogo, BrailleIndicator, prettyToolName } from "../lib/branding.js";
+import {
+  EmptyState,
+  HeaderPill,
+  PanelPage,
+  mutedTextClass,
+  panelCardClass,
+  subtlePanelClass,
+} from "./PanelPrimitives.js";
 
 interface LogEntry {
   _id?: string;
@@ -37,7 +45,7 @@ const STATUS_CONFIG: Record<string, { dot: string; label: string; color: string 
   running: { dot: "bg-sky-400", label: "Running", color: "text-sky-400" },
   completed: { dot: "bg-emerald-400", label: "Done", color: "text-emerald-400" },
   failed: { dot: "bg-rose-400", label: "Failed", color: "text-rose-400" },
-  cancelled: { dot: "bg-slate-500", label: "Cancelled", color: "text-slate-500" },
+  cancelled: { dot: "bg-zinc-500", label: "Cancelled", color: "text-zinc-500" },
 };
 
 function plainPreview(value?: string | null, length = 160): string {
@@ -455,10 +463,7 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
     (a) => a.status === "running" || a.status === "spawned",
   ).length;
 
-  const cardBg = isDark
-    ? "bg-slate-900/40 border-slate-800/60"
-    : "bg-white border-slate-200";
-  const hoverBg = isDark ? "hover:bg-slate-800/40" : "hover:bg-slate-50";
+  const hoverBg = isDark ? "hover:bg-white/5" : "hover:bg-zinc-50";
 
   if (selected) {
     return (
@@ -471,65 +476,49 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
   }
 
   return (
-    <div className="flex flex-col h-full -m-5">
-      {/* Toolbar */}
-      <div
-        className={`shrink-0 border-b px-5 py-3 flex items-center gap-3 ${
-          isDark ? "border-slate-800" : "border-slate-200"
-        }`}
-      >
-        <h2
-          className={`text-xs font-semibold uppercase tracking-wider ${
-            isDark ? "text-slate-500" : "text-slate-400"
+    <PanelPage
+      eyebrow="Runs"
+      title="Agents"
+      description="Top-level and delegated agent runs, with live status and tool traces."
+      stat={<HeaderPill isDark={isDark}>{activeCount} active</HeaderPill>}
+      action={
+        <div
+          className={`segmented-control flex items-center rounded-2xl border p-1 ${
+            isDark ? "border-white/10 bg-[#17171a]" : "border-zinc-200 bg-zinc-100"
           }`}
         >
-          Agents
-        </h2>
-        {activeCount > 0 && (
-          <span className="flex items-center gap-1.5 text-xs text-sky-400 font-medium">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-sky-400 pulse-ring" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-400" />
-            </span>
-            {activeCount} active
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-1">
           {["all", "running", "completed", "failed"].map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
-              className={`px-2.5 py-1 text-xs rounded-md capitalize transition-colors ${
+              className={`segmented-button rounded-xl px-2.5 py-1 text-xs capitalize ${
                 statusFilter === s
                   ? isDark
-                    ? "bg-slate-700 text-white font-medium"
-                    : "bg-slate-200 text-slate-800 font-medium"
+                    ? "bg-zinc-100 text-zinc-950 shadow-sm"
+                    : "bg-white text-zinc-950 shadow-sm"
                   : isDark
-                    ? "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
-                    : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                    ? "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+                    : "text-zinc-500 hover:bg-white/70 hover:text-zinc-800"
               }`}
             >
               {s}
             </button>
           ))}
         </div>
-      </div>
+      }
+    >
 
-      <div className="flex-1 overflow-y-auto debug-scroll p-4 space-y-3">
+      <div className="space-y-3">
         {agents === undefined ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
-              <div key={i} className={`h-20 rounded-xl border ${cardBg} shimmer`} />
+              <div key={i} className={panelCardClass(isDark, "h-20 shimmer")} />
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <p
-            className={`text-sm py-8 text-center ${
-              isDark ? "text-slate-600" : "text-slate-400"
-            }`}
-          >
+          <EmptyState isDark={isDark}>
             {statusFilter !== "all" ? `No ${statusFilter} agents` : "No agents yet"}
-          </p>
+          </EmptyState>
         ) : (
           filtered.map((agent) => {
             const cfg = STATUS_CONFIG[agent.status] ?? STATUS_CONFIG.running;
@@ -544,7 +533,7 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
               <div
                 key={agent._id}
                 onClick={() => setSelected(agent.agentId)}
-                className={`border rounded-xl p-4 cursor-pointer transition-all duration-150 fade-in ${cardBg} ${hoverBg}`}
+                className={`${panelCardClass(isDark, "cursor-pointer px-4 py-3.5 transition-colors fade-in")} ${hoverBg}`}
               >
                 <div className="flex items-center gap-2.5 mb-1.5">
                   <span className="relative flex h-2.5 w-2.5 shrink-0">
@@ -559,7 +548,7 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
                   </span>
                   <span
                     className={`text-sm font-medium truncate ${
-                      isDark ? "text-slate-200" : "text-slate-800"
+                      isDark ? "text-zinc-100" : "text-zinc-900"
                     }`}
                   >
                     {agent.name}
@@ -574,7 +563,7 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
 
                 <p
                   className={`text-xs truncate mb-2 ${
-                    isDark ? "text-slate-500" : "text-slate-500"
+                    mutedTextClass(isDark)
                   }`}
                 >
                   {agent.status === "completed"
@@ -589,19 +578,19 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
                     {agent.costUsd > 0 && (
                       <span
                         className="text-emerald-500 font-semibold"
-                        title={estimatedCost ? "API-equivalent estimate from Codex tokens" : undefined}
+                        title={estimatedCost ? "API-equivalent estimate from hosted runtime tokens" : undefined}
                       >
                         {formatCostUsd(agent.costUsd, estimatedCost)}
                       </span>
                     )}
                     {totalTokens > 0 && (
                       <span
-                        className={isDark ? "text-slate-600" : "text-slate-400"}
+                        className={isDark ? "text-zinc-600" : "text-zinc-400"}
                       >
                         {(totalTokens / 1000).toFixed(1)}k tok
                       </span>
                     )}
-                    <span className={isDark ? "text-slate-600" : "text-slate-400"}>
+                    <span className={isDark ? "text-zinc-600" : "text-zinc-400"}>
                       {elapsed.toFixed(1)}s
                     </span>
                   </div>
@@ -619,7 +608,7 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
           })
         )}
       </div>
-    </div>
+    </PanelPage>
   );
 }
 
@@ -641,12 +630,8 @@ function AgentDetail({
 
   if (!agent) {
     return (
-      <div className="p-5">
-        <div
-          className={`h-20 rounded-xl shimmer ${
-            isDark ? "bg-slate-900/40" : "bg-slate-100"
-          }`}
-        />
+      <div className="mx-auto max-w-[1040px] pb-10">
+        <div className={panelCardClass(isDark, "h-20 shimmer")} />
       </div>
     );
   }
@@ -658,21 +643,17 @@ function AgentDetail({
   const timeline = logs ? buildTimeline(logs as LogEntry[]) : [];
 
   return (
-    <div className="flex flex-col h-full -m-5 fade-in">
-      <div
-        className={`shrink-0 border-b px-5 py-3 flex items-center gap-3 ${
-          isDark ? "border-slate-800" : "border-slate-200"
-        }`}
-      >
+    <div className="mx-auto max-w-[1040px] space-y-4 pb-10 fade-in">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={onBack}
-          className={`text-xs rounded-md px-2.5 py-1 transition-colors ${
+          className={`rounded-xl px-2.5 py-1.5 text-xs transition-colors ${
             isDark
-              ? "text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700"
-              : "text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200"
+              ? "bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-zinc-200"
+              : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-800"
           }`}
         >
-          ← Back
+          Back
         </button>
         <span className="relative flex h-2.5 w-2.5">
           {isActive && (
@@ -686,7 +667,7 @@ function AgentDetail({
         </span>
         <span
           className={`text-sm font-medium ${
-            isDark ? "text-slate-200" : "text-slate-800"
+            isDark ? "text-zinc-100" : "text-zinc-900"
           }`}
         >
           {agent.name}
@@ -696,7 +677,7 @@ function AgentDetail({
           {agent.costUsd > 0 && (
             <span
               className="text-emerald-500 font-semibold"
-              title={estimatedCost ? "API-equivalent estimate from Codex tokens" : undefined}
+              title={estimatedCost ? "API-equivalent estimate from hosted runtime tokens" : undefined}
             >
               {formatCostUsd(agent.costUsd, estimatedCost)}
             </span>
@@ -709,13 +690,9 @@ function AgentDetail({
         </div>
       </div>
 
-      <div className="shrink-0 p-4 pb-2">
+      <div>
         <div
-          className={`rounded-xl border shadow-lg px-4 py-3 ${
-            isDark
-              ? "bg-slate-900/90 border-sky-800/40"
-              : "bg-white border-sky-200"
-          }`}
+          className={panelCardClass(isDark, "px-4 py-3")}
         >
           <button
             onClick={() => setRequestOpen(!requestOpen)}
@@ -755,17 +732,13 @@ function AgentDetail({
       </div>
 
       {agent.mcpServers.length > 0 && (
-        <div className="shrink-0 px-4 pb-2">
+        <div>
           <div
-            className={`rounded-xl border px-4 py-2.5 ${
-              isDark
-                ? "bg-slate-900/60 border-slate-800/60"
-                : "bg-slate-50 border-slate-200"
-            }`}
+            className={panelCardClass(isDark, "px-4 py-2.5")}
           >
             <span
               className={`text-[10px] font-bold mono tracking-wider ${
-                isDark ? "text-slate-500" : "text-slate-400"
+                mutedTextClass(isDark)
               }`}
             >
               INTEGRATIONS
@@ -776,8 +749,8 @@ function AgentDetail({
                   key={name}
                   className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium ${
                     isDark
-                      ? "bg-slate-800 text-slate-300"
-                      : "bg-white text-slate-600 border border-slate-200"
+                      ? "bg-white/5 text-zinc-300"
+                      : "bg-white text-zinc-600 border border-zinc-200"
                   }`}
                 >
                   <IntegrationLogo raw={name} size={14} />
@@ -789,15 +762,13 @@ function AgentDetail({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto debug-scroll p-5">
+      <div className={panelCardClass(isDark, "p-5")}>
         {logs === undefined ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
               <div
                 key={i}
-                className={`h-8 rounded shimmer ${
-                  isDark ? "bg-slate-900/30" : "bg-slate-100"
-                }`}
+                className={subtlePanelClass(isDark, "h-8 shimmer")}
               />
             ))}
           </div>
@@ -837,13 +808,9 @@ function AgentDetail({
       </div>
 
       {agent.status === "completed" && agent.result && (
-        <div className="sticky bottom-0 p-4 pt-2">
+        <div className="sticky bottom-0 pt-2">
           <div
-            className={`rounded-xl border shadow-lg px-4 py-3 ${
-              isDark
-                ? "bg-slate-900/90 border-emerald-800/40"
-                : "bg-white border-emerald-200"
-            }`}
+            className={panelCardClass(isDark, "px-4 py-3")}
           >
             <button
               onClick={() => setResponseOpen(!responseOpen)}
@@ -880,13 +847,9 @@ function AgentDetail({
       )}
 
       {agent.status === "failed" && agent.error && (
-        <div className="sticky bottom-0 p-4 pt-2">
+        <div className="sticky bottom-0 pt-2">
           <div
-            className={`rounded-xl border shadow-lg px-4 py-3 ${
-              isDark
-                ? "bg-slate-900/90 border-rose-800/40"
-                : "bg-white border-rose-200"
-            }`}
+            className={panelCardClass(isDark, "px-4 py-3")}
           >
             <span className="text-[10px] font-bold mono tracking-wider text-rose-500">
               ERROR

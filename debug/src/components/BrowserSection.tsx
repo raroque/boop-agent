@@ -18,6 +18,7 @@ import {
   PlayIcon,
 } from "@hugeicons/core-free-icons";
 import { api } from "../../../convex/_generated/api.js";
+import { panelCardClass, subtlePanelClass } from "./PanelPrimitives.js";
 
 interface BrowserSettings {
   enabled: boolean;
@@ -144,10 +145,9 @@ export function BrowserSection({ isDark }: { isDark: boolean }) {
     }
   }
 
-  const muted = isDark ? "text-slate-400" : "text-slate-600";
-  const subtle = isDark ? "text-slate-500" : "text-slate-400";
-  const label = isDark ? "text-slate-200" : "text-slate-800";
-  const surface = isDark ? "bg-slate-900/40 border-slate-800/60" : "bg-white border-slate-200";
+  const muted = isDark ? "text-zinc-400" : "text-zinc-500";
+  const subtle = isDark ? "text-zinc-500" : "text-zinc-400";
+  const label = isDark ? "text-zinc-50" : "text-zinc-950";
   const running = status?.running ?? false;
   const settings = status?.settings;
   const launchedAt = status?.launchedAt
@@ -155,12 +155,12 @@ export function BrowserSection({ isDark }: { isDark: boolean }) {
     : null;
 
   return (
-    <section className={`border rounded-xl fade-in overflow-hidden ${surface}`}>
+    <section className={panelCardClass(isDark, "fade-in overflow-hidden")}>
       <div className="px-4 py-4 flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0">
           <span
-            className={`h-10 w-10 rounded-lg inline-flex items-center justify-center shrink-0 ${
-              isDark ? "bg-slate-950/60 text-sky-300" : "bg-sky-50 text-sky-700"
+            className={`h-10 w-10 rounded-xl inline-flex items-center justify-center shrink-0 ${
+              isDark ? "bg-white/5 text-zinc-300" : "bg-zinc-100 text-zinc-700"
             }`}
           >
             <HugeiconsIcon icon={ChromeIcon} size={20} strokeWidth={1.8} />
@@ -193,12 +193,8 @@ export function BrowserSection({ isDark }: { isDark: boolean }) {
       </div>
 
       {!enabled ? (
-        <div className={`border-t px-4 py-4 ${isDark ? "border-slate-800/70" : "border-slate-200"}`}>
-          <div
-            className={`rounded-lg px-3 py-3 text-xs leading-relaxed ${
-              isDark ? "bg-slate-950/35 text-slate-400" : "bg-slate-50 text-slate-600"
-            }`}
-          >
+        <div className={`border-t px-4 py-4 ${isDark ? "border-white/10" : "border-zinc-200"}`}>
+          <div className={subtlePanelClass(isDark, "px-3 py-3 text-xs leading-relaxed text-zinc-500")}>
             Off by default. Agents will not see or use the local browser integration until this is
             enabled. Patchright Chrome is installed only when you use the install control below
             after enabling it.
@@ -206,7 +202,7 @@ export function BrowserSection({ isDark }: { isDark: boolean }) {
           {message && <MessageLine message={message} isDark={isDark} />}
         </div>
       ) : (
-        <div className={`border-t p-4 space-y-5 slide-down ${isDark ? "border-slate-800/70" : "border-slate-200"}`}>
+        <div className={`border-t p-4 space-y-5 slide-down ${isDark ? "border-white/10" : "border-zinc-200"}`}>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
             <StatusMetric
               label="Window"
@@ -235,11 +231,7 @@ export function BrowserSection({ isDark }: { isDark: boolean }) {
           </div>
 
           {status?.activeUrl && (
-            <div
-              className={`rounded-lg px-3 py-2 text-[11px] mono truncate ${
-                isDark ? "bg-slate-950/35 text-slate-400" : "bg-slate-50 text-slate-600"
-              }`}
-            >
+            <div className={subtlePanelClass(isDark, "px-3 py-2 text-[11px] mono truncate text-zinc-500")}>
               active: {status.activeUrl}
             </div>
           )}
@@ -320,13 +312,13 @@ export function BrowserSection({ isDark }: { isDark: boolean }) {
             </div>
           </BrowserGroup>
 
-          <div className={`border-t pt-4 ${isDark ? "border-slate-800/70" : "border-slate-200"}`}>
+          <div className={`border-t pt-4 ${isDark ? "border-white/10" : "border-zinc-200"}`}>
             <button
               type="button"
               onClick={() => setAdvancedOpen((value) => !value)}
               aria-expanded={advancedOpen}
               className={`w-full flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
-                isDark ? "hover:bg-slate-950/35" : "hover:bg-slate-50"
+                isDark ? "hover:bg-white/5" : "hover:bg-zinc-50"
               }`}
             >
               <span className="flex items-center gap-2 min-w-0">
@@ -334,7 +326,7 @@ export function BrowserSection({ isDark }: { isDark: boolean }) {
                   icon={ComputerSettingsIcon}
                   size={16}
                   strokeWidth={1.8}
-                  className={isDark ? "text-sky-300" : "text-sky-700"}
+                  className={isDark ? "text-zinc-400" : "text-zinc-500"}
                 />
                 <span>
                   <span className={`block text-xs font-semibold uppercase tracking-wider ${label}`}>
@@ -458,11 +450,11 @@ function StatusPill({
             ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
             : "border-emerald-200 bg-emerald-50 text-emerald-700"
           : isDark
-            ? "border-slate-800 bg-slate-950/40 text-slate-400"
-            : "border-slate-200 bg-slate-50 text-slate-500"
+            ? "border-white/10 bg-white/5 text-zinc-400"
+            : "border-zinc-200 bg-zinc-50 text-zinc-500"
       }`}
     >
-      <span className={`h-2 w-2 rounded-full ${running ? "bg-emerald-400" : "bg-slate-500"}`} />
+      <span className={`h-2 w-2 rounded-full ${running ? "bg-emerald-400" : "bg-zinc-400"}`} />
       {running ? `Running${launchedAt ? ` since ${launchedAt}` : ""}` : "Stopped"}
     </span>
   );
@@ -482,20 +474,20 @@ function StatusMetric({
   return (
     <div
       className={`rounded-lg px-3 py-2.5 flex items-center gap-2 min-w-0 ${
-        isDark ? "bg-slate-950/35" : "bg-slate-50"
+        isDark ? "bg-white/5" : "bg-zinc-50"
       }`}
     >
       <HugeiconsIcon
         icon={icon}
         size={16}
         strokeWidth={1.8}
-        className={isDark ? "text-slate-500" : "text-slate-400"}
+        className={isDark ? "text-zinc-500" : "text-zinc-400"}
       />
       <div className="min-w-0">
-        <div className={`text-[10px] uppercase tracking-wider ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+        <div className={`text-[10px] uppercase tracking-wider ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
           {label}
         </div>
-        <div className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+        <div className={`text-xs truncate ${isDark ? "text-zinc-200" : "text-zinc-700"}`}>
           {value}
         </div>
       </div>
@@ -517,19 +509,19 @@ function BrowserGroup({
   children: ReactNode;
 }) {
   return (
-    <div className={`border-t pt-4 ${isDark ? "border-slate-800/70" : "border-slate-200"}`}>
+    <div className={`border-t pt-4 ${isDark ? "border-white/10" : "border-zinc-200"}`}>
       <div className="flex items-start gap-2 mb-3">
         <HugeiconsIcon
           icon={icon}
           size={16}
           strokeWidth={1.8}
-          className={isDark ? "text-sky-300" : "text-sky-700"}
+          className={isDark ? "text-zinc-400" : "text-zinc-500"}
         />
         <div>
-          <div className={`text-xs font-semibold uppercase tracking-wider ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+          <div className={`text-xs font-semibold uppercase tracking-wider ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
             {title}
           </div>
-          <div className={`text-[11px] mt-0.5 leading-relaxed ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+          <div className="text-[11px] mt-0.5 leading-relaxed text-zinc-500">
             {description}
           </div>
         </div>
@@ -560,13 +552,13 @@ function BrowserToggle({
   return (
     <div className={rowPanelClass(isDark)}>
       <div className="min-w-0">
-        <div className={`text-xs font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+        <div className={`text-xs font-medium ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>
           {label}
         </div>
-        <div className={`text-[11px] mt-1 leading-relaxed ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+        <div className={`text-[11px] mt-1 leading-relaxed ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
           {description}
         </div>
-        <div className={`text-[10px] mono mt-1.5 ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+        <div className={`text-[10px] mono mt-1.5 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
           {value === undefined
             ? `${settingKey} = ...`
             : value === null
@@ -638,7 +630,7 @@ function BrowserTextSetting({
 
   return (
     <label className="flex flex-col gap-1.5 min-w-0">
-      <span className={`text-[10px] uppercase tracking-wider ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+      <span className={`text-[10px] uppercase tracking-wider ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
         {label}
       </span>
       <div className="flex flex-col sm:flex-row gap-2 min-w-0">
@@ -682,7 +674,7 @@ function BrowserTextSetting({
           {saving ? "Saving..." : "Save"}
         </BrowserButton>
       </div>
-      <span className={`text-[10px] mono truncate ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+      <span className={`text-[10px] mono truncate ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
         {value === undefined
           ? `${settingKey} = ...`
           : value === null
@@ -725,8 +717,8 @@ function SwitchButton({
         checked
           ? "bg-emerald-500 focus:ring-emerald-500/40"
           : isDark
-            ? "bg-slate-700 focus:ring-slate-500/40"
-            : "bg-slate-300 focus:ring-slate-400/40"
+            ? "bg-zinc-700 focus:ring-zinc-500/40"
+            : "bg-zinc-300 focus:ring-zinc-400/40"
       }`}
     >
       <span
@@ -760,8 +752,8 @@ function BrowserButton({
       disabled={disabled}
       className={`inline-flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-md border transition disabled:opacity-50 ${
         isDark
-          ? "border-slate-700 bg-slate-950/20 hover:bg-slate-800 text-slate-200"
-          : "border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
+          ? "border-white/10 bg-white/5 hover:bg-white/10 text-zinc-200"
+          : "border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700"
       } ${className}`}
     >
       {icon && <HugeiconsIcon icon={icon} size={14} strokeWidth={1.8} />}
@@ -774,13 +766,13 @@ function inputClass(isDark: boolean, extra = "") {
   const sizing = extra || "w-full";
   return `min-w-0 text-xs px-3 py-1.5 rounded-md border outline-none focus:ring-2 ${
     isDark
-      ? "bg-slate-950/40 border-slate-700 text-slate-200 placeholder-slate-600 focus:ring-sky-500/30"
-      : "bg-white border-slate-300 text-slate-800 placeholder-slate-400 focus:ring-sky-500/20"
+      ? "bg-white/5 border-white/10 text-zinc-200 placeholder-zinc-600 focus:ring-zinc-500/30"
+      : "bg-white border-zinc-200 text-zinc-800 placeholder-zinc-400 focus:ring-zinc-500/20"
   } ${sizing}`;
 }
 
 function rowPanelClass(isDark: boolean) {
   return `flex items-start justify-between gap-3 rounded-lg px-3 py-3 ${
-    isDark ? "bg-slate-950/35" : "bg-slate-50"
+    isDark ? "bg-white/5" : "bg-zinc-50"
   }`;
 }
