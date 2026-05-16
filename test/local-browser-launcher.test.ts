@@ -1,3 +1,4 @@
+import { rmSync, statSync } from "node:fs";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -59,9 +60,12 @@ import { closeLocalBrowser, launchLocalBrowser } from "../server/browser/launche
 describe("local browser launcher lifecycle", () => {
   afterAll(async () => {
     await closeLocalBrowser();
+    rmSync(mocks.settings.profileDir, { recursive: true, force: true });
   });
 
   it("honors close requests that arrive while Chrome is still launching", async () => {
+    rmSync(mocks.settings.profileDir, { recursive: true, force: true });
+
     const launch = launchLocalBrowser({ url: "https://example.com" });
 
     await vi.waitFor(() => {
@@ -78,6 +82,7 @@ describe("local browser launcher lifecycle", () => {
       running: true,
       url: "https://example.com/",
     });
+    expect(statSync(mocks.settings.profileDir).mode & 0o777).toBe(0o700);
     await close;
 
     expect(mocks.context.close).toHaveBeenCalledTimes(1);
