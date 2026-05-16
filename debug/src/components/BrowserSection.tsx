@@ -79,6 +79,7 @@ export function BrowserSection({ isDark }: { isDark: boolean }) {
   const storedEnabled = useQuery(api.settings.get, { key: ENABLED_KEY });
   const startUrl = useQuery(api.settings.get, { key: START_URL_KEY });
   const [launchUrl, setLaunchUrl] = useState("");
+  const [launchUrlFocused, setLaunchUrlFocused] = useState(false);
   const launchUrlInitialized = useRef(false);
   const setSetting = useMutation(api.settings.set);
 
@@ -104,10 +105,14 @@ export function BrowserSection({ isDark }: { isDark: boolean }) {
   }, [refresh]);
 
   useEffect(() => {
-    if (launchUrlInitialized.current || startUrl === undefined) return;
-    launchUrlInitialized.current = true;
-    if (startUrl) setLaunchUrl(startUrl);
-  }, [startUrl]);
+    if (startUrl === undefined) return;
+    if (!launchUrlInitialized.current) {
+      launchUrlInitialized.current = true;
+      if (startUrl) setLaunchUrl(startUrl);
+      return;
+    }
+    if (!launchUrlFocused) setLaunchUrl(startUrl ?? "");
+  }, [launchUrlFocused, startUrl]);
 
   async function setLocalBrowserEnabled(nextEnabled: boolean) {
     setBusy("Enable");
@@ -293,6 +298,8 @@ export function BrowserSection({ isDark }: { isDark: boolean }) {
                 type="url"
                 value={launchUrl}
                 onChange={(event) => setLaunchUrl(event.target.value)}
+                onFocus={() => setLaunchUrlFocused(true)}
+                onBlur={() => setLaunchUrlFocused(false)}
                 placeholder="URL to open now"
                 className={inputClass(isDark, "w-full")}
               />

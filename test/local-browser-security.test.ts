@@ -66,6 +66,20 @@ describe("local browser security hygiene", () => {
     ]);
   });
 
+  it("drops high-risk browser extra args", () => {
+    expect(
+      parseExtraArgs(
+        [
+          "--disable-gpu",
+          "--remote-debugging-port=9222",
+          "--disable-web-security",
+          "--load-extension=/tmp/example",
+          "--proxy-server=http://127.0.0.1:8080",
+        ].join("\n"),
+      ),
+    ).toEqual(["--disable-gpu", "--proxy-server=http://127.0.0.1:8080"]);
+  });
+
   it("parses environment browser extra args with shell-style spacing", () => {
     expect(
       parseEnvExtraArgs("--disable-gpu --no-sandbox\n--disable-dev-shm-usage"),

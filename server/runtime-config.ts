@@ -42,6 +42,17 @@ export interface BrowserSettings {
 
 const DEFAULT_BROWSER_PROFILE_DIR = join(homedir(), ".boop", "browser-profile");
 const DEFAULT_BROWSER_CHANNEL = "chrome";
+const BLOCKED_BROWSER_EXTRA_ARGS = new Set([
+  "--allow-running-insecure-content",
+  "--disable-extensions-except",
+  "--disable-web-security",
+  "--load-extension",
+  "--remote-allow-origins",
+  "--remote-debugging-address",
+  "--remote-debugging-port",
+  "--unsafely-treat-insecure-origin-as-secure",
+  "--user-data-dir",
+]);
 
 export const RUNTIME_ALIASES: Record<string, RuntimeName> = {
   anthropic: "claude",
@@ -171,7 +182,11 @@ export function parseExtraArgs(input: string | null): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .filter((line) => line.startsWith("--"));
+    .filter((line) => {
+      if (!line.startsWith("--")) return false;
+      const [flagName] = line.toLowerCase().split(/[=\s]/, 1);
+      return !BLOCKED_BROWSER_EXTRA_ARGS.has(flagName);
+    });
 }
 
 export function parseEnvExtraArgs(input: string | undefined): string[] {
