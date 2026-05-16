@@ -31,7 +31,7 @@ function repoFromRemote(remote: string | null): string | null {
   return match?.[1] ?? null;
 }
 
-function getOriginRepo(): string {
+function getOriginRepo(): string | null {
   if (process.env.BOOP_GITHUB_REPO) return process.env.BOOP_GITHUB_REPO;
   try {
     const remote = execFileSync("git", ["remote", "get-url", "origin"], {
@@ -39,11 +39,9 @@ function getOriginRepo(): string {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    const repo = repoFromRemote(remote);
-    if (!repo) throw new Error("Origin remote is not a GitHub repository");
-    return repo;
+    return repoFromRemote(remote);
   } catch {
-    throw new Error("Set BOOP_GITHUB_REPO or configure a GitHub origin remote");
+    return null;
   }
 }
 
@@ -116,8 +114,22 @@ async function loadChangelog(): Promise<ChangelogPayload> {
   const repo = getOriginRepo();
   const branch = process.env.BOOP_GITHUB_BRANCH ?? DEFAULT_BRANCH;
   const version = await getPackageVersion();
-  const rawUrl = `https://raw.githubusercontent.com/${repo}/${branch}/CHANGELOG.md`;
   const fetchedAt = new Date().toISOString();
+
+  if (!repo) {
+    return {
+      repo: "local",
+      branch,
+      version,
+      source: "local-changelog",
+      url: null,
+      fetchedAt,
+      markdown: await localChangelog(),
+      warning: "GitHub repository unavailable; using local changelog.",
+    };
+  }
+
+  const rawUrl = `https://raw.githubusercontent.com/${repo}/${branch}/CHANGELOG.md`;
 
   try {
     return {

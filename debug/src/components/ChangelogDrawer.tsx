@@ -227,6 +227,7 @@ export function ChangelogDrawer({ open, onClose, isDark }: ChangelogDrawerProps)
       <button
         aria-label="Close changelog"
         onClick={onClose}
+        tabIndex={-1}
         className="absolute inset-0 z-30 cursor-default bg-black/10 opacity-0"
       />
       <aside

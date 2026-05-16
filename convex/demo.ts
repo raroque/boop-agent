@@ -1251,7 +1251,18 @@ export const setMode = mutation({
     const removed = await deleteDemoRows(ctx);
     const seeded = args.enabled ? await seedDemoData(ctx) : null;
     await setDemoSetting(ctx, args.enabled);
-    const counts = await demoCounts(ctx);
+    const counts: DemoCounts = seeded ?? {
+      conversations: 0,
+      messages: 0,
+      agents: 0,
+      agentLogs: 0,
+      memories: 0,
+      memoryEvents: 0,
+      automations: 0,
+      automationRuns: 0,
+      consolidationRuns: 0,
+      usageRecords: 0,
+    };
     return {
       enabled: args.enabled,
       removed,
