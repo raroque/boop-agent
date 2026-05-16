@@ -16,6 +16,7 @@ import { createComposioRouter } from "./composio-routes.js";
 import { ensureProactiveWatcher } from "./proactive-email.js";
 import { preloadLocalModel } from "./embeddings.js";
 import { createMemoryRouter } from "./memory-routes.js";
+import { createChangelogRouter } from "./changelog.js";
 import {
   getRuntimeConfig,
   resolveModelInput,
@@ -108,7 +109,7 @@ async function main() {
         const effort = resolveReasoningEffortInput(String(body.reasoningEffort));
         if (!effort) {
           res.status(400).json({
-            error: `Unknown Codex reasoning effort "${String(body.reasoningEffort)}"`,
+            error: `Unknown reasoning effort "${String(body.reasoningEffort)}"`,
           });
           return;
         }
@@ -124,6 +125,7 @@ async function main() {
   app.use("/sendblue", createSendblueRouter());
   app.use("/composio", createComposioRouter());
   app.use("/memory", createMemoryRouter());
+  app.use("/changelog", createChangelogRouter());
 
   app.post("/agents/:id/cancel", (req, res) => {
     const ok = cancelAgent(req.params.id);

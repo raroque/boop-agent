@@ -99,7 +99,7 @@ export default function MemoryGraphView({
     return (
       <div
         className={`flex items-center justify-center h-full text-sm ${
-          isDark ? "text-slate-600" : "text-slate-400"
+          isDark ? "text-zinc-600" : "text-zinc-400"
         }`}
       >
         No memories yet. Chat with the agent to build your graph.
@@ -112,7 +112,7 @@ export default function MemoryGraphView({
       <ForceGraph2D
         ref={fgRef}
         graphData={graph}
-        backgroundColor={isDark ? "#020617" : "#f8fafc"}
+        backgroundColor={isDark ? "#202024" : "#ffffff"}
         nodeRelSize={4}
         linkColor={() => (isDark ? "rgba(148,163,184,0.15)" : "rgba(15,23,42,0.15)")}
         linkWidth={1}
@@ -136,7 +136,7 @@ export default function MemoryGraphView({
             ctx.fill();
             ctx.globalAlpha = 1;
             ctx.fillStyle = "#ffffff";
-            ctx.font = `bold ${Math.max(10, 12 / globalScale)}px ui-sans-serif, system-ui`;
+            ctx.font = `bold ${Math.max(10, 12 / globalScale)}px Geist, ui-sans-serif, system-ui`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
             ctx.fillText(node.label, node.x, node.y);
@@ -149,8 +149,8 @@ export default function MemoryGraphView({
             ctx.fill();
             ctx.globalAlpha = 1;
             if (globalScale > 1.5) {
-              ctx.fillStyle = isDark ? "rgba(226,232,240,0.9)" : "rgba(30,41,59,0.9)";
-              ctx.font = `${10 / globalScale}px ui-sans-serif, system-ui`;
+              ctx.fillStyle = isDark ? "rgba(244,244,245,0.9)" : "rgba(39,39,42,0.9)";
+              ctx.font = `${10 / globalScale}px Geist, ui-sans-serif, system-ui`;
               ctx.textAlign = "center";
               ctx.textBaseline = "top";
               ctx.fillText(node.label.slice(0, 40), node.x, node.y + radius + 2);
