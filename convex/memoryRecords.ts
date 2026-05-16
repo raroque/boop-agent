@@ -27,7 +27,7 @@ export const upsert = mutation({
     supersedes: v.optional(v.array(v.string())),
     embedding: v.optional(v.array(v.float64())),
     metadata: v.optional(v.string()),
-    imageStorageIds: v.optional(v.array(v.id("_storage"))),
+    imageStorageIds: v.optional(v.union(v.array(v.id("_storage")), v.null())),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -64,9 +64,11 @@ export const upsert = mutation({
         embedding: args.embedding ?? existing.embedding,
         metadata: args.metadata ?? existing.metadata,
         imageStorageIds:
-          args.imageStorageIds && args.imageStorageIds.length > 0
-            ? args.imageStorageIds
-            : existing.imageStorageIds,
+          args.imageStorageIds === null
+            ? undefined
+            : args.imageStorageIds && args.imageStorageIds.length > 0
+              ? args.imageStorageIds
+              : existing.imageStorageIds,
         lastAccessedAt: now,
       });
       return existing._id;

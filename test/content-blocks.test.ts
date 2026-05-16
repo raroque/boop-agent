@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   buildPromptWithImages,
   buildPromptWithImagesOrTextFallback,
+  readCappedImageBytes,
 } from "../server/images/content-blocks.js";
+import { MAX_IMAGE_BYTES } from "../server/images/mime.js";
 
 const fakeFetch = (mapping: Record<string, { bytes: Buffer; mediaType: string }>) =>
   async (id: string) => {
@@ -97,5 +99,18 @@ describe("buildPromptWithImages", () => {
     expect(res.imageError).toBe("storage unavailable");
     expect(res.prompt).toContain("couldn't retrieve the stored image bytes");
     expect(res.prompt).toContain("can you inspect this?");
+  });
+
+  it("reads stored image responses with a streaming size cap", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_IMAGE_BYTES));
+        controller.enqueue(new Uint8Array(1));
+      },
+    });
+
+    await expect(readCappedImageBytes(new Response(stream))).rejects.toThrow(
+      /stored image too large/,
+    );
   });
 });

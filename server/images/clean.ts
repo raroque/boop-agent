@@ -118,7 +118,7 @@ export async function runImageCleanup(): Promise<{ deleted: number; kept: number
           }
         }
         if (failedRefs > 0) {
-          kept += failedRefs;
+          kept += refs.length;
           return;
         }
         try {

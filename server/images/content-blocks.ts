@@ -37,6 +37,32 @@ function textOnlyImageFallback(text: string): string {
   return `[user sent images, but Boop couldn't retrieve the stored image bytes. Continue using the text-only message; if image details are necessary, say the image could not be inspected.]\n${text}`;
 }
 
+export async function readCappedImageBytes(res: Response): Promise<Buffer> {
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("stored image fetch returned no body");
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_IMAGE_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`stored image too large: >${MAX_IMAGE_BYTES} bytes`);
+    }
+    chunks.push(value);
+  }
+
+  const bytes = Buffer.allocUnsafe(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 export async function buildPromptWithImages(
   args: BuildPromptArgs,
 ): Promise<PromptInput> {
@@ -94,9 +120,6 @@ export async function fetchStoredBytes(storageId: string): Promise<ImageBytes> {
     contentLength: lenHeader ? Number(lenHeader) : undefined,
   });
   if (!check.ok) throw new Error(`stored image rejected: ${check.reason}`);
-  const bytes = Buffer.from(await res.arrayBuffer());
-  if (bytes.byteLength > MAX_IMAGE_BYTES) {
-    throw new Error(`stored image too large: ${bytes.byteLength} bytes`);
-  }
+  const bytes = await readCappedImageBytes(res);
   return { bytes, mediaType: check.mediaType };
 }
