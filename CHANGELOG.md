@@ -8,6 +8,10 @@ Format:
 
 ---
 
+## Unreleased — Social Composio connectors
+
+- Added: Instagram and YouTube to the default Composio connector catalog.
+
 ## Unreleased — MMS image viewing + cross-runtime image spawning
 
 - Added: optional local browser use via a Patchright-backed persistent Chrome profile. It is off by default and agents do not see or use the `browser` integration until the user enables "Local browser use" in Settings. Once enabled, it is available as a fallback for login-only services, JS-heavy/visual workflows, and bot-wall-sensitive pages, with a manual login handoff tool that opens visible Chrome and tells the user: "I need you to log in first. I’ve spawned an instance on your machine."
