@@ -61,6 +61,8 @@ const TOOL_BRANDS: ToolBrand[] = [
   { key: "discord", displayName: "Discord", domain: "discord.com", aliases: ["discord"] },
   { key: "twitter", displayName: "Twitter", domain: "twitter.com", aliases: ["twitter", "x"] },
   { key: "linkedin", displayName: "LinkedIn", domain: "linkedin.com", aliases: ["linkedin"] },
+  { key: "instagram", displayName: "Instagram", domain: "instagram.com", aliases: ["instagram"] },
+  { key: "youtube", displayName: "YouTube", domain: "youtube.com", aliases: ["youtube"] },
   { key: "trello", displayName: "Trello", domain: "trello.com", aliases: ["trello"] },
   { key: "asana", displayName: "Asana", domain: "asana.com", aliases: ["asana"] },
   { key: "jira", displayName: "Jira", domain: "atlassian.com", aliases: ["jira"] },
