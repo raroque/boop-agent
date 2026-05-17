@@ -11,6 +11,8 @@ import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
 import { getRuntimeConfig, type RuntimeConfig } from "./runtime-config.js";
 import { runAgentRuntime } from "./runtimes/index.js";
 import { buildPromptWithImages, fetchStoredBytes } from "./images/content-blocks.js";
+import { usageLimitReply } from "./runtime-errors.js";
+import { getUserMemoryContextBlock } from "./memory/context.js";
 
 const running = new Map<string, AbortController>();
 
@@ -176,6 +178,7 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
   let errorMsg: string | undefined;
 
   try {
+    const memoryContextBlock = await getUserMemoryContextBlock();
     const executionPrompt = await buildPromptWithImages({
       text: opts.task,
       imageStorageIds: opts.imageStorageIds,
@@ -183,7 +186,9 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
     });
     const result = await runAgentRuntime(runtimeConfig, {
       prompt: executionPrompt,
-      systemPrompt: EXECUTION_SYSTEM,
+      systemPrompt: memoryContextBlock
+        ? `${EXECUTION_SYSTEM}\n\n${memoryContextBlock}`
+        : EXECUTION_SYSTEM,
       claudeMcpServers: mcpServers,
       tools: runtimeTools,
       allowedTools,
@@ -224,7 +229,9 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
     usage = result.usage;
   } catch (err) {
     status = abort.signal.aborted ? "cancelled" : "failed";
-    errorMsg = String(err);
+    errorMsg =
+      usageLimitReply(err, runtimeConfig.runtime === "codex" ? "Codex" : "Claude") ??
+      String(err);
     await convex.mutation(api.agents.addLog, {
       agentId,
       logType: "error",

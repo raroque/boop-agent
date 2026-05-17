@@ -6,6 +6,8 @@ import { sendImessage } from "./sendblue.js";
 import { broadcast } from "./broadcast.js";
 import { getUserTimezone } from "./timezone-config.js";
 
+const AUTOMATION_CLAIM_LEASE_MS = 30 * 60_000;
+
 function randomId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -106,6 +108,13 @@ export async function tickAutomations(): Promise<void> {
   const now = Date.now();
   const due = all.filter((a) => a.nextRunAt !== undefined && a.nextRunAt <= now);
   for (const a of due) {
+    const claimed = await convex.mutation(api.automations.claimDue, {
+      automationId: a.automationId,
+      now,
+      claimedUntil: now + AUTOMATION_CLAIM_LEASE_MS,
+    });
+    if (!claimed) continue;
+
     // fire-and-forget so one slow automation doesn't block others
     runAutomation({
       automationId: a.automationId,

@@ -14,6 +14,7 @@ import { sendImessage } from "./sendblue.js";
 import { ensureTrigger, getComposio, listConnectedToolkits } from "./composio.js";
 import { ensureWebhookSubscription } from "./composio-webhook.js";
 import { describeUserNow } from "./timezone-config.js";
+import { getUserMemoryContextBlock } from "./memory/context.js";
 
 const TRIGGER_SLUG = "GMAIL_NEW_GMAIL_MESSAGE";
 const CLASSIFIER_MODEL = process.env.BOOP_CLASSIFIER_MODEL ?? "claude-haiku-4-5-20251001";
@@ -195,6 +196,7 @@ export async function classifyEmailImportance(
     : baseRuntimeConfig;
   const recordUsage = options.recordUsage ?? true;
   const userIdentities = await getUserGmailIdentities();
+  const memoryContextBlock = await getUserMemoryContextBlock();
   const tzInfo = await describeUserNow();
 
   const prefBlock =
@@ -221,7 +223,13 @@ export async function classifyEmailImportance(
   let usage: UsageTotals = { ...EMPTY_USAGE, model: runtimeConfig.model };
   const result = await runAgentRuntime(runtimeConfig, {
     prompt: userPrompt,
-    systemPrompt: `${RUBRIC_PROMPT}\n\n${prefBlock}\n\n${idBlock}\n\n${timeBlock}`,
+    systemPrompt: [
+      RUBRIC_PROMPT,
+      prefBlock,
+      idBlock,
+      memoryContextBlock || "Known user identity/correction memories: (none recorded)",
+      timeBlock,
+    ].join("\n\n"),
     tools: [],
     mode: "background",
   });

@@ -18,11 +18,13 @@ import { sendImessage } from "./sendblue.js";
 import { defineRuntimeTool } from "./runtimes/tool.js";
 import { runAgentRuntime } from "./runtimes/index.js";
 import { runtimeText } from "./runtimes/types.js";
+import { usageLimitReply } from "./runtime-errors.js";
 import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
 import {
   buildPromptWithImagesOrTextFallback,
   fetchStoredBytes,
 } from "./images/content-blocks.js";
+import { getUserMemoryContextBlock } from "./memory/context.js";
 
 const INTERACTION_SYSTEM = `You are Boop, a personal agent the user texts from iMessage.
 
@@ -328,9 +330,11 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const userText = opts.mediaError
     ? `[user sent images but they couldn't be downloaded: ${opts.mediaError}]\n${opts.content}`
     : opts.content;
+  const proactiveMemoryBlock =
+    opts.kind === "proactive" ? await getUserMemoryContextBlock() : "";
   const promptText =
     opts.kind === "proactive"
-      ? `Standalone proactive notice. Write a concise user-facing iMessage from this notice only. Do not research, spawn agents, or continue any prior conversation.\n\n${userText}`
+      ? `${proactiveMemoryBlock ? `${proactiveMemoryBlock}\n\n` : ""}Standalone proactive notice. Write a concise user-facing iMessage from this notice only. Do not research, spawn agents, or continue any prior conversation.\n\n${userText}`
       : historyBlock
         ? `Prior turns:\n${historyBlock}\n\nCurrent message:\n${userText}`
         : userText;
@@ -550,7 +554,9 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     usage = result.usage;
   } catch (err) {
     console.error(`[turn ${tag}] query failed`, err);
-    reply = "Sorry — I hit an error processing that. Try again in a moment.";
+    reply =
+      usageLimitReply(err, runtimeLabel(runtimeConfig.runtime)) ??
+      "Sorry — I hit an error processing that. Try again in a moment.";
   }
 
   // Sometimes the model produces a placeholder string like "(no output)" or
