@@ -223,16 +223,15 @@ export function ClaudeLogo({ size = 12, className = "" }: { size?: number; class
 
 export type RuntimeProvider = "claude" | "codex";
 
-export function HostedRuntimeLogo({ size = 12, className = "" }: { size?: number; className?: string }) {
-  const radius = Math.max(8, Math.round(size * 0.4));
+export function CodexLogo({ size = 12, className = "" }: { size?: number; className?: string }) {
   return (
-    <span
-      className={`inline-flex shrink-0 items-center justify-center overflow-hidden bg-zinc-950 text-white ${className}`}
-      style={{ width: size, height: size, borderRadius: radius }}
-      aria-label="Hosted runtime"
-    >
-      <HugeiconsIcon icon={Robot02Icon} size={Math.max(10, Math.round(size * 0.7))} />
-    </span>
+    <img
+      src="/codex-logo.png"
+      width={size}
+      height={size}
+      alt="Codex"
+      className={`inline-block rounded-[4px] ${className}`}
+    />
   );
 }
 
@@ -246,7 +245,7 @@ export function RuntimeProviderLogo({
   className?: string;
 }) {
   return runtime === "codex" ? (
-    <HostedRuntimeLogo size={size} className={className} />
+    <CodexLogo size={size} className={className} />
   ) : (
     <ClaudeLogo size={size} className={className} />
   );
@@ -265,7 +264,7 @@ export function RuntimeProviderBadge({
   compact?: boolean;
   className?: string;
 }) {
-  const label = runtime === "codex" ? "Hosted" : "Claude";
+  const label = runtime === "codex" ? "Codex" : "Claude";
   return (
     <div
       className={`inline-flex min-w-0 items-center gap-1.5 rounded-2xl border px-2.5 py-1.5 ${

@@ -578,7 +578,7 @@ export function AgentsPanel({ isDark }: { isDark: boolean }) {
                     {agent.costUsd > 0 && (
                       <span
                         className="text-emerald-500 font-semibold"
-                        title={estimatedCost ? "API-equivalent estimate from hosted runtime tokens" : undefined}
+                        title={estimatedCost ? "API-equivalent estimate from Codex runtime tokens" : undefined}
                       >
                         {formatCostUsd(agent.costUsd, estimatedCost)}
                       </span>
@@ -677,7 +677,7 @@ function AgentDetail({
           {agent.costUsd > 0 && (
             <span
               className="text-emerald-500 font-semibold"
-              title={estimatedCost ? "API-equivalent estimate from hosted runtime tokens" : undefined}
+              title={estimatedCost ? "API-equivalent estimate from Codex runtime tokens" : undefined}
             >
               {formatCostUsd(agent.costUsd, estimatedCost)}
             </span>

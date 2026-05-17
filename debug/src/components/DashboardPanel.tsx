@@ -364,7 +364,7 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
               body: (
                 <>
                   <p className="mb-1.5">
-                    Claude rows use SDK-reported cost when available. Hosted rows are
+                    Claude rows use SDK-reported cost when available. Codex rows are
                     estimated from token counts and configured token pricing.
                   </p>
                   <p>

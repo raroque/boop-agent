@@ -62,7 +62,7 @@ const RUNTIME_SETTING_COUNT = SETTINGS.length + 2;
 
 const RUNTIME_OPTIONS: Option<RuntimeChoice>[] = [
   { value: "claude", label: "Claude" },
-  { value: "codex", label: "Hosted" },
+  { value: "codex", label: "Codex" },
 ];
 
 const CLAUDE_MODELS: Option[] = [

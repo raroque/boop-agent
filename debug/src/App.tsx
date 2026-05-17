@@ -142,7 +142,7 @@ export function App() {
   const storedProvider: RuntimeProvider | null =
     storedRuntime === "claude" || storedRuntime === "codex" ? storedRuntime : null;
   const activeRuntime = runtimeConfig?.runtime ?? storedProvider ?? "claude";
-  const providerLabel = activeRuntime === "codex" ? "Hosted" : "Claude";
+  const providerLabel = activeRuntime === "codex" ? "Codex" : "Claude";
   const modelLabel =
     runtimeConfig?.model ??
     (activeRuntime === "codex" ? storedHostedModel : storedClaudeModel) ??
