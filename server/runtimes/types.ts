@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import type { UsageTotals } from "../usage.js";
 
-export type RuntimeName = "claude" | "codex";
+export type RuntimeName = "claude";
 export type RuntimeReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 export type RuntimeMode = "dispatcher" | "execution" | "background";
 

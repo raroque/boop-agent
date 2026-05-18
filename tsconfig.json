@@ -4,7 +4,6 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM"],
-    "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
@@ -17,10 +16,9 @@
     "baseUrl": ".",
     "paths": {
       "@server/*": ["server/*"],
-      "@integrations/*": ["integrations/*"],
       "@convex/*": ["convex/*"]
     }
   },
-  "include": ["server/**/*.ts", "integrations/**/*.ts", "scripts/**/*.ts", "debug/src/**/*.ts", "debug/src/**/*.tsx"],
-  "exclude": ["node_modules", "convex/_generated"]
+  "include": ["server/**/*.ts", "scripts/**/*.ts"],
+  "exclude": ["node_modules", "convex", "convex/_generated"]
 }
