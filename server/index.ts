@@ -55,6 +55,21 @@ async function main() {
 
   const app = express();
   app.use(cors());
+  app.use(
+    express.json({
+      limit: "2mb",
+      verify: (req, _res, buf) => {
+        // Stash raw body bytes for HMAC verification on signed webhook routes.
+        (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+      },
+    }),
+  );
+
+  if (!process.env.SENDBLUE_SIGNING_SECRET) {
+    console.warn(
+      "[security] SENDBLUE_SIGNING_SECRET is not set — Sendblue webhook signature verification is DISABLED. Forged webhooks will be accepted. Set this env var in .env.local for production.",
+    );
+  }
   // Composio webhook receiver must read raw bytes for HMAC verification, so
   // its body parser is mounted BEFORE the global express.json. Without this
   // ordering the JSON parser consumes the stream first and the raw buffer
