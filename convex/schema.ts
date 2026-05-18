@@ -9,9 +9,12 @@ export default defineSchema({
     agentId: v.optional(v.string()),
     turnId: v.optional(v.string()),
     createdAt: v.number(),
+    imageStorageIds: v.optional(v.array(v.id("_storage"))),
+    mediaError: v.optional(v.string()),
   })
     .index("by_conversation", ["conversationId"])
-    .index("by_conversation_turn", ["conversationId", "turnId"]),
+    .index("by_conversation_turn", ["conversationId", "turnId"])
+    .index("by_createdAt", ["createdAt"]),
 
   conversations: defineTable({
     conversationId: v.string(),
@@ -48,6 +51,7 @@ export default defineSchema({
     // schema churn.
     metadata: v.optional(v.string()),
     createdAt: v.number(),
+    imageStorageIds: v.optional(v.array(v.id("_storage"))),
   })
     .index("by_memory_id", ["memoryId"])
     .index("by_tier", ["tier"])
@@ -64,12 +68,17 @@ export default defineSchema({
     conversationId: v.optional(v.string()),
     name: v.string(),
     task: v.string(),
+    runtime: v.optional(v.union(v.literal("claude"), v.literal("codex"))),
+    model: v.optional(v.string()),
+    reasoningEffort: v.optional(v.string()),
+    billingMode: v.optional(v.union(v.literal("api"), v.literal("codex-subscription"))),
     status: v.union(
       v.literal("spawned"),
       v.literal("running"),
       v.literal("completed"),
       v.literal("failed"),
       v.literal("cancelled"),
+      v.literal("paused"),
     ),
     result: v.optional(v.string()),
     error: v.optional(v.string()),
@@ -97,11 +106,14 @@ export default defineSchema({
       v.literal("consolidation-proposer"),
       v.literal("consolidation-adversary"),
       v.literal("consolidation-judge"),
+      v.literal("proactive"),
     ),
     conversationId: v.optional(v.string()),
     turnId: v.optional(v.string()),
     agentId: v.optional(v.string()),
     runId: v.optional(v.string()),
+    runtime: v.optional(v.union(v.literal("claude"), v.literal("codex"))),
+    billingMode: v.optional(v.union(v.literal("api"), v.literal("codex-subscription"))),
     model: v.string(),
     inputTokens: v.number(),
     outputTokens: v.number(),
@@ -150,6 +162,11 @@ export default defineSchema({
     task: v.string(),
     integrations: v.array(v.string()),
     schedule: v.string(),
+    // IANA timezone the cron expression is evaluated in. Stored at create
+    // time so changing the user's global timezone later doesn't shift
+    // existing automations. Optional for backwards compatibility — pre-TZ
+    // automations fall back to the user's current setting at run time.
+    timezone: v.optional(v.string()),
     enabled: v.boolean(),
     conversationId: v.optional(v.string()),
     notifyConversationId: v.optional(v.string()),

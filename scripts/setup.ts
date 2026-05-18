@@ -8,6 +8,45 @@ const ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
 const ENV_PATH = resolve(ROOT, ".env.local");
 const EXAMPLE_PATH = resolve(ROOT, ".env.example");
 
+type RuntimeChoice = "claude" | "codex";
+
+const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
+const DEFAULT_CODEX_MODEL = "gpt-5.5";
+const DEFAULT_CODEX_REASONING_EFFORT = "medium";
+
+const CLAUDE_MODEL_CHOICES = [
+  { title: "claude-sonnet-4-6 (recommended)", value: "claude-sonnet-4-6" },
+  { title: "claude-opus-4-6 (slowest, most capable)", value: "claude-opus-4-6" },
+  { title: "claude-haiku-4-5 (fastest, cheapest)", value: "claude-haiku-4-5" },
+];
+
+const CODEX_MODEL_CHOICES = [
+  { title: "gpt-5.5 (most capable)", value: "gpt-5.5" },
+  { title: "gpt-5.4-mini (faster local testing)", value: "gpt-5.4-mini" },
+  { title: "gpt-5.4 (balanced)", value: "gpt-5.4" },
+  { title: "gpt-5.3-codex (coding optimized)", value: "gpt-5.3-codex" },
+];
+
+const CODEX_REASONING_CHOICES = [
+  { title: "low (fastest)", value: "low" },
+  { title: "medium (recommended)", value: "medium" },
+  { title: "high (deeper reasoning)", value: "high" },
+  { title: "xhigh (maximum reasoning)", value: "xhigh" },
+];
+
+function runtimeFromEnv(value: string | undefined): RuntimeChoice {
+  return value === "codex" ? "codex" : "claude";
+}
+
+function initialForChoice<T extends readonly { value: string }[]>(
+  choices: T,
+  value: string | undefined,
+  fallback = 0,
+): number {
+  const index = choices.findIndex((choice) => choice.value === value);
+  return index >= 0 ? index : fallback;
+}
+
 function readEnv(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
   const lines = readFileSync(path, "utf8").split("\n");
@@ -60,7 +99,7 @@ function writeEnv(path: string, env: Record<string, string>): void {
 
 function cleanConvexUrlEnv(path: string): void {
   const envContent = readFileSync(path, "utf8");
-  const updated = envContent.replace(/^VITE_CONVEX_URL=.*(\r?\n)?/gm, "");
+  const updated = envContent.replace(/^(?:CONVEX_URL|VITE_CONVEX_URL)=.*(\r?\n)?/gm, "");
   writeFileSync(path, updated);
 }
 
@@ -80,7 +119,8 @@ async function runConvexDev(): Promise<void> {
     : ["convex", "dev", "--once", "--configure", "new"];
 
   if (!existing.CONVEX_DEPLOYMENT) {
-    // Remove VITE_CONVEX_URL from the env file to allow convex cli to populate it.
+    // Remove old Convex URLs from the env file to allow convex cli to populate
+    // the Vite URL cleanly.
     cleanConvexUrlEnv(ENV_PATH);
   }
 
@@ -161,6 +201,8 @@ interface SendblueKeys {
   fromNumber?: string;
 }
 
+type SendblueImportResult = SendblueKeys | "skip" | null;
+
 function parseSendblueKeys(output: string): SendblueKeys {
   const clean = output.replace(/\x1b\[[0-9;]*m/g, "");
   const keys: SendblueKeys = {};
@@ -231,7 +273,7 @@ function parseSendbluePhones(output: string): string[] {
   return numbers;
 }
 
-async function importSendblueFromCli(): Promise<SendblueKeys | null> {
+async function importSendblueFromCli(): Promise<SendblueImportResult> {
   const { method } = await prompts(
     {
       type: "select",
@@ -253,7 +295,7 @@ async function importSendblueFromCli(): Promise<SendblueKeys | null> {
   );
 
   if (method === "manual") return null;
-  if (method === "skip") return { apiKey: "", apiSecret: "", fromNumber: "" };
+  if (method === "skip") return "skip";
 
   const { account } = await prompts({
     type: "select",
@@ -323,27 +365,32 @@ async function main() {
   console.log(`
 What this does:
   1. Pulls your Sendblue keys (via their CLI, or you paste them)
-  2. Asks about your Claude model preference
-  3. Runs \`npx convex dev\` to create a Convex project
-  4. Writes .env.local
+  2. Asks whether Boop should use your Claude Code or Codex subscription
+  3. Optionally enables local browser use
+  4. Runs \`npx convex dev\` to create a Convex project
+  5. Writes .env.local
 
 Before you start:
-  • A Claude Code subscription:    https://claude.com/code
-  • Convex account (free tier):    https://convex.dev
-  • Sendblue (free on agent plan): https://sendblue.com
+  • Claude Code subscription if choosing Claude: https://claude.com/code
+  • Codex/ChatGPT account if choosing Codex:     run \`codex login\`
+  • Convex account (free tier):                  https://convex.dev
+  • Sendblue (free on agent plan):               https://sendblue.com
 `);
 
   const existing = readEnv(ENV_PATH);
+  const runtimeDefault = runtimeFromEnv(existing.BOOP_RUNTIME);
   const cli = await importSendblueFromCli();
+  const sendblueSkipped = cli === "skip";
+  const cliKeys = cli && cli !== "skip" ? cli : null;
 
   const sendblueDefaults = {
-    SENDBLUE_API_KEY: cli?.apiKey ?? existing.SENDBLUE_API_KEY ?? "",
-    SENDBLUE_API_SECRET: cli?.apiSecret ?? existing.SENDBLUE_API_SECRET ?? "",
-    SENDBLUE_FROM_NUMBER: cli?.fromNumber ?? existing.SENDBLUE_FROM_NUMBER ?? "",
+    SENDBLUE_API_KEY: cliKeys?.apiKey ?? existing.SENDBLUE_API_KEY ?? "",
+    SENDBLUE_API_SECRET: cliKeys?.apiSecret ?? existing.SENDBLUE_API_SECRET ?? "",
+    SENDBLUE_FROM_NUMBER: cliKeys?.fromNumber ?? existing.SENDBLUE_FROM_NUMBER ?? "",
   };
 
   const sendbluePrompts = [] as any[];
-  if (!sendblueDefaults.SENDBLUE_API_KEY) {
+  if (!sendblueSkipped && !sendblueDefaults.SENDBLUE_API_KEY) {
     sendbluePrompts.push({
       type: "text",
       name: "SENDBLUE_API_KEY",
@@ -351,7 +398,7 @@ Before you start:
       initial: "",
     });
   }
-  if (!sendblueDefaults.SENDBLUE_API_SECRET) {
+  if (!sendblueSkipped && !sendblueDefaults.SENDBLUE_API_SECRET) {
     sendbluePrompts.push({
       type: "password",
       name: "SENDBLUE_API_SECRET",
@@ -359,12 +406,12 @@ Before you start:
       initial: "",
     });
   }
-  if (!sendblueDefaults.SENDBLUE_FROM_NUMBER) {
+  if (!sendblueSkipped && !sendblueDefaults.SENDBLUE_FROM_NUMBER) {
     sendbluePrompts.push({
       type: "text",
       name: "SENDBLUE_FROM_NUMBER",
       message:
-        "Your Sendblue-provisioned number (the one people text TO, e.g. +14695551234). Required by Sendblue.",
+        "Your Sendblue-provisioned number (the one people text TO, e.g. +1XXXXXXXXXX). Required by Sendblue.",
       initial: "",
     });
   }
@@ -374,14 +421,49 @@ Before you start:
       ...sendbluePrompts,
       {
         type: "select",
+        name: "BOOP_RUNTIME",
+        message: "Which subscription should Boop use for the agent runtime?",
+        choices: [
+          {
+            title: "Claude Code subscription",
+            value: "claude",
+            description: "Uses the Claude Agent SDK and your local `claude` login.",
+          },
+          {
+            title: "Codex / ChatGPT subscription",
+            value: "codex",
+            description: "Uses local `codex app-server` auth from `codex login`.",
+          },
+        ],
+        initial: runtimeDefault === "codex" ? 1 : 0,
+      },
+      {
+        type: (_prev: unknown, values: Record<string, unknown>) =>
+          values.BOOP_RUNTIME === "claude" ? "select" : null,
         name: "BOOP_MODEL",
         message: "Which Claude model should the agent use?",
-        choices: [
-          { title: "claude-sonnet-4-6 (recommended)", value: "claude-sonnet-4-6" },
-          { title: "claude-opus-4-6 (slowest, most capable)", value: "claude-opus-4-6" },
-          { title: "claude-haiku-4-5 (fastest, cheapest)", value: "claude-haiku-4-5" },
-        ],
-        initial: 0,
+        choices: CLAUDE_MODEL_CHOICES,
+        initial: initialForChoice(CLAUDE_MODEL_CHOICES, existing.BOOP_MODEL),
+      },
+      {
+        type: (_prev: unknown, values: Record<string, unknown>) =>
+          values.BOOP_RUNTIME === "codex" ? "select" : null,
+        name: "BOOP_CODEX_MODEL",
+        message: "Which Codex model should the agent use?",
+        choices: CODEX_MODEL_CHOICES,
+        initial: initialForChoice(CODEX_MODEL_CHOICES, existing.BOOP_CODEX_MODEL),
+      },
+      {
+        type: (_prev: unknown, values: Record<string, unknown>) =>
+          values.BOOP_RUNTIME === "codex" ? "select" : null,
+        name: "BOOP_CODEX_REASONING_EFFORT",
+        message: "How much Codex reasoning effort should Boop use?",
+        choices: CODEX_REASONING_CHOICES,
+        initial: initialForChoice(
+          CODEX_REASONING_CHOICES,
+          existing.BOOP_CODEX_REASONING_EFFORT,
+          1,
+        ),
       },
       {
         type: "text",
@@ -406,6 +488,14 @@ Before you start:
 
   // Merge CLI-sourced defaults with what the user answered (answer wins).
   Object.assign(answers, {
+    BOOP_RUNTIME: answers.BOOP_RUNTIME ?? runtimeDefault,
+    BOOP_MODEL: answers.BOOP_MODEL ?? existing.BOOP_MODEL ?? DEFAULT_CLAUDE_MODEL,
+    BOOP_CODEX_MODEL:
+      answers.BOOP_CODEX_MODEL ?? existing.BOOP_CODEX_MODEL ?? DEFAULT_CODEX_MODEL,
+    BOOP_CODEX_REASONING_EFFORT:
+      answers.BOOP_CODEX_REASONING_EFFORT ??
+      existing.BOOP_CODEX_REASONING_EFFORT ??
+      DEFAULT_CODEX_REASONING_EFFORT,
     SENDBLUE_API_KEY: answers.SENDBLUE_API_KEY ?? sendblueDefaults.SENDBLUE_API_KEY,
     SENDBLUE_API_SECRET: answers.SENDBLUE_API_SECRET ?? sendblueDefaults.SENDBLUE_API_SECRET,
     SENDBLUE_FROM_NUMBER: answers.SENDBLUE_FROM_NUMBER ?? sendblueDefaults.SENDBLUE_FROM_NUMBER,
@@ -468,6 +558,148 @@ Before you start:
     console.log(
       `\nSkipped. Add COMPOSIO_API_KEY to .env.local later to enable integrations.`,
     );
+  }
+
+  // ---- Embedding provider --------------------------------------------------
+  banner("Memory search — embedding provider");
+  const existingVoyage = existing.VOYAGE_API_KEY ?? "";
+  const existingOpenai = existing.OPENAI_API_KEY ?? "";
+  const inferredCurrent = existingVoyage
+    ? "voyage"
+    : existingOpenai
+      ? "openai"
+      : "local";
+  console.log(`
+Boop's recall() searches your stored memories by semantic similarity. Pick
+how you want to generate embeddings:
+
+  • Local  — free, runs in-process via @huggingface/transformers
+            (Xenova/bge-large-en-v1.5, 1024-dim). First run downloads
+            ~440MB and caches forever. No API key.
+  • Voyage — paid, ~$0.06/M tokens. Slightly stronger English retrieval.
+  • OpenAI — paid, ~$0.13/M tokens. Comparable to Voyage.
+
+All three produce 1024-dim vectors (compatible with the same Convex index)
+so you can switch later by adding/removing the API key.
+`);
+  const { embeddingProvider } = await prompts(
+    {
+      type: "select",
+      name: "embeddingProvider",
+      message: "Which embedding provider should boop use?",
+      choices: [
+        { title: "Local (free, recommended)", value: "local" },
+        { title: "Voyage (paid — I have a key)", value: "voyage" },
+        { title: "OpenAI (paid — I have a key)", value: "openai" },
+      ],
+      initial:
+        inferredCurrent === "voyage" ? 1 : inferredCurrent === "openai" ? 2 : 0,
+    },
+    {
+      onCancel: () => {
+        console.log("Setup cancelled.");
+        process.exit(1);
+      },
+    },
+  );
+
+  if (embeddingProvider === "voyage") {
+    const { VOYAGE_API_KEY } = await prompts({
+      type: "password",
+      name: "VOYAGE_API_KEY",
+      message: "Paste your Voyage API key (https://dash.voyageai.com):",
+      initial: existingVoyage,
+    });
+    (answers as any).VOYAGE_API_KEY = VOYAGE_API_KEY || "";
+    (answers as any).OPENAI_API_KEY = "";
+  } else if (embeddingProvider === "openai") {
+    const { OPENAI_API_KEY } = await prompts({
+      type: "password",
+      name: "OPENAI_API_KEY",
+      message: "Paste your OpenAI API key:",
+      initial: existingOpenai,
+    });
+    (answers as any).OPENAI_API_KEY = OPENAI_API_KEY || "";
+    (answers as any).VOYAGE_API_KEY = "";
+  } else {
+    // Local — clear any stale paid keys so embeddings.ts falls through to
+    // the local provider on next start.
+    (answers as any).VOYAGE_API_KEY = "";
+    (answers as any).OPENAI_API_KEY = "";
+
+    const { preload } = await prompts({
+      type: "confirm",
+      name: "preload",
+      message:
+        "Pre-download the local model now? (~440MB, ~30s on broadband — saves the wait on first recall)",
+      initial: true,
+    });
+    if (preload) {
+      console.log("\nDownloading Xenova/bge-large-en-v1.5… (Ctrl+C to skip)\n");
+      try {
+        await runInherit("npx", ["tsx", "scripts/preload-embeddings.ts"]);
+        console.log("✓ Local model cached.");
+      } catch (err) {
+        console.warn(
+          "Preload failed — model will download on first recall instead.",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+
+  // ---- Local browser use ---------------------------------------------------
+  banner("Local browser use — optional");
+  console.log(`
+Boop can optionally expose a local Patchright Chrome profile to spawned agents.
+Use it for login-required services, visual browser workflows, or sites that
+reject ordinary automation. It is off by default, and agents cannot see or use
+the browser integration unless you enable it.
+`);
+
+  const { enableLocalBrowser } = await prompts(
+    {
+      type: "confirm",
+      name: "enableLocalBrowser",
+      message: "Enable Local browser use now?",
+      initial: existing.BOOP_BROWSER_ENABLED === "true",
+    },
+    {
+      onCancel: () => {
+        console.log("Setup cancelled.");
+        process.exit(1);
+      },
+    },
+  );
+  (answers as any).BOOP_BROWSER_ENABLED = enableLocalBrowser ? "true" : "false";
+
+  if (enableLocalBrowser) {
+    const { installBrowser } = await prompts(
+      {
+        type: "confirm",
+        name: "installBrowser",
+        message: "Install the Patchright Chrome browser binary now?",
+        initial: false,
+      },
+      {
+        onCancel: () => {
+          console.log("Setup cancelled.");
+          process.exit(1);
+        },
+      },
+    );
+    if (installBrowser) {
+      console.log("\nInstalling Patchright Chrome… (Ctrl+C to skip)\n");
+      try {
+        await runInherit("npx", ["-y", "patchright", "install", "chrome"]);
+        console.log("✓ Patchright Chrome installed.");
+      } catch (err) {
+        console.warn(
+          "Patchright Chrome install failed — you can retry from Settings later.",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
   }
 
   // ---- Tunnel configuration ------------------------------------------------
@@ -538,8 +770,26 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
   if (env.VITE_CONVEX_URL?.includes("example.convex.cloud")) delete env.VITE_CONVEX_URL;
   writeEnv(ENV_PATH, env);
 
-  banner("Claude authentication");
-  console.log(`This project uses your Claude Code subscription — no Anthropic API key needed.
+  if (env.BOOP_RUNTIME === "codex") {
+    const codexInstalled = await hasBinary("codex");
+    banner("Codex authentication");
+    console.log(`This project uses your Codex / ChatGPT subscription through local Codex auth — no OpenAI API key needed.
+
+If you haven't already:
+  • Install Codex CLI:  npm install -g @openai/codex
+  • Run once:           codex login
+  • Sign in when prompted
+
+Boop reads the Codex credentials saved on disk. Set BOOP_CODEX_AUTH_HOME in
+.env.local only if you need Boop to read a different Codex home containing
+auth.json.
+
+${codexInstalled ? "✓ Codex CLI found on PATH." : "⚠ Codex CLI was not found on PATH. Install it before running `npm run dev`."}
+`);
+  } else {
+    const claudeInstalled = await hasBinary("claude");
+    banner("Claude authentication");
+    console.log(`This project uses your Claude Code subscription — no Anthropic API key needed.
 
 If you haven't already:
   • Install Claude Code:  npm install -g @anthropic-ai/claude-code
@@ -548,29 +798,32 @@ If you haven't already:
 
 The Claude Agent SDK reads the credentials Claude Code saves on disk.
 You can override with ANTHROPIC_API_KEY in .env.local if you'd rather use an API key.
+
+${claudeInstalled ? "✓ Claude Code found on PATH." : "⚠ Claude Code was not found on PATH. Install it before running `npm run dev`."}
 `);
+  }
 
   if (answers.runConvex) {
     await runConvexDev();
     const after = readEnv(ENV_PATH);
 
-    // CONVEX_URL or VITE_CONVEX_URL is written to .env.local as part of `convex dev`; derive CONVEX_URL from it
-    // if not available, fallback to deriving from CONVEX_DEPLOYMENT.
+    // VITE_CONVEX_URL is written to .env.local as part of `convex dev`. The
+    // server falls back to it, so avoid writing an active CONVEX_URL too; Convex
+    // CLI treats multiple Convex URL env vars as ambiguous.
     const deploymentMatch =
       after.CONVEX_DEPLOYMENT?.match(/^([a-z]+):([\w-]+)/);
 
     if (deploymentMatch) {
       const url =
-        after.CONVEX_URL ||
         after.VITE_CONVEX_URL ||
+        after.CONVEX_URL ||
         `https://${deploymentMatch[2]}.convex.cloud`;
-      if (after.CONVEX_URL !== url || after.VITE_CONVEX_URL !== url) {
+      if (after.VITE_CONVEX_URL !== url || after.CONVEX_URL) {
         writeEnv(ENV_PATH, {
           ...after,
-          CONVEX_URL: url,
           VITE_CONVEX_URL: url,
         });
-        console.log(`\n✓ Synced CONVEX_URL + VITE_CONVEX_URL → ${url}`);
+        console.log(`\n✓ Synced VITE_CONVEX_URL → ${url}`);
       }
     }
   } else {
@@ -623,6 +876,12 @@ Integrations (via Composio):
   2. Open the debug dashboard → Connections tab.
   3. Click Connect on any toolkit (Gmail, Slack, GitHub, Linear, Notion, …).
   4. Composio handles OAuth; the toolkit becomes available to the agent.
+
+Local browser use:
+  • Off by default unless you enabled it during setup or in Settings.
+  • Open the debug dashboard → Settings → Local browser use to toggle it.
+  • The Patchright Chrome binary is installed only if you opt in from setup
+    or click "Install Patchright Chrome" in the local browser settings.
 `);
 }
 

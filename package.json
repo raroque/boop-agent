@@ -1,8 +1,8 @@
 {
   "name": "boop-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Text-an-agent starter: iMessage your Claude agent, it runs sub-agents, remembers you, and grows with integrations you add.",
+  "description": "Text-an-agent starter: iMessage your Claude or Codex-backed agent, with sub-agents, memory, automations, and integrations.",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -16,9 +16,12 @@
     "dev:convex": "convex dev",
     "dev:debug": "vite --config debug/vite.config.ts",
     "build:debug": "vite build --config debug/vite.config.ts",
+    "codex:protocol": "codex app-server generate-ts --out server/runtimes/codex-app-server-protocol --experimental",
     "start": "npm run preflight && tsx server/index.ts",
     "deploy:convex": "convex deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
@@ -26,8 +29,9 @@
     "@composio/core": "^0.6.10",
     "@hugeicons/core-free-icons": "^1.0.0",
     "@hugeicons/react": "^1.0.0",
+    "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "convex": "^1.17.0",
+    "convex": "^1.36.1",
     "cors": "^2.8.5",
     "croner": "^9.0.0",
     "dotenv": "^16.4.0",
@@ -35,6 +39,9 @@
     "react-force-graph-2d": "^1.27.0",
     "ws": "^8.18.0",
     "zod": "^3.23.0"
+  },
+  "optionalDependencies": {
+    "patchright": "^1.59.4"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
@@ -53,7 +60,8 @@
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "vitest": "^2.1.9"
   },
   "engines": {
     "node": ">=20"

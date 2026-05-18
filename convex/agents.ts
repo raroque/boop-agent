@@ -15,6 +15,10 @@ export const create = mutation({
     conversationId: v.optional(v.string()),
     name: v.string(),
     task: v.string(),
+    runtime: v.optional(v.union(v.literal("claude"), v.literal("codex"))),
+    model: v.optional(v.string()),
+    reasoningEffort: v.optional(v.string()),
+    billingMode: v.optional(v.union(v.literal("api"), v.literal("codex-subscription"))),
     mcpServers: v.array(v.string()),
   },
   handler: async (ctx, args) => {

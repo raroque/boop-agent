@@ -1,6 +1,15 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
+import {
+  EmptyState,
+  HeaderPill,
+  PanelPage,
+  bodyTextClass,
+  mutedTextClass,
+  panelCardClass,
+  subtlePanelClass,
+} from "./PanelPrimitives.js";
 
 function formatSchedule(schedule: string): string {
   return schedule;
@@ -26,11 +35,8 @@ export function AutomationsPanel({ isDark }: { isDark: boolean }) {
   const setEnabled = useMutation(api.automations.setEnabled);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const cardBg = isDark
-    ? "bg-slate-900/40 border-slate-800/60"
-    : "bg-white border-slate-200";
-  const hoverBg = isDark ? "hover:bg-slate-800/40" : "hover:bg-slate-50";
-  const mutedText = isDark ? "text-slate-500" : "text-slate-400";
+  const hoverBg = isDark ? "hover:bg-white/5" : "hover:bg-zinc-50";
+  const mutedText = mutedTextClass(isDark);
 
   const list = automations ?? [];
   const enabledCount = list.filter((a: any) => a.enabled).length;
@@ -46,44 +52,28 @@ export function AutomationsPanel({ isDark }: { isDark: boolean }) {
   }
 
   return (
-    <div className="flex flex-col h-full -m-5">
-      <div
-        className={`shrink-0 border-b px-5 py-3 flex items-center gap-3 ${
-          isDark ? "border-slate-800" : "border-slate-200"
-        }`}
-      >
-        <h2
-          className={`text-xs font-semibold uppercase tracking-wider ${
-            isDark ? "text-slate-500" : "text-slate-400"
-          }`}
-        >
-          Automations
-        </h2>
-        <span className={`text-xs mono ${mutedText}`}>
-          {enabledCount} enabled / {list.length} total
-        </span>
-      </div>
-
-      <div className="flex-1 overflow-y-auto debug-scroll p-4 space-y-3">
+    <PanelPage
+      eyebrow="Schedule"
+      title="Automations"
+      description="Recurring jobs the agent runs without a live conversation."
+      stat={<HeaderPill isDark={isDark}>{enabledCount} enabled / {list.length} total</HeaderPill>}
+    >
+      <div className="space-y-3">
         {automations === undefined ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
-              <div key={i} className={`h-20 rounded-xl border ${cardBg} shimmer`} />
+              <div key={i} className={panelCardClass(isDark, "h-20 shimmer")} />
             ))}
           </div>
         ) : list.length === 0 ? (
-          <p
-            className={`text-sm py-8 text-center ${
-              isDark ? "text-slate-600" : "text-slate-400"
-            }`}
-          >
+          <EmptyState isDark={isDark}>
             No automations yet. Text the agent: <em>"every morning at 8, summarize my calendar"</em>.
-          </p>
+          </EmptyState>
         ) : (
           list.map((auto: any) => (
             <div
               key={auto._id}
-              className={`border rounded-xl p-4 cursor-pointer transition-all duration-150 fade-in ${cardBg} ${hoverBg}`}
+              className={`${panelCardClass(isDark, "cursor-pointer px-4 py-3.5 transition-colors fade-in")} ${hoverBg}`}
               onClick={() => setSelectedId(auto.automationId)}
             >
               <div className="flex items-center gap-2.5 mb-1.5">
@@ -95,16 +85,16 @@ export function AutomationsPanel({ isDark }: { isDark: boolean }) {
                       enabled: !auto.enabled,
                     });
                   }}
-                  className={`relative inline-flex items-center w-9 h-5 rounded-full transition-colors shrink-0 ${
+                  className={`toggle-switch relative inline-flex items-center w-9 h-5 rounded-full shrink-0 ${
                     auto.enabled
                       ? "bg-emerald-500"
                       : isDark
-                        ? "bg-slate-700"
-                        : "bg-slate-300"
+                        ? "bg-zinc-700"
+                        : "bg-zinc-300"
                   }`}
                 >
                   <span
-                    className={`inline-block w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                    className={`toggle-thumb inline-block w-3.5 h-3.5 rounded-full bg-white shadow-sm ${
                       auto.enabled ? "translate-x-[18px]" : "translate-x-[3px]"
                     }`}
                   />
@@ -112,17 +102,17 @@ export function AutomationsPanel({ isDark }: { isDark: boolean }) {
 
                 <span
                   className={`text-sm font-medium truncate ${
-                    isDark ? "text-slate-200" : "text-slate-800"
+                    isDark ? "text-zinc-100" : "text-zinc-900"
                   } ${!auto.enabled ? "opacity-50" : ""}`}
                 >
                   {auto.name}
                 </span>
 
                 <span
-                  className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
                     isDark
-                      ? "text-sky-400 bg-sky-400/10 border-sky-500/20"
-                      : "text-sky-600 bg-sky-50 border-sky-200"
+                      ? "bg-zinc-100/10 text-zinc-300"
+                      : "bg-zinc-100 text-zinc-700"
                   }`}
                 >
                   Scheduled
@@ -143,7 +133,7 @@ export function AutomationsPanel({ isDark }: { isDark: boolean }) {
 
               <div
                 className={`flex items-center gap-3 ml-[46px] text-[10px] mono ${
-                  isDark ? "text-slate-600" : "text-slate-400"
+                  isDark ? "text-zinc-600" : "text-zinc-400"
                 }`}
               >
                 {auto.lastRunAt && <span>Last run: {timeAgo(auto.lastRunAt)}</span>}
@@ -164,7 +154,7 @@ export function AutomationsPanel({ isDark }: { isDark: boolean }) {
           ))
         )}
       </div>
-    </div>
+    </PanelPage>
   );
 }
 
@@ -182,52 +172,44 @@ function AutomationDetail({
   const setEnabled = useMutation(api.automations.setEnabled);
   const remove = useMutation(api.automations.remove);
 
-  const mutedText = isDark ? "text-slate-500" : "text-slate-400";
+  const mutedText = mutedTextClass(isDark);
 
   if (!auto) {
     return (
-      <div className="p-5">
-        <div
-          className={`h-20 rounded-xl shimmer ${
-            isDark ? "bg-slate-900/40" : "bg-slate-100"
-          }`}
-        />
+      <div className="mx-auto max-w-[1040px] pb-10">
+        <div className={panelCardClass(isDark, "h-20 shimmer")} />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full -m-5 fade-in">
-      <div
-        className={`shrink-0 border-b px-5 py-3 flex items-center gap-3 ${
-          isDark ? "border-slate-800" : "border-slate-200"
-        }`}
-      >
+    <div className="mx-auto max-w-[1040px] space-y-4 pb-10 fade-in">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={onBack}
-          className={`text-xs rounded-md px-2.5 py-1 transition-colors ${
+          className={`rounded-xl px-2.5 py-1.5 text-xs transition-colors ${
             isDark
-              ? "text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700"
-              : "text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200"
+              ? "bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-zinc-200"
+              : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-800"
           }`}
         >
-          ← Back
+          Back
         </button>
 
         <button
           onClick={() =>
             setEnabled({ automationId: auto.automationId, enabled: !auto.enabled })
           }
-          className={`relative inline-flex items-center w-9 h-5 rounded-full transition-colors shrink-0 ${
+          className={`toggle-switch relative inline-flex items-center w-9 h-5 rounded-full shrink-0 ${
             auto.enabled
               ? "bg-emerald-500"
               : isDark
-                ? "bg-slate-700"
-                : "bg-slate-300"
+                ? "bg-zinc-700"
+                : "bg-zinc-300"
           }`}
         >
           <span
-            className={`inline-block w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${
+            className={`toggle-thumb inline-block w-3.5 h-3.5 rounded-full bg-white shadow-sm ${
               auto.enabled ? "translate-x-[18px]" : "translate-x-[3px]"
             }`}
           />
@@ -235,17 +217,17 @@ function AutomationDetail({
 
         <span
           className={`text-sm font-medium ${
-            isDark ? "text-slate-200" : "text-slate-800"
+            isDark ? "text-zinc-100" : "text-zinc-900"
           }`}
         >
           {auto.name}
         </span>
 
         <span
-          className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+          className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
             isDark
-              ? "text-sky-400 bg-sky-400/10 border-sky-500/20"
-              : "text-sky-600 bg-sky-50 border-sky-200"
+              ? "bg-zinc-100/10 text-zinc-300"
+              : "bg-zinc-100 text-zinc-700"
           }`}
         >
           Scheduled
@@ -268,21 +250,17 @@ function AutomationDetail({
         </button>
       </div>
 
-      <div
-        className={`shrink-0 border-b px-5 py-3 space-y-2 ${
-          isDark ? "border-slate-800/50" : "border-slate-100"
-        }`}
-      >
+      <div className={panelCardClass(isDark, "space-y-2 px-4 py-3")}>
         <div>
           <span
             className={`text-[10px] font-bold mono ${
-              isDark ? "text-slate-600" : "text-slate-400"
+              isDark ? "text-zinc-600" : "text-zinc-400"
             }`}
           >
             TASK{" "}
           </span>
           <span
-            className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}
+            className={`text-xs ${bodyTextClass(isDark)}`}
           >
             {auto.task}
           </span>
@@ -291,13 +269,13 @@ function AutomationDetail({
           <div>
             <span
               className={`text-[10px] font-bold mono ${
-                isDark ? "text-slate-600" : "text-slate-400"
+                isDark ? "text-zinc-600" : "text-zinc-400"
               }`}
             >
               INTEGRATIONS{" "}
             </span>
             <span
-              className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}
+              className={`text-xs ${bodyTextClass(isDark)}`}
             >
               {auto.integrations.join(", ")}
             </span>
@@ -307,13 +285,13 @@ function AutomationDetail({
           <div>
             <span
               className={`text-[10px] font-bold mono ${
-                isDark ? "text-slate-600" : "text-slate-400"
+                isDark ? "text-zinc-600" : "text-zinc-400"
               }`}
             >
               NEXT RUN{" "}
             </span>
             <span
-              className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}
+              className={`text-xs ${bodyTextClass(isDark)}`}
             >
               {new Date(auto.nextRunAt).toLocaleString()}
             </span>
@@ -321,15 +299,11 @@ function AutomationDetail({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto debug-scroll">
-        <div
-          className={`px-5 py-2 border-b ${
-            isDark ? "border-slate-800/50" : "border-slate-100"
-          }`}
-        >
+      <div className={panelCardClass(isDark, "overflow-hidden")}>
+        <div className={`border-b px-4 py-2 ${isDark ? "border-white/10" : "border-zinc-100"}`}>
           <span
             className={`text-[10px] font-semibold uppercase tracking-wider ${
-              isDark ? "text-slate-600" : "text-slate-400"
+              isDark ? "text-zinc-600" : "text-zinc-400"
             }`}
           >
             Run History ({runs?.length ?? 0})
@@ -341,9 +315,7 @@ function AutomationDetail({
             {[1, 2, 3].map((i) => (
               <div
                 key={i}
-                className={`h-10 rounded shimmer ${
-                  isDark ? "bg-slate-900/30" : "bg-slate-100"
-                }`}
+                className={subtlePanelClass(isDark, "h-10 shimmer")}
               />
             ))}
           </div>
@@ -358,7 +330,7 @@ function AutomationDetail({
         ) : (
           <div
             className={`divide-y ${
-              isDark ? "divide-slate-800/40" : "divide-slate-100"
+              isDark ? "divide-white/10" : "divide-zinc-100"
             }`}
           >
             {runs.map((run: any) => {
@@ -367,7 +339,7 @@ function AutomationDetail({
                 <div
                   key={run._id}
                   className={`px-5 py-2.5 ${
-                    isDark ? "hover:bg-slate-900/40" : "hover:bg-slate-50"
+                    isDark ? "hover:bg-white/5" : "hover:bg-zinc-50"
                   }`}
                 >
                   <div className="flex items-center gap-3">
@@ -392,7 +364,7 @@ function AutomationDetail({
                     </span>
                     <span
                       className={`text-[10px] mono shrink-0 ${
-                        isDark ? "text-slate-600" : "text-slate-400"
+                        isDark ? "text-zinc-600" : "text-zinc-400"
                       }`}
                     >
                       {run.startedAt ? timeAgo(run.startedAt) : ""}

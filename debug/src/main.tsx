@@ -17,7 +17,7 @@ document.documentElement.classList.add(storedTheme === "light" ? "light" : "dark
 const convexUrl = import.meta.env.VITE_CONVEX_URL;
 if (!convexUrl) {
   document.getElementById("root")!.innerHTML = `
-    <div style="padding:2rem;font-family:system-ui">
+    <div style="padding:2rem;font-family:Geist,ui-sans-serif,system-ui,sans-serif">
       <h1>VITE_CONVEX_URL is not set</h1>
       <p>Run <code>npm run setup</code> or <code>npx convex dev</code> to configure Convex, then reload.</p>
     </div>`;

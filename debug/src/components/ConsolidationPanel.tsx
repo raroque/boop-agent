@@ -2,6 +2,15 @@ import { useEffect, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
 import { useSocket, type SocketEvent } from "../lib/useSocket.js";
+import {
+  EmptyState,
+  HeaderPill,
+  PanelPage,
+  bodyTextClass,
+  mutedTextClass,
+  panelCardClass,
+  subtlePanelClass,
+} from "./PanelPrimitives.js";
 
 type Phase =
   | "loaded"
@@ -112,11 +121,8 @@ export function ConsolidationPanel({ isDark }: { isDark: boolean }) {
   }
 
   const list = runs ?? [];
-  const cardBg = isDark
-    ? "bg-slate-900/40 border-slate-800/60"
-    : "bg-white border-slate-200";
-  const hoverBg = isDark ? "hover:bg-slate-800/40" : "hover:bg-slate-50";
-  const muted = isDark ? "text-slate-500" : "text-slate-400";
+  const hoverBg = isDark ? "hover:bg-white/5" : "hover:bg-zinc-50";
+  const muted = mutedTextClass(isDark);
 
   if (selectedId) {
     return (
@@ -130,51 +136,40 @@ export function ConsolidationPanel({ isDark }: { isDark: boolean }) {
   }
 
   return (
-    <div className="flex flex-col h-full -m-5">
-      <div
-        className={`shrink-0 border-b px-5 py-3 flex items-center gap-3 ${
-          isDark ? "border-slate-800" : "border-slate-200"
-        }`}
-      >
-        <h2
-          className={`text-xs font-semibold uppercase tracking-wider ${
-            isDark ? "text-slate-500" : "text-slate-400"
-          }`}
-        >
-          Memory Consolidation
-        </h2>
-        <span className={`text-xs mono ${muted}`}>
-          {list.length} run{list.length === 1 ? "" : "s"}
-        </span>
+    <PanelPage
+      eyebrow="Maintenance"
+      title="Consolidation"
+      description="Memory cleanup runs that merge duplicates, prune stale records, and preserve reasoning."
+      stat={<HeaderPill isDark={isDark}>{list.length} run{list.length === 1 ? "" : "s"}</HeaderPill>}
+      action={
         <button
           onClick={triggerManual}
           disabled={triggering}
-          className="ml-auto px-3 py-1.5 text-xs rounded-md bg-sky-600 hover:bg-sky-500 text-white transition disabled:opacity-50"
+          className={`rounded-xl px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
+            isDark ? "bg-zinc-100 text-zinc-950 hover:bg-white" : "bg-zinc-950 text-white hover:bg-zinc-800"
+          }`}
         >
           {triggering ? "Running…" : "Run now"}
         </button>
-      </div>
+      }
+    >
 
-      <div className="flex-1 overflow-y-auto debug-scroll p-4 space-y-3">
+      <div className="space-y-3">
         {runs === undefined ? (
           <div className="space-y-3">
             {[1, 2].map((i) => (
-              <div key={i} className={`h-20 rounded-xl border ${cardBg} shimmer`} />
+              <div key={i} className={panelCardClass(isDark, "h-20 shimmer")} />
             ))}
           </div>
         ) : list.length === 0 ? (
-          <div
-            className={`text-sm py-8 text-center ${
-              isDark ? "text-slate-600" : "text-slate-400"
-            }`}
-          >
+          <EmptyState isDark={isDark}>
             No consolidation runs yet. The loop runs daily, or hit "Run now" to
             trigger one.
             <p className={`text-xs mt-2 ${muted}`}>
               Consolidation reviews your memories for duplicates and
-              contradictions, merges or prunes via a proposer → judge pipeline.
+              contradictions, then merges or prunes via a proposer and judge pipeline.
             </p>
-          </div>
+          </EmptyState>
         ) : (
           list.map((run: any) => {
             const isActive = run.status === "running";
@@ -192,7 +187,7 @@ export function ConsolidationPanel({ isDark }: { isDark: boolean }) {
               <div
                 key={run._id}
                 onClick={() => setSelectedId(run.runId)}
-                className={`border rounded-xl p-4 cursor-pointer transition-all duration-150 fade-in ${cardBg} ${hoverBg}`}
+                className={`${panelCardClass(isDark, "cursor-pointer px-4 py-3.5 transition-colors fade-in")} ${hoverBg}`}
               >
                 <div className="flex items-center gap-2.5 mb-1.5">
                   <span className="relative flex h-2.5 w-2.5 shrink-0">
@@ -207,7 +202,7 @@ export function ConsolidationPanel({ isDark }: { isDark: boolean }) {
                   </span>
                   <span
                     className={`text-sm font-medium ${
-                      isDark ? "text-slate-200" : "text-slate-800"
+                      isDark ? "text-zinc-100" : "text-zinc-900"
                     }`}
                   >
                     {statusCfg.label}
@@ -245,7 +240,7 @@ export function ConsolidationPanel({ isDark }: { isDark: boolean }) {
           })
         )}
       </div>
-    </div>
+    </PanelPage>
   );
 }
 
@@ -304,23 +299,23 @@ function ConsolidationDetail({
     setAllPhases(phases);
   }, [runId]);
 
-  const muted = isDark ? "text-slate-500" : "text-slate-400";
+  const muted = mutedTextClass(isDark);
 
   if (!run) {
     return (
-      <div className="p-5">
+      <div className="mx-auto max-w-[1040px] pb-10">
         <button
           onClick={onBack}
-          className={`text-xs rounded-md px-2.5 py-1 mb-3 ${
+          className={`mb-3 rounded-xl px-2.5 py-1.5 text-xs ${
             isDark
-              ? "text-slate-400 bg-slate-800"
-              : "text-slate-500 bg-slate-100"
+              ? "bg-white/5 text-zinc-400"
+              : "bg-zinc-100 text-zinc-500"
           }`}
         >
-          ← Back
+          Back
         </button>
         <div
-          className={`text-sm ${isDark ? "text-slate-600" : "text-slate-400"}`}
+          className={`text-sm ${mutedTextClass(isDark)}`}
         >
           Loading run {runId}…
         </div>
@@ -336,21 +331,17 @@ function ConsolidationDetail({
         : PHASE_CONFIG.started;
 
   return (
-    <div className="flex flex-col h-full -m-5 fade-in">
-      <div
-        className={`shrink-0 border-b px-5 py-3 flex items-center gap-3 ${
-          isDark ? "border-slate-800" : "border-slate-200"
-        }`}
-      >
+    <div className="mx-auto max-w-[1040px] space-y-4 pb-10 fade-in">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={onBack}
-          className={`text-xs rounded-md px-2.5 py-1 transition-colors ${
+          className={`rounded-xl px-2.5 py-1.5 text-xs transition-colors ${
             isDark
-              ? "text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700"
-              : "text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200"
+              ? "bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-zinc-200"
+              : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-800"
           }`}
         >
-          ← Back
+          Back
         </button>
         <span
           className={`relative flex h-2.5 w-2.5 shrink-0 ${statusCfg.color}`}
@@ -366,7 +357,7 @@ function ConsolidationDetail({
         </span>
         <span
           className={`text-sm font-medium ${
-            isDark ? "text-slate-200" : "text-slate-800"
+            isDark ? "text-zinc-100" : "text-zinc-900"
           }`}
         >
           Consolidation {runId.slice(-6)}
@@ -377,11 +368,7 @@ function ConsolidationDetail({
         </span>
       </div>
 
-      <div
-        className={`shrink-0 border-b px-5 py-3 grid grid-cols-4 gap-4 text-center ${
-          isDark ? "border-slate-800/60" : "border-slate-100"
-        }`}
-      >
+      <div className={panelCardClass(isDark, "grid grid-cols-4 gap-4 px-5 py-3 text-center")}>
         <SummaryStat
           label="proposals"
           value={run.proposalsCount}
@@ -412,9 +399,8 @@ function ConsolidationDetail({
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto debug-scroll p-5 space-y-6">
-        {/* Pipeline timeline (live + historical) */}
-        <section>
+      <div className={panelCardClass(isDark, "space-y-6 px-5 py-4")}>
+          <section>
           <div
             className={`text-[10px] font-semibold uppercase tracking-wider mb-3 ${muted}`}
           >
@@ -422,8 +408,9 @@ function ConsolidationDetail({
           </div>
           {allPhases.length === 0 ? (
             <div className={`text-sm ${muted}`}>
-              No live phase events captured. Scroll down for the stored
-              proposals and decisions from this run.
+              {run.status === "completed" || run.status === "failed"
+                ? "Phase events stream live; this run already finished. The full result is preserved below."
+                : "Waiting for phase events…"}
             </div>
           ) : (
             <div className="space-y-0">
@@ -439,7 +426,7 @@ function ConsolidationDetail({
                       {!isLast && (
                         <div
                           className={`flex-1 w-px mt-1 ${
-                            isDark ? "bg-slate-800" : "bg-slate-200"
+                            isDark ? "bg-white/10" : "bg-zinc-200"
                           }`}
                         />
                       )}
@@ -457,7 +444,7 @@ function ConsolidationDetail({
                       </div>
                       <div
                         className={`text-xs ${
-                          isDark ? "text-slate-400" : "text-slate-600"
+                          bodyTextClass(isDark)
                         } mono`}
                       >
                         {p.memoriesCount !== undefined &&
@@ -480,7 +467,6 @@ function ConsolidationDetail({
           )}
         </section>
 
-        {/* Stored reasoning — proposals + decisions + applied */}
         <ReasoningSection run={run} isDark={isDark} />
 
         {run.notes && (
@@ -534,9 +520,25 @@ function ReasoningSection({ run, isDark }: { run: any; isDark: boolean }) {
 
   const decisions: any[] = details.decisions ?? [];
   const applied: any[] = details.applied ?? [];
+  const snapshots: Record<string, { content: string; segment: string; tier: string }> =
+    details.memorySnapshots ?? {};
   const decisionByIdx = new Map<number, any>();
   for (const d of decisions) decisionByIdx.set(d.proposalIndex, d);
   const appliedByIdx = new Set<number>(applied.map((a) => a.proposalIndex));
+
+  const renderRef = (id: string) => (
+    <MemoryRef id={id} snap={snapshots[id]} isDark={isDark} />
+  );
+  const renderRefList = (ids: string[]) =>
+    ids.length === 0 ? (
+      <span className={muted}>(none)</span>
+    ) : (
+      <div className="space-y-1 mt-0.5">
+        {ids.map((id) => (
+          <div key={id}>{renderRef(id)}</div>
+        ))}
+      </div>
+    );
 
   return (
     <section>
@@ -590,11 +592,12 @@ function ReasoningSection({ run, isDark }: { run: any; isDark: boolean }) {
                 {p.type === "merge" && (
                   <>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>keep:</span> {p.keep}
+                      <span className={muted}>keep:</span>
+                      <div className="mt-0.5">{p.keep && renderRef(p.keep)}</div>
                     </div>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>absorb:</span>{" "}
-                      {(p.absorb ?? []).join(", ")}
+                      <span className={muted}>absorb:</span>
+                      {renderRefList(p.absorb ?? [])}
                     </div>
                     {p.rewriteContent && (
                       <div
@@ -610,18 +613,20 @@ function ReasoningSection({ run, isDark }: { run: any; isDark: boolean }) {
                 {p.type === "supersede" && (
                   <>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>newer:</span> {p.newer}
+                      <span className={muted}>newer:</span>
+                      <div className="mt-0.5">{p.newer && renderRef(p.newer)}</div>
                     </div>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>older:</span>{" "}
-                      {(p.older ?? []).join(", ")}
+                      <span className={muted}>older:</span>
+                      {renderRefList(p.older ?? [])}
                     </div>
                   </>
                 )}
                 {p.type === "prune" && (
                   <>
                     <div className={isDark ? "text-slate-300" : "text-slate-700"}>
-                      <span className={muted}>memoryId:</span> {p.memoryId}
+                      <span className={muted}>memoryId:</span>
+                      <div className="mt-0.5">{p.memoryId && renderRef(p.memoryId)}</div>
                     </div>
                     {p.reason && (
                       <div className={isDark ? "text-slate-400" : "text-slate-600"}>
@@ -682,6 +687,45 @@ function SummaryStat({
       <div className={`text-[10px] uppercase tracking-wider ${isDark ? "text-slate-500" : "text-slate-400"}`}>
         {label}
       </div>
+    </div>
+  );
+}
+
+function MemoryRef({
+  id,
+  snap,
+  isDark,
+}: {
+  id: string;
+  snap?: { content: string; segment: string; tier: string };
+  isDark: boolean;
+}) {
+  const muted = isDark ? "text-slate-500" : "text-slate-400";
+  const idColor = isDark ? "text-slate-500" : "text-slate-400";
+  const contentColor = isDark ? "text-slate-200" : "text-slate-800";
+  const tagColor = isDark ? "text-sky-400" : "text-sky-600";
+
+  if (!snap) {
+    return (
+      <span className={`text-[11px] mono ${idColor}`}>
+        {id} <span className={muted}>· (no snapshot)</span>
+      </span>
+    );
+  }
+
+  return (
+    <div
+      className={`rounded border px-2 py-1.5 ${
+        isDark ? "bg-slate-950/40 border-slate-800/80" : "bg-white border-slate-200"
+      }`}
+    >
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <span className={`text-[10px] mono ${idColor}`}>{id}</span>
+        <span className={`text-[9px] mono uppercase ${tagColor}`}>
+          {snap.tier}/{snap.segment}
+        </span>
+      </div>
+      <div className={`text-[11px] ${contentColor}`}>{snap.content}</div>
     </div>
   );
 }

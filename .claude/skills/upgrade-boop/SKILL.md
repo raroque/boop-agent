@@ -7,11 +7,11 @@ description: Pull upstream Boop changes into a customized fork. Previews, backs 
 
 Your Boop fork drifts from upstream as you customize it — system prompts tweaked, new automations, tuned memory thresholds, etc. This skill brings upstream changes in without blowing away those edits.
 
-Run `/upgrade-boop` inside the repo (from `claude`, not your normal shell).
+Run `/upgrade-boop` inside the repo from `claude`. This is the supported upgrade path: the agent previews the diff, creates rollback points, performs the merge, resolves conflicts when needed, and runs referenced migration skills.
 
 ## How it works
 
-**Preflight:** refuses to touch anything with a dirty working tree. If the `upstream` remote is missing, adds it (default: `https://github.com/chris/boop-agent.git` — the skill will ask).
+**Preflight:** refuses to touch anything with a dirty working tree. If the `upstream` remote is missing, adds it (default: `https://github.com/raroque/boop-agent.git` — the skill will ask).
 
 **Backup:** creates a timestamped rollback branch + tag before doing anything. Printed at the end so you can `git reset --hard` back.
 
@@ -54,7 +54,7 @@ If output is non-empty:
 - Tell the user to commit or stash first. Stop.
 
 Confirm remotes with `git remote -v`. If `upstream` is missing:
-- Ask the user for the upstream repo URL (default: `https://github.com/chris/boop-agent.git`).
+- Ask the user for the upstream repo URL (default: `https://github.com/raroque/boop-agent.git`).
 - `git remote add upstream <url>`
 - `git fetch upstream --prune`
 
@@ -95,7 +95,7 @@ Bucket files into the categories listed in **How it works** (Core, Integrations,
 
 **Large-drift check:** if upstream has many commits and the user has heavy local drift, mention that starting fresh and reapplying customizations might be cleaner than merging. Don't push — offer.
 
-Ask the user with `AskUserQuestion`:
+Ask the user with the active agent's user-question mechanism:
 - A) **Full update** — merge all upstream changes (default)
 - B) **Selective** — cherry-pick specific commits
 - C) **Abort** — preview only
@@ -171,7 +171,7 @@ If any:
 - Display a warning header: "This update introduces breaking changes that may need action:"
 - Show each `[BREAKING]` line in full.
 - Collect referenced skills.
-- `AskUserQuestion` (multiSelect: true):
+- Ask the user with the active agent's user-question mechanism (multi-select when available):
   - One option per referenced skill
   - "Skip — I'll handle these manually"
 - For each selected skill, invoke via the Skill tool.

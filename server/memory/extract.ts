@@ -1,21 +1,27 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { api } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 import { embed } from "../embeddings.js";
-import { aggregateUsageFromResult, EMPTY_USAGE, type UsageTotals } from "../usage.js";
+import { getRuntimeConfig, type RuntimeConfig } from "../runtime-config.js";
+import { runAgentRuntime } from "../runtimes/index.js";
+import { EMPTY_USAGE, type UsageTotals } from "../usage.js";
 import { SEGMENT_DEFAULTS, makeMemoryId, type MemorySegment } from "./types.js";
+import { buildPromptWithImages, fetchStoredBytes } from "../images/content-blocks.js";
 
 const EXTRACTION_PROMPT = `You are a memory-extraction subagent.
 
-Given a user message + assistant reply, extract any DURABLE facts worth remembering.
+Given a user message + assistant reply (and, sometimes, an image the
+user sent), extract any DURABLE facts worth remembering.
+
 Return STRICT JSON:
 {"facts":[
-  {"content":"...","segment":"identity|preference|correction|relationship|project|knowledge|context","importance":0.0-1.0,"corrects":"what was wrong, if this is a correction"}
+  {"content":"...","segment":"identity|preference|correction|relationship|project|knowledge|context","importance":0.0-1.0,"corrects":"what was wrong, if this is a correction","describesImage":true|false}
 ]}
 
 Rules:
 - Prefer fewer, higher-quality facts over many trivial ones.
 - Skip anything transient ("I'm tired right now"). Context facts should describe ongoing state, not momentary feelings.
+- If the user sent an image and it depicts something durable (a pet, a place they live, a project they're working on, a vehicle they own, a document they reference), produce a SINGLE descriptive fact for that image. content: "User sent a photo: <one-sentence factual description>". segment: knowledge (or relationship for people, project for projects). describesImage: true.
+- Skip image-description for fleeting screenshots ("here's the receipt from today") — those are context at best, and 3-day cleanup will reclaim them.
 - Segment meanings:
   - identity: name, role, location, core traits (highest priority — rarely changes)
   - correction: the user explicitly corrected something. "No, it's Sarah not Sara." "Actually I prefer X not Y." Set "corrects" to the wrong value or prior belief being overturned. Use this instead of preference/identity when the user is FIXING something rather than stating it fresh.
@@ -26,6 +32,7 @@ Rules:
   - context: current ongoing situation
 - Importance defaults: identity 0.85, correction 0.80, relationship 0.75, preference 0.70, project 0.65, knowledge 0.60, context 0.40. Bump up or down only when you have a clear reason — trust the defaults.
 - The "corrects" field is ONLY for segment="correction". Omit it (or null) for everything else.
+- The "describesImage" field is true ONLY for the one fact (if any) that describes the inbound image. Omit it (or false) for all other facts.
 - Return empty facts array if nothing durable.
 
 Respond with ONLY the JSON object.`;
@@ -35,6 +42,7 @@ interface ExtractedFact {
   segment: MemorySegment;
   importance: number;
   corrects?: string | null;
+  describesImage?: boolean;
 }
 
 export async function extractAndStore(opts: {
@@ -42,35 +50,38 @@ export async function extractAndStore(opts: {
   userMessage: string;
   assistantReply: string;
   turnId: string;
+  runtimeConfig?: RuntimeConfig;
+  imageStorageIds?: string[];
 }): Promise<void> {
   const started = Date.now();
-  const requestedModel = process.env.BOOP_MODEL ?? "claude-sonnet-4-6";
   try {
-    const payload = `USER: ${opts.userMessage}\n\nASSISTANT: ${opts.assistantReply}`;
-    let buffer = "";
-    let usage: UsageTotals = { ...EMPTY_USAGE };
-    for await (const msg of query({
+    const runtimeConfig = opts.runtimeConfig ?? (await getRuntimeConfig());
+    const baseText = `USER: ${opts.userMessage}\n\nASSISTANT: ${opts.assistantReply}`;
+    const payload =
+      opts.imageStorageIds && opts.imageStorageIds.length > 0
+        ? await buildPromptWithImages({
+            text: baseText,
+            imageStorageIds: opts.imageStorageIds,
+            fetchBytes: fetchStoredBytes,
+          })
+        : baseText;
+    let usage: UsageTotals = { ...EMPTY_USAGE, model: runtimeConfig.model };
+    const result = await runAgentRuntime(runtimeConfig, {
       prompt: payload,
-      options: {
-        systemPrompt: EXTRACTION_PROMPT,
-        model: requestedModel,
-        permissionMode: "bypassPermissions",
-      },
-    })) {
-      if (msg.type === "assistant") {
-        for (const block of msg.message.content) {
-          if (block.type === "text") buffer += block.text;
-        }
-      } else if (msg.type === "result") {
-        usage = aggregateUsageFromResult(msg, requestedModel);
-      }
-    }
+      systemPrompt: EXTRACTION_PROMPT,
+      tools: [],
+      mode: "background",
+    });
+    const buffer = result.text;
+    usage = result.usage;
 
     if (usage.costUsd > 0 || usage.inputTokens > 0) {
       await convex.mutation(api.usageRecords.record, {
         source: "extract",
         conversationId: opts.conversationId,
         turnId: opts.turnId,
+        runtime: runtimeConfig.runtime,
+        billingMode: runtimeConfig.billingMode,
         model: usage.model,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
@@ -101,6 +112,10 @@ export async function extractAndStore(opts: {
         f.segment === "correction" && f.corrects
           ? JSON.stringify({ corrects: f.corrects })
           : undefined;
+      const isImageDescription =
+        Boolean((f as { describesImage?: boolean }).describesImage) &&
+        opts.imageStorageIds !== undefined &&
+        opts.imageStorageIds.length > 0;
       await convex.mutation(api.memoryRecords.upsert, {
         memoryId,
         content: f.content,
@@ -111,6 +126,10 @@ export async function extractAndStore(opts: {
         sourceTurn: opts.turnId,
         embedding,
         metadata,
+        // TODO(codegen): drop cast once schema push regenerates Convex API.
+        imageStorageIds: isImageDescription
+          ? (opts.imageStorageIds as never)
+          : undefined,
       });
     }
 

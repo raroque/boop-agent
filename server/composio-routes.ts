@@ -13,6 +13,8 @@ import {
   renameConnection,
 } from "./composio.js";
 import { refreshIntegrations } from "./integrations/registry.js";
+import { getStoredWebhookSecret } from "./composio-webhook.js";
+import { handleEmailEvent } from "./proactive-email.js";
 
 export function createComposioRouter(): express.Router {
   const router = express.Router();
@@ -168,6 +170,81 @@ export function createComposioRouter(): express.Router {
       res.status(500).json({ error: String(err) });
     }
   });
+
+  // Composio webhook receiver. The raw-body parser is mounted in
+  // server/index.ts BEFORE express.json (otherwise the JSON parser would
+  // consume the stream first and we'd lose the bytes needed for HMAC
+  // verification). Respond 200 fast — Composio only retries on non-2xx, so
+  // post-ack failures in the async dispatch don't trigger redeliveries.
+  router.post(
+    "/webhook",
+    async (req, res) => {
+      const composio = getComposio();
+      if (!composio) {
+        res.status(503).json({ error: "composio disabled" });
+        return;
+      }
+      const id = String(req.header("webhook-id") ?? "");
+      const signature = String(req.header("webhook-signature") ?? "");
+      const timestamp = String(req.header("webhook-timestamp") ?? "");
+      const rawBody = Buffer.isBuffer(req.body) ? req.body.toString("utf-8") : "";
+      if (!id || !signature || !timestamp || !rawBody) {
+        res.status(400).json({ error: "missing webhook headers/body" });
+        return;
+      }
+      // Independent freshness check on top of the SDK's HMAC verify. The
+      // header is Unix seconds (some providers ship ms; tolerate both).
+      // Reject anything more than ~5 min off so a captured signed request
+      // can't be replayed indefinitely if a future SDK relaxes its own
+      // staleness check.
+      const tsNum = Number(timestamp);
+      if (Number.isFinite(tsNum)) {
+        const tsMs = tsNum > 1e12 ? tsNum : tsNum * 1000;
+        const skew = Math.abs(Date.now() - tsMs);
+        if (skew > 5 * 60 * 1000) {
+          console.warn(
+            `[composio-webhook] stale timestamp (skew=${skew}ms); rejecting`,
+          );
+          res.status(401).end();
+          return;
+        }
+      }
+      const secret = await getStoredWebhookSecret();
+      if (!secret) {
+        console.warn("[composio-webhook] no stored secret; cannot verify — rejecting");
+        res.status(401).end();
+        return;
+      }
+      let verified;
+      try {
+        verified = await composio.triggers.verifyWebhook({
+          id,
+          signature,
+          timestamp,
+          payload: rawBody,
+          secret,
+        });
+      } catch (err) {
+        console.warn("[composio-webhook] signature verification failed", err);
+        res.status(401).end();
+        return;
+      }
+      // Ack immediately; dispatch is fire-and-forget.
+      res.json({ ok: true });
+      // Defensive null-guard: verifyWebhook normally throws on bad
+      // signature, but if a future SDK version resolves with a falsy /
+      // payload-less result instead, accessing verified.payload would crash
+      // post-ack and surface as an unhandled rejection.
+      const payload = verified?.payload;
+      if (!payload) {
+        console.warn("[composio-webhook] verified result had no payload; skipping dispatch");
+        return;
+      }
+      Promise.resolve()
+        .then(() => handleEmailEvent(payload))
+        .catch((err) => console.error("[composio-webhook] dispatch failed", err));
+    },
+  );
 
   return router;
 }

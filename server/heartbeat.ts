@@ -4,6 +4,7 @@ import { cancelAgent, runningAgentIds } from "./execution-agent.js";
 import { broadcast } from "./broadcast.js";
 
 const STALE_MS = 15 * 60 * 1000;
+const ORPHANED_MS = 90 * 1000;
 
 export async function sweepStaleAgents(): Promise<void> {
   const runningInDb = await convex.query(api.agents.list, { status: "running", limit: 100 });
@@ -12,15 +13,19 @@ export async function sweepStaleAgents(): Promise<void> {
 
   for (const a of runningInDb) {
     const age = now - a.startedAt;
-    if (age < STALE_MS) continue;
+    const isLive = live.has(a.agentId);
+    if (isLive && age < STALE_MS) continue;
+    if (!isLive && age < ORPHANED_MS) continue;
 
-    if (live.has(a.agentId)) {
+    if (isLive) {
       cancelAgent(a.agentId);
     }
     await convex.mutation(api.agents.update, {
       agentId: a.agentId,
       status: "failed",
-      error: `Marked failed after ${Math.round(age / 1000)}s (stale heartbeat).`,
+      error: isLive
+        ? `Marked failed after ${Math.round(age / 1000)}s (stale heartbeat).`
+        : `Marked failed after ${Math.round(age / 1000)}s (orphaned after backend restart).`,
     });
     broadcast("agent_stale", { agentId: a.agentId });
   }

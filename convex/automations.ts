@@ -8,6 +8,7 @@ export const create = mutation({
     task: v.string(),
     integrations: v.array(v.string()),
     schedule: v.string(),
+    timezone: v.optional(v.string()),
     conversationId: v.optional(v.string()),
     notifyConversationId: v.optional(v.string()),
     nextRunAt: v.optional(v.number()),

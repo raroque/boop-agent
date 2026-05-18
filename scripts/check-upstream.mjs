@@ -76,7 +76,7 @@ function printBehindBanner(ahead) {
 ${C.yellow}╭──────────────────────────────────────────────────────────────╮
 │ ${pad(line, 60)} │
 │                                                              │
-│ Open \`claude\` in this repo and run:                          │
+│ Open Codex or Claude in this repo and run:                    │
 │   ${pad(cmd, 58)} │
 │                                                              │
 │ Previews diffs, tags a rollback, merges, surfaces [BREAKING] │
@@ -93,7 +93,8 @@ function printNoUpstreamHint() {
   console.log(
     `${C.dim}  ℹ Tip: set up upstream for new-version checks on \`npm run dev\`:
      ${C.bold}git remote add upstream https://github.com/raroque/boop-agent.git${C.reset}${C.dim}
-     Then \`claude\` → \`/upgrade-boop\` whenever upstream has changes.${C.reset}
+     Then open Codex or Claude in this repo and run \`/upgrade-boop\`
+     whenever upstream has changes.${C.reset}
 `,
   );
 }

@@ -8,7 +8,7 @@
 //
 // Behavior:
 //   1. Runs `sendblue webhooks` to list current inbound hooks.
-//   2. Removes any stale *.ngrok-free.app / *.ngrok.app / trycloudflare.com
+//   2. Removes any stale *.ngrok-free.app / *.ngrok-free.dev / *.ngrok.app / trycloudflare.com
 //      webhooks of type=receive that don't match the new URL.
 //   3. Adds the new URL as type=receive (unless already registered).
 
@@ -69,7 +69,7 @@ function parseWebhookLines(output) {
   return hooks;
 }
 
-const STALE_DOMAIN_RE = /(ngrok-free\.app|ngrok\.app|trycloudflare\.com|loca\.lt)/;
+const STALE_DOMAIN_RE = /(ngrok-free\.(app|dev)|ngrok\.app|trycloudflare\.com|loca\.lt)/;
 
 async function main() {
   const url = process.argv[2];

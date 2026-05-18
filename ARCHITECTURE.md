@@ -17,7 +17,7 @@ boop-agent is a small distributed system disguised as a single-server app. Four 
 │                                    (one per task)               │
 │                                           │                     │
 │                                           ▼                     │
-│                                    Integrations (MCP)           │
+│                                    Integrations (MCP/tools)     │
 └────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -44,7 +44,7 @@ The front door. One instance per user turn. Its job is to **decide**, not to do.
 Spawned per task. Ephemeral. One instance, one job, one result.
 
 - Gets the specific `task` the interaction agent wrote (not the raw user message).
-- Loads **only** the integrations named in the spawn call.
+- Loads **only** the integrations named in the spawn call. That can include Composio toolkits or the optional local `browser` integration.
 - System prompt drills: iMessage-friendly output, draft-before-send for any external action.
 - Logs every `tool_use`, `tool_result`, and text block to Convex so the debug dashboard can replay it.
 - Runs with `permissionMode: bypassPermissions` — the interaction agent is the gatekeeper.
@@ -104,7 +104,7 @@ You can see every draft (pending, sent, rejected) in the Drafts tab of the debug
 
 ### 6. Heartbeat + lifecycle — `server/heartbeat.ts`
 
-Every 60 seconds, scan `executionAgents` with status `running`. Any whose `startedAt` is older than 15 minutes gets marked `failed` and the in-process `AbortController` is triggered if it still exists. This handles both server restarts (controller gone, DB still "running") and genuinely stuck agents.
+Every 60 seconds, scan `executionAgents` with status `running`. Live in-process agents are marked `failed` after 15 minutes and their `AbortController` is triggered. Orphaned rows with no live controller are marked `failed` after 90 seconds, which covers server restarts or watcher reloads that interrupt an agent before it can write a final status.
 
 HTTP routes for the debug dashboard:
 - `POST /agents/:id/cancel` — abort an in-flight agent
@@ -158,6 +158,39 @@ Env:
 
 ---
 
+### 9. Local browser use — Patchright Chrome (`server/browser/`)
+
+Local browser use is an optional integration named `browser`. It is separate from Composio and is deliberately hidden from the dispatcher until the user enables **Settings → Local browser use**.
+
+Flow:
+
+1. The debug dashboard writes `browser_*` settings into Convex's `settings` table.
+2. `server/runtime-config.ts:getBrowserSettings()` reads those settings, falling back to `.env.local` values only when no runtime override exists.
+3. `server/integrations/browser-loader.ts` registers the integration with `isEnabled()`, so `listEnabledIntegrations()` exposes `browser` only when enabled.
+4. The dispatcher forces `spawn_agent(integrations: ["browser"])` when the user explicitly asks for local browser/Chrome/Patchright, the browser integration, or combines a browser/Chrome request with "not Composio" / "not native integration".
+5. `server/browser/launcher.ts` lazily imports Patchright, launches a persistent Chrome profile, and reuses it across browser tool calls.
+
+HTTP routes (`server/browser-routes.ts`, mounted at `/browser`) are local-only. Requests with public `Host`, `X-Forwarded-Host`, or non-local `X-Forwarded-For` headers are rejected before any browser action runs.
+
+- `GET  /status` — current settings, Patchright version, detected Chrome path, active URL, running state.
+- `POST /launch` — launch/reuse the local browser with the saved or provided URL.
+- `POST /login` — force a visible browser and return the handoff message: "I need you to log in first. I’ve spawned an instance on your machine."
+- `POST /close` — close the local browser context.
+- `POST /install` — run `npx -y patchright install chrome`.
+
+Runtime shape:
+- Claude gets an MCP server named `browser`, so tool names are `mcp__browser__browser_open`, etc.
+- Codex gets dynamic runtime tools under `local_browser`, so it avoids the reserved Responses API browser namespace while keeping the user-facing integration name `browser`.
+- The Patchright package is an optional dependency and the browser binary is installed only by explicit setup/UI opt-in.
+
+Security model:
+- Boop does not store third-party passwords or OAuth tokens for local browser use. Browser cookies and sessions live in the chosen Chrome profile directory.
+- `browser_fill` redacts the typed value before tool-use arguments are written to Convex agent logs.
+- The feature is for login-required services, visual browser workflows, JS-heavy apps, and bot-wall-sensitive pages where native integrations or `WebFetch` are not enough.
+- The login handoff is separately gated by `browser_login_handoff`, so a user can allow browser automation without allowing agent-triggered login windows.
+
+---
+
 ## Data model (Convex)
 
 Seven tables. Read `convex/schema.ts` for the exact shape.
@@ -175,7 +208,7 @@ Seven tables. Read `convex/schema.ts` for the exact shape.
 | `consolidationRuns` | History of consolidation passes | runId, proposalsCount, mergedCount, prunedCount |
 | `sendblueDedup` | Webhook dedup by `message_handle` | handle, claimedAt |
 | `memoryEvents` | Append-only event log for the debug UI | eventType, conversationId, memoryId, data |
-| `settings` | Runtime overrides (model, etc.) read by `server/runtime-config.ts` | key, value, updatedAt |
+| `settings` | Runtime overrides (model, browser settings, etc.) read by `server/runtime-config.ts` | key, value, updatedAt |
 
 `memoryRecords` also carries a `vectorIndex("by_embedding")` with 1024-dimension vectors filtered by `lifecycle`.
 
@@ -212,6 +245,8 @@ Steps 6–7 run in parallel where safe. Step 8 is fire-and-forget — the user n
 **Memory lives next to execution, not in the model.** Claude has no memory across turns. We re-hydrate the relevant slice every turn via `recall()`. Writing is explicit (`write_memory`) or inferred (`extract.ts`). Nothing is implicit.
 
 **Integrations via Composio.** Tool-calling is what the SDK does best. Composio handles the OAuth, token-refresh, and 1000+ service adapters we'd otherwise hand-roll. Each connected toolkit becomes an MCP server on demand, scoped to just that toolkit so the sub-agent's context stays small.
+
+**Local browser is opt-in.** Browser automation has a different trust profile from API integrations because it controls a real local Chrome profile. Keeping it disabled by default, hidden from the dispatcher until enabled, and separately gating login handoff keeps the default agent surface small while still covering services that require a human session or a visual browser.
 
 **Convex for state.** Reactive queries power the debug UI without polling. Durable enough for real use, free tier generous enough for a personal agent.
 
