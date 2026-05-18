@@ -18,3 +18,6 @@ data/
 debug/dist/
 .cache/
 .tsbuildinfo
+website/.next/
+website/tsconfig.tsbuildinfo
+website/node_modules/
