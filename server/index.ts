@@ -19,6 +19,7 @@ import { createMemoryRouter } from "./memory-routes.js";
 import { createBrowserRouter } from "./browser-routes.js";
 import { closeLocalBrowser } from "./browser/launcher.js";
 import { createChangelogRouter } from "./changelog.js";
+import { createTelegramRouter } from "./telegram.js";    
 import {
   getRuntimeConfig,
   resolveModelInput,
@@ -129,6 +130,7 @@ async function main() {
   app.use("/memory", createMemoryRouter());
   app.use("/browser", createBrowserRouter());
   app.use("/changelog", createChangelogRouter());
+  app.use("/telegram", createTelegramRouter());  
 
   app.post("/agents/:id/cancel", (req, res) => {
     const ok = cancelAgent(req.params.id);

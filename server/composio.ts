@@ -47,6 +47,7 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
   { slug: "linkedin", displayName: "LinkedIn", authMode: "managed" },
   { slug: "instagram", displayName: "Instagram", authMode: "managed" },
   { slug: "youtube", displayName: "YouTube", authMode: "managed" },
+  { slug: "telegram", displayName: "Telegram", authMode: "managed" },
 ];
 
 const DISPLAY_NAME_BY_SLUG = new Map(CURATED_TOOLKITS.map((t) => [t.slug, t.displayName]));
