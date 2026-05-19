@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import CoreGraphics
 
 /// Curated, type-safe list of Lucide icons we bundle. The agent's
 /// set_thread_icon tool returns one of these names; we match against
@@ -10,10 +12,14 @@ enum LucideName: String, CaseIterable, Sendable {
     case arrowLeft = "arrow-left"
     case paperclip
     case moreHorizontal = "more-horizontal"
+    case ellipsis
     case chevronUp = "chevron-up"
     case chevronDown = "chevron-down"
+    case chevronLeft = "chevron-left"
+    case messageSquare = "message-square"
     case download, share, check, circle
     case alertCircle = "alert-circle"
+    case bot, user, image, filter
 
     // thread-topic
     case calendar, clock
@@ -53,18 +59,64 @@ enum LucideName: String, CaseIterable, Sendable {
     }
 }
 
-/// SwiftUI view rendering a Lucide icon from our asset catalog.
-/// Uses the asset-catalog template-rendering mode so we can tint with
-/// `.foregroundStyle`.
+/// Renders a Lucide icon from its bundled PDF. Uses `CGPDFDocument` + a
+/// cached `UIImage` so the work happens once per icon name. We bypass
+/// `Assets.xcassets` for the Lucide set because actool refuses to thin
+/// a 26.5-SDK asset catalog against a 26.4 simulator runtime. PDFs live
+/// directly under `Boop/Resources/Lucide/<name>.pdf` and get bundled as
+/// raw resources.
 struct LucideIcon: View {
     let name: LucideName
     var size: CGFloat = 22
 
     var body: some View {
-        Image("Lucide/\(name.rawValue)")
-            .resizable()
-            .renderingMode(.template)
-            .scaledToFit()
-            .frame(width: size, height: size)
+        if let image = LucideIconCache.image(for: name.rawValue) {
+            Image(uiImage: image)
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .frame(width: size, height: size)
+        } else {
+            // Missing asset — render an empty slot of the right size so
+            // layout doesn't shift. Useful signal in dev too.
+            Color.clear.frame(width: size, height: size)
+                .accessibilityLabel("missing icon: \(name.rawValue)")
+        }
+    }
+}
+
+/// Process-wide cache of rasterized Lucide PDFs.
+private enum LucideIconCache {
+    private static var cache: [String: UIImage] = [:]
+    private static let lock = NSLock()
+
+    static func image(for name: String) -> UIImage? {
+        lock.lock(); defer { lock.unlock() }
+        if let cached = cache[name] { return cached }
+        guard let url = Bundle.main.url(forResource: name, withExtension: "pdf"),
+              let document = CGPDFDocument(url as CFURL),
+              let page = document.page(at: 1)
+        else { return nil }
+
+        // PDFs from rsvg-convert are 24×24pt at PDF coordinates. Rasterize
+        // at 3× for retina; the SwiftUI Image then scales DOWN to the
+        // requested .frame size, which preserves sharpness across all the
+        // sizes the design system uses (16, 18, 20, 22, 24, 26 pt).
+        let pageRect = page.getBoxRect(.mediaBox)
+        let scale: CGFloat = 3.0
+        let renderSize = CGSize(width: pageRect.width * scale, height: pageRect.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: renderSize, format: format)
+        let rendered = renderer.image { ctx in
+            let cg = ctx.cgContext
+            cg.translateBy(x: 0, y: renderSize.height)
+            cg.scaleBy(x: scale, y: -scale)
+            cg.drawPDFPage(page)
+        }
+        let templated = rendered.withRenderingMode(.alwaysTemplate)
+        cache[name] = templated
+        return templated
     }
 }

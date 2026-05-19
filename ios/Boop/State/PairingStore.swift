@@ -25,7 +25,20 @@ final class PairingStore {
         // Restore prior pairing if the bearer is in Keychain.
         if let bearer = KeychainStore.loadBearer(), !bearer.isEmpty {
             phase = .paired(bearer: bearer)
+            return
         }
+        #if DEBUG
+        // Simulator-only shortcut: if a bearer is staged in UserDefaults
+        // (boop.debug.bearer), promote it to Keychain and enter .paired.
+        // Useful for `simctl` driven UI fine-tuning without driving the
+        // actual pairing dance.
+        if let staged = UserDefaults.standard.string(forKey: "boop.debug.bearer"),
+           !staged.isEmpty {
+            KeychainStore.saveBearer(staged)
+            UserDefaults.standard.removeObject(forKey: "boop.debug.bearer")
+            phase = .paired(bearer: staged)
+        }
+        #endif
     }
 
     /// Kick off a new pairing attempt: POST /pair/create, then begin

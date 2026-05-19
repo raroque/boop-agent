@@ -100,3 +100,61 @@ export const listForThread = query({
       .take(cap);
   },
 });
+
+/**
+ * Powers the iOS Files screen. Returns every message-attachment pair for a
+ * device across all its threads (open + archived), flattened and sorted
+ * newest-first. Each row carries the thread's icon so the UI can render the
+ * tint chip without a second lookup.
+ */
+export const listFilesForDevice = query({
+  args: { deviceId: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, { deviceId, limit }) => {
+    const cap = Math.min(limit ?? 100, 500);
+    const threads = await ctx.db
+      .query("threads")
+      .withIndex("by_device", (q) => q.eq("deviceId", deviceId))
+      .collect();
+    const iconByThread = new Map<string, string | undefined>();
+    for (const t of threads) iconByThread.set(t._id, t.icon);
+
+    const flat: Array<{
+      messageId: string;
+      threadId: string;
+      threadIcon: string | undefined;
+      role: "user" | "assistant" | "system";
+      createdAt: number;
+      attachment: {
+        kind: "image" | "pdf" | "doc";
+        mimeType: string;
+        sizeBytes: number;
+        storageId: string;
+        signedUrl?: string;
+        description?: string;
+        filename?: string;
+      };
+    }> = [];
+
+    for (const t of threads) {
+      const msgs = await ctx.db
+        .query("messages")
+        .withIndex("by_thread", (q) => q.eq("threadId", t._id))
+        .order("desc")
+        .take(cap);
+      for (const m of msgs) {
+        for (const a of m.attachments ?? []) {
+          flat.push({
+            messageId: m._id,
+            threadId: t._id,
+            threadIcon: iconByThread.get(t._id),
+            role: m.role,
+            createdAt: m.createdAt,
+            attachment: a,
+          });
+        }
+      }
+    }
+    flat.sort((a, b) => b.createdAt - a.createdAt);
+    return flat.slice(0, cap);
+  },
+});

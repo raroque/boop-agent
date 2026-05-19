@@ -117,7 +117,12 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
     task: opts.task,
     mcpServers: opts.integrations,
   });
-  broadcast("agent_spawned", { agentId, name, task: opts.task });
+  broadcast("agent_spawned", {
+    agentId,
+    conversationId: opts.conversationId,
+    name,
+    task: opts.task,
+  });
 
   let buffer = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
@@ -188,7 +193,12 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
               ...(accounts.length ? { accounts } : {}),
               content: JSON.stringify(block.input).slice(0, 2000),
             });
-            broadcast("agent_tool", { agentId, toolName: block.name, accounts });
+            broadcast("agent_tool", {
+              agentId,
+              conversationId: opts.conversationId,
+              toolName: block.name,
+              accounts,
+            });
           }
         }
       } else if (msg.type === "user") {
@@ -255,7 +265,12 @@ export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResu
       durationMs: Date.now() - agentStart,
     });
   }
-  broadcast("agent_done", { agentId, status, result: buffer.slice(0, 200) });
+  broadcast("agent_done", {
+    agentId,
+    conversationId: opts.conversationId,
+    status,
+    result: buffer.slice(0, 200),
+  });
 
   return { agentId, result: buffer || errorMsg || "(no output)", status };
 }

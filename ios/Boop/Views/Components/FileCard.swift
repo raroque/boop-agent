@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A file in the chat (sent by user OR produced by the agent). Tap → opens
-/// the full-screen FilePreviewScreen.
+/// AttachmentPreviewSheet.
 struct FileCard: View {
     let filename: String
     let kind: String        // "md" | "pdf" | "jpg" | "txt" | etc.

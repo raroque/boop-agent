@@ -122,8 +122,13 @@ const STREAM_EVENTS = new Set([
   "assistant_delta",
   "assistant_message",
   "assistant_ack",
+  "assistant_attachments",
   "thinking",
   "error",
+  "thread_icon",
+  "agent_spawned",
+  "agent_tool",
+  "agent_done",
 ]);
 
 // ---------- router ----------
@@ -306,6 +311,98 @@ export function createIosRouter(): Router {
       threadId: effectiveThreadId,
     }).catch((err) => console.error("[ios] runTurn failed", err));
     res.json({ ok: true, conversationId, threadId: effectiveThreadId });
+  });
+
+  // ---------- Agents (read-only) ----------
+
+  // GET /agents?threadId=<id>&status=<filter>&limit=N — list execution
+  // agents that ran for the given thread, newest first. Drives the Live
+  // Agents sheet on iOS. Requires the thread to belong to the authed
+  // device (we scope via the conversationId `ios:<deviceId>:<threadId>`).
+  router.get("/agents", requireBearer, async (req: AuthedRequest, res) => {
+    const deviceId = req.deviceId!;
+    const threadId = typeof req.query.threadId === "string" ? req.query.threadId : null;
+    if (!threadId) {
+      res.status(400).json({ error: "threadId required" });
+      return;
+    }
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    const limit = Math.min(Number(req.query.limit ?? 30) || 30, 100);
+    const conversationId = `ios:${deviceId}:${threadId}`;
+    try {
+      const agents = await convex.query(api.agents.listForConversation, {
+        conversationId,
+        status: status as any,
+        limit,
+      });
+      res.json({ agents });
+    } catch (err) {
+      console.error("[ios] agents:list failed", err);
+      res.status(500).json({ error: "agents fetch failed" });
+    }
+  });
+
+  // GET /agents/:agentId — single agent row.
+  router.get("/agents/:agentId", requireBearer, async (req: AuthedRequest, res) => {
+    const agentId = req.params.agentId;
+    try {
+      const agent = await convex.query(api.agents.get, { agentId });
+      if (!agent) {
+        res.status(404).json({ error: "agent not found" });
+        return;
+      }
+      // Defence-in-depth: ensure the agent's conversation belongs to this device.
+      const deviceId = req.deviceId!;
+      if (agent.conversationId && !agent.conversationId.startsWith(`ios:${deviceId}:`)) {
+        res.status(403).json({ error: "forbidden" });
+        return;
+      }
+      res.json({ agent });
+    } catch (err) {
+      console.error("[ios] agents:get failed", err);
+      res.status(500).json({ error: "agent fetch failed" });
+    }
+  });
+
+  // GET /agents/:agentId/logs — the tool/text/error timeline for an agent.
+  router.get("/agents/:agentId/logs", requireBearer, async (req: AuthedRequest, res) => {
+    const agentId = req.params.agentId;
+    const limit = Math.min(Number(req.query.limit ?? 200) || 200, 500);
+    try {
+      const agent = await convex.query(api.agents.get, { agentId });
+      if (!agent) {
+        res.status(404).json({ error: "agent not found" });
+        return;
+      }
+      const deviceId = req.deviceId!;
+      if (agent.conversationId && !agent.conversationId.startsWith(`ios:${deviceId}:`)) {
+        res.status(403).json({ error: "forbidden" });
+        return;
+      }
+      const logs = await convex.query(api.agents.getLogs, { agentId, limit });
+      res.json({ agent, logs });
+    } catch (err) {
+      console.error("[ios] agents:logs failed", err);
+      res.status(500).json({ error: "agent logs fetch failed" });
+    }
+  });
+
+  // GET /files — authed. Returns all files (message attachments) across
+  // every thread for the authed device, newest-first. Powers the Files
+  // screen surfaced from the menu sheet.
+  router.get("/files", requireBearer, async (req: AuthedRequest, res) => {
+    const deviceId = req.deviceId!;
+    const limit = Math.min(Number(req.query.limit ?? 100) || 100, 500);
+    try {
+      const files = await convex.query(api.messages.listFilesForDevice, {
+        deviceId,
+        limit,
+      });
+      res.json({ files });
+    } catch (err) {
+      console.error("[ios] files:list failed", err);
+      res.status(500).json({ error: "files fetch failed" });
+    }
   });
 
   // GET /messages — authed history fetch. Returns newest-first, like

@@ -8,7 +8,11 @@ import { extractAndStore } from "./memory/extract.js";
 import { availableIntegrations, describeIntegrations, spawnExecutionAgent } from "./execution-agent.js";
 import { createAutomationMcp } from "./automation-tools.js";
 import { createDraftDecisionMcp } from "./draft-tools.js";
-import { createSelfMcp, setCurrentTurnThreadId } from "./self-tools.js";
+import {
+  createSelfMcp,
+  setCurrentTurnConversationId,
+  setCurrentTurnThreadId,
+} from "./self-tools.js";
 import { getRuntimeModel } from "./runtime-config.js";
 import { getChannelPrimary } from "./runtime-config.js";
 import { broadcast } from "./broadcast.js";
@@ -429,6 +433,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   let usage: UsageTotals = { ...EMPTY_USAGE };
   let deltaSeq = 0;
   setCurrentTurnThreadId(opts.threadId ?? null);
+  setCurrentTurnConversationId(opts.threadId ? opts.conversationId : null);
   try {
     for await (const msg of query({
       prompt,
@@ -515,6 +520,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     reply = "Sorry — I hit an error processing that. Try again in a moment.";
   } finally {
     setCurrentTurnThreadId(null);
+    setCurrentTurnConversationId(null);
   }
 
   // Sometimes the model produces a placeholder string like "(no output)" or

@@ -2,8 +2,11 @@ import SwiftUI
 
 struct ChatView: View {
     @Binding var showMenu: Bool
+    var onOpenAgent: (String?) -> Void = { _ in }
+
     @Environment(ChatStore.self) private var chat
     @Environment(ThreadsStore.self) private var threads
+    @Environment(AgentsStore.self) private var agentsStore
     @State private var draft: String = ""
     @FocusState private var composerFocused: Bool
 
@@ -23,9 +26,9 @@ struct ChatView: View {
 
     private var header: some View {
         HStack {
-            Text("Boop")
-                .font(BoopFont.semibold(17))
-                .foregroundStyle(BoopColor.textPrimary)
+            AnimatedGIFView(name: "boop")
+                .frame(width: 47, height: 47)
+                .accessibilityLabel("Boop")
                 .accessibilityAddTraits(.isHeader)
             Spacer()
             Button(action: { showMenu = true }) {
@@ -33,12 +36,8 @@ struct ChatView: View {
             }
             .accessibilityLabel("Menu")
         }
-        .padding(.horizontal, BoopSpacing.edge)
-        .padding(.top, 14).padding(.bottom, 10)
-        .overlay(
-            Rectangle().fill(BoopColor.border).frame(height: 1),
-            alignment: .bottom
-        )
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
     }
 
     private var messageList: some View {
@@ -51,11 +50,20 @@ struct ChatView: View {
                     if chat.isAwaitingReply {
                         TypingBubble().id("typing")
                     }
+                    ForEach(agentsStore.activeAgents) { agent in
+                        SubAgentPill(
+                            agentName: agent.name,
+                            toolCount: agentsStore.toolCounts[agent.agentId] ?? 0,
+                            onTap: { onOpenAgent(agent.agentId) }
+                        )
+                        .id("agent-\(agent.agentId)")
+                    }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(.horizontal, 14).padding(.top, 12)
                 .padding(.bottom, 150)
                 .animation(.easeInOut(duration: 0.18), value: chat.isAwaitingReply)
+                .animation(.easeInOut(duration: 0.18), value: agentsStore.activeAgents.count)
             }
             .onChange(of: chat.messages.count) {
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -65,6 +73,9 @@ struct ChatView: View {
             }
             .onChange(of: chat.isAwaitingReply) { _, awaiting in
                 if awaiting { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            }
+            .onChange(of: agentsStore.activeAgents.count) { _, newCount in
+                if newCount > 0 { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
         }

@@ -128,6 +128,56 @@ export async function runTurn(inbound: ParsedInbound): Promise<void> {
             }
           : {};
       await dispatch(conversationId, reply, sendOpts);
+
+      // Build the attachments list that goes on the persisted assistant
+      // message. iOS uses this to render an inline file card in the chat
+      // bubble and to power the Files screen. Other channels deliver the
+      // file out-of-band (sendOpts above), but persisting on the message
+      // keeps the dashboard + history view consistent across channels.
+      const messageAttachments: Array<{
+        kind: "image" | "pdf" | "doc";
+        mimeType: string;
+        sizeBytes: number;
+        storageId: string;
+        signedUrl?: string;
+        filename?: string;
+      }> = [];
+      if (imageArtifact) {
+        messageAttachments.push({
+          kind: "image",
+          mimeType: imageArtifact.mimeType,
+          sizeBytes: imageArtifact.fileSizeBytes,
+          storageId: imageArtifact.storageId,
+          signedUrl: publicizeStorageUrl(imageArtifact.signedUrl) ?? undefined,
+          filename: `image-${imageArtifact._creationTime}.${
+            imageArtifact.mimeType.split("/")[1] ?? "png"
+          }`,
+        });
+      }
+      if (pdfArtifact) {
+        messageAttachments.push({
+          kind: "pdf",
+          mimeType: "application/pdf",
+          sizeBytes: pdfArtifact.fileSizeBytes,
+          storageId: pdfArtifact.storageId,
+          signedUrl: publicizeStorageUrl(pdfArtifact.signedUrl) ?? undefined,
+          filename: pdfArtifact.filename,
+        });
+      }
+
+      // Broadcast a separate `assistant_attachments` event so live SSE
+      // consumers (iOS) merge file payloads onto the just-finalized
+      // assistant message without a history refetch. Separate event is
+      // cleaner than re-broadcasting `assistant_message` — interaction
+      // agent already fired that one before this code ran, so a second
+      // emit would risk being interpreted as a fresh message.
+      if (messageAttachments.length > 0) {
+        broadcast("assistant_attachments", {
+          conversationId,
+          attachments: messageAttachments,
+        });
+      }
+
       // F5 retry: the SSE/dashboard already streamed the reply via
       // broadcast("assistant_message"), so a silent messages.send
       // failure leaves an orphan — visible in the live UI, absent on
@@ -141,6 +191,9 @@ export async function runTurn(inbound: ParsedInbound): Promise<void> {
             role: "assistant",
             content: reply,
             ...(threadId ? { threadId: threadId as any } : {}),
+            ...(messageAttachments.length > 0
+              ? { attachments: messageAttachments as any }
+              : {}),
           });
           sendErr = undefined;
           break;

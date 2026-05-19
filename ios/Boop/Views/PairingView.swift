@@ -38,16 +38,17 @@ struct PairingView: View {
 
     private var header: some View {
         HStack {
-            Text("Boop")
-                .font(BoopFont.semibold(17))
-                .foregroundStyle(BoopColor.textPrimary)
+            AnimatedGIFView(name: "boop")
+                .frame(width: 47, height: 47)
+                .accessibilityLabel("Boop")
+                .accessibilityAddTraits(.isHeader)
             Spacer()
             Button(action: { showMenu = true }) {
                 DotGrid().foregroundStyle(BoopColor.textPrimary).frame(width: 32, height: 32)
             }
         }
-        .padding(.horizontal, BoopSpacing.edge)
-        .padding(.top, 14).padding(.bottom, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder

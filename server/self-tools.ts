@@ -27,20 +27,32 @@ import {
 } from "./timezone-config.js";
 import { convex } from "./convex-client.js";
 import { api } from "../convex/_generated/api.js";
+import { broadcast } from "./broadcast.js";
 
-// ---------- per-turn iOS thread id ref ----------
+// ---------- per-turn iOS thread context ----------
 // Set once per turn by the dispatcher; cleared in finally. Allows
 // set_thread_icon to stamp the current thread without the tool needing
-// the threadId in its own arguments.
+// the threadId in its own arguments, and to broadcast the icon update
+// back to the iOS stream using the same conversationId the SSE filter
+// is matching against.
 
 let currentTurnThreadId: string | null = null;
+let currentTurnConversationId: string | null = null;
 
 export function setCurrentTurnThreadId(threadId: string | null): void {
   currentTurnThreadId = threadId;
 }
 
+export function setCurrentTurnConversationId(conversationId: string | null): void {
+  currentTurnConversationId = conversationId;
+}
+
 function getCurrentTurnThreadId(): string | null {
   return currentTurnThreadId;
+}
+
+function getCurrentTurnConversationId(): string | null {
+  return currentTurnConversationId;
 }
 
 export function createSelfMcp() {
@@ -253,6 +265,14 @@ channel is not configured or the user has not texted it yet.`,
               threadId: threadId as any,
               icon: args.icon,
             });
+            const conversationId = getCurrentTurnConversationId();
+            if (conversationId) {
+              broadcast("thread_icon", {
+                conversationId,
+                threadId,
+                icon: args.icon,
+              });
+            }
             return {
               content: [
                 { type: "text" as const, text: `Thread icon set to ${args.icon}.` },

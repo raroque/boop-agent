@@ -6,11 +6,11 @@ struct Dock: View {
     var onSend: (String) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 8) {
             composerRow
-            Divider().background(BoopColor.border)
             threadBar
         }
+        .padding(.bottom, 10)
         .background(BoopColor.glassBg)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: BoopRadius.dock))
@@ -26,8 +26,8 @@ struct Dock: View {
     private var composerRow: some View {
         HStack(spacing: 8) {
             Button(action: { /* attach picker — M2 */ }) {
-                LucideIcon(name: .paperclip, size: 18)
-                    .foregroundStyle(BoopColor.textSecondary)
+                LucideIcon(name: .plus, size: 18)
+                    .foregroundStyle(BoopColor.textTertiary)
                     .frame(width: 32, height: 32)
             }
             TextField("", text: $draft,
@@ -44,56 +44,69 @@ struct Dock: View {
             }
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding(.horizontal, BoopSpacing.l)
-        .frame(height: 76)
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: BoopRadius.dock)
+                .fill(Color.white.opacity(0.03))
+        )
+        .padding(.horizontal, 6)
+        .padding(.top, 6)
     }
 
     private var threadBar: some View {
-        HStack(spacing: 8) {
-            if let activeId = threads.activeThreadId,
-               let active = threads.threads.first(where: { $0.id == activeId }) {
-                activeTab(active)
-            }
-            ForEach(threads.threads.filter { $0.id != threads.activeThreadId }) { thread in
-                inactiveIcon(thread)
+        HStack(spacing: 10) {
+            ForEach(threads.threads) { thread in
+                threadTab(thread)
             }
             Spacer(minLength: 0)
             newThreadButton
         }
-        .padding(.horizontal, BoopSpacing.l)
+        .padding(.horizontal, 12)
+        .padding(.top, 2)
         .frame(height: 40)
     }
 
-    private func activeTab(_ t: BoopThread) -> some View {
+    /// One thread chip in the dock. Active threads render as the 36×36
+    /// tinted pill in place; inactive ones as the smaller dim icon. We
+    /// never reorder — the user's mental map relies on stable positions.
+    @ViewBuilder
+    private func threadTab(_ t: BoopThread) -> some View {
+        let isActive = (t.id == threads.activeThreadId)
         let tint = ThreadTint.forThreadId(t.id)
-        return Button(action: {}) {
-            LucideIcon(name: t.lucide, size: 18)
-                .foregroundStyle(tint.text)
-                .frame(width: 36, height: 36)
-                .background(tint.fill, in: Circle())
-                .overlay(Circle().strokeBorder(tint.border, lineWidth: 1))
-                .shadow(color: tint.solid.opacity(0.35), radius: 6, y: 2)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Active thread")
-    }
-
-    private func inactiveIcon(_ t: BoopThread) -> some View {
-        let tint = ThreadTint.forThreadId(t.id)
-        return Button(action: { threads.selectThread(t.id) }) {
-            ZStack(alignment: .topTrailing) {
-                LucideIcon(name: t.lucide, size: 20)
-                    .foregroundStyle(tint.text.opacity(0.55))
-                    .frame(width: 32, height: 32)
-                if t.unread {
-                    Circle().fill(BoopColor.accent).frame(width: 6, height: 6)
-                        .overlay(Circle().strokeBorder(BoopColor.bg, lineWidth: 2))
-                        .padding(.top, 2).padding(.trailing, 2)
+        Button(action: {
+            if !isActive { threads.selectThread(t.id) }
+        }) {
+            if isActive {
+                LucideIcon(name: t.lucide, size: 18)
+                    .foregroundStyle(tint.text)
+                    .frame(width: 36, height: 36)
+                    .background(tint.fill, in: Circle())
+                    .overlay(Circle().strokeBorder(tint.border, lineWidth: 1))
+                    .shadow(color: tint.solid.opacity(0.35), radius: 6, y: 2)
+            } else {
+                ZStack(alignment: .topTrailing) {
+                    LucideIcon(name: t.lucide, size: 20)
+                        .foregroundStyle(tint.text.opacity(0.55))
+                        .frame(width: 32, height: 32)
+                    if t.unread {
+                        Circle().fill(BoopColor.accent).frame(width: 6, height: 6)
+                            .overlay(Circle().strokeBorder(BoopColor.bg, lineWidth: 2))
+                            .padding(.top, 2).padding(.trailing, 2)
+                    }
                 }
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Switch to thread")
+        .accessibilityLabel(isActive ? "Active thread" : "Switch to thread")
+        .contextMenu {
+            Button(role: .destructive) {
+                Task { await threads.archiveThread(t.id) }
+            } label: {
+                Label("Archive", systemImage: "archivebox")
+            }
+        }
     }
 
     private var newThreadButton: some View {
@@ -102,7 +115,7 @@ struct Dock: View {
                 .foregroundStyle(BoopColor.textTertiary)
                 .frame(width: 28, height: 28)
                 .background(.clear, in: Circle())
-                .overlay(Circle().strokeBorder(BoopColor.borderStrong, style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])))
+                .overlay(Circle().strokeBorder(BoopColor.textTertiary, lineWidth: 1.5))
         }
         .buttonStyle(.plain)
         .disabled(threads.threads.count >= 4)

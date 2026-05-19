@@ -2,18 +2,46 @@ import SwiftUI
 
 struct MessageBubble: View {
     let message: Message
+    @Environment(ThreadsStore.self) private var threadsStore
+    @State private var previewing: Attachment?
+
+    private var thread: BoopThread? {
+        threadsStore.threads.first { $0.id == message.threadId }
+    }
 
     var body: some View {
         HStack {
             if message.role == .user { Spacer(minLength: 40) }
-            content
-                .padding(.horizontal, 13)
-                .padding(.vertical, 9)
-                .background(backgroundColor)
-                .clipShape(shape)
-                .overlay(borderOverlay)
-                .frame(maxWidth: 320, alignment: message.role == .user ? .trailing : .leading)
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
+                if !message.content.isEmpty {
+                    content
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 9)
+                        .background(backgroundColor)
+                        .clipShape(shape)
+                        .overlay(borderOverlay)
+                }
+                ForEach(message.attachments) { att in
+                    FileCard(
+                        filename: att.displayName,
+                        kind: att.displayKind,
+                        sizeBytes: att.sizeBytes,
+                        source: message.role == .user ? .user : .agent,
+                        createdAt: message.createdAt,
+                        onTap: { previewing = att },
+                    )
+                }
+            }
+            .frame(maxWidth: 320, alignment: message.role == .user ? .trailing : .leading)
             if message.role != .user { Spacer(minLength: 40) }
+        }
+        .sheet(item: $previewing) { att in
+            AttachmentPreviewSheet(
+                attachment: att,
+                thread: thread,
+                sourceLabel: message.role == .user ? "You" : "Agent",
+                createdAt: message.createdAt
+            )
         }
     }
 

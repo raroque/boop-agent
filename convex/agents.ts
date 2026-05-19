@@ -108,3 +108,23 @@ export const getLogs = query({
       .take(args.limit ?? 500);
   },
 });
+
+/** List execution agents scoped to a single conversation, newest first.
+ *  Used by the iOS Live Agents view to show only the agents spawned for
+ *  the active thread. */
+export const listForConversation = query({
+  args: {
+    conversationId: v.string(),
+    status: v.optional(statusV),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 30;
+    const rows = await ctx.db
+      .query("executionAgents")
+      .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))
+      .order("desc")
+      .take(limit * 2);
+    return args.status ? rows.filter((r) => r.status === args.status).slice(0, limit) : rows.slice(0, limit);
+  },
+});

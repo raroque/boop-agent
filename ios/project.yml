@@ -22,6 +22,11 @@ targets:
       - path: Boop
         excludes:
           - "**/.DS_Store"
+          # TEMP: actool refuses to thin a 26.5-SDK asset catalog against a
+          # 26.4 simulator runtime. Lucide PDFs render from raw bundle
+          # resources via PDFKit instead (see LucideIcon.swift). Re-include
+          # this and remove the workaround once iOS 26.5 sim runtime ships.
+          - "Resources/Assets.xcassets"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.boop.Boop
@@ -33,8 +38,6 @@ targets:
         SUPPORTS_MACCATALYST: NO
         TARGETED_DEVICE_FAMILY: "1,2"
         SDKROOT: iphoneos
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_PREVIEWS: YES
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_EMIT_LOC_STRINGS: YES

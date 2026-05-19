@@ -101,6 +101,54 @@ struct BoopClient {
         return try await perform(req)
     }
 
+    // MARK: - Files
+
+    func fetchFiles(limit: Int = 100) async throws -> FilesResponse {
+        guard let bearer else { throw ClientError.bearerMissing }
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("/channels/ios/files"),
+            resolvingAgainstBaseURL: false,
+        )!
+        components.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        var req = URLRequest(url: components.url!)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        return try await perform(req)
+    }
+
+    // MARK: - Agents
+
+    func listAgents(threadId: String, status: String? = nil, limit: Int = 30) async throws -> AgentsResponse {
+        guard let bearer else { throw ClientError.bearerMissing }
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("/channels/ios/agents"),
+            resolvingAgainstBaseURL: false,
+        )!
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "threadId", value: threadId),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        if let status { items.append(URLQueryItem(name: "status", value: status)) }
+        components.queryItems = items
+        var req = URLRequest(url: components.url!)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        return try await perform(req)
+    }
+
+    func fetchAgentLogs(agentId: String, limit: Int = 200) async throws -> AgentLogsResponse {
+        guard let bearer else { throw ClientError.bearerMissing }
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("/channels/ios/agents/\(agentId)/logs"),
+            resolvingAgainstBaseURL: false,
+        )!
+        components.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        var req = URLRequest(url: components.url!)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        return try await perform(req)
+    }
+
     func archiveThread(threadId: String) async throws {
         guard let bearer else { throw ClientError.bearerMissing }
         var req = URLRequest(
@@ -166,6 +214,11 @@ enum StreamEvent: Sendable {
     case ack(conversationId: String, content: String)
     case thinking(conversationId: String, text: String)
     case error(conversationId: String, source: String?, message: String)
+    case threadIcon(conversationId: String, threadId: String, icon: String)
+    case attachments(conversationId: String, attachments: [Attachment])
+    case agentSpawned(conversationId: String, agentId: String, name: String, task: String)
+    case agentTool(conversationId: String, agentId: String, toolName: String)
+    case agentDone(conversationId: String, agentId: String, status: String)
 
     var conversationId: String {
         switch self {
@@ -173,7 +226,12 @@ enum StreamEvent: Sendable {
              .message(let id, _),
              .ack(let id, _),
              .thinking(let id, _),
-             .error(let id, _, _):
+             .error(let id, _, _),
+             .threadIcon(let id, _, _),
+             .attachments(let id, _),
+             .agentSpawned(let id, _, _, _),
+             .agentTool(let id, _, _),
+             .agentDone(let id, _, _):
             return id
         }
     }
@@ -348,6 +406,42 @@ private final class SSEDelegate: NSObject, URLSessionDataDelegate, @unchecked Se
             let message = (dict["message"] as? String) ?? "server error"
             let source = dict["source"] as? String
             return .error(conversationId: conversationId, source: source, message: message)
+
+        case "thread_icon":
+            guard let threadId = dict["threadId"] as? String,
+                  let icon = dict["icon"] as? String
+            else { return nil }
+            return .threadIcon(conversationId: conversationId, threadId: threadId, icon: icon)
+
+        case "assistant_attachments":
+            guard let raw = dict["attachments"] as? [[String: Any]] else { return nil }
+            let decoder = JSONDecoder()
+            let parsed: [Attachment] = raw.compactMap { dict in
+                guard let data = try? JSONSerialization.data(withJSONObject: dict),
+                      let att = try? decoder.decode(Attachment.self, from: data)
+                else { return nil }
+                return att
+            }
+            guard !parsed.isEmpty else { return nil }
+            return .attachments(conversationId: conversationId, attachments: parsed)
+
+        case "agent_spawned":
+            guard let agentId = dict["agentId"] as? String,
+                  let name = dict["name"] as? String
+            else { return nil }
+            let task = (dict["task"] as? String) ?? ""
+            return .agentSpawned(conversationId: conversationId, agentId: agentId, name: name, task: task)
+
+        case "agent_tool":
+            guard let agentId = dict["agentId"] as? String,
+                  let toolName = dict["toolName"] as? String
+            else { return nil }
+            return .agentTool(conversationId: conversationId, agentId: agentId, toolName: toolName)
+
+        case "agent_done":
+            guard let agentId = dict["agentId"] as? String else { return nil }
+            let status = (dict["status"] as? String) ?? "completed"
+            return .agentDone(conversationId: conversationId, agentId: agentId, status: status)
 
         default:
             return nil

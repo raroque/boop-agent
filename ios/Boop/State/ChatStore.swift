@@ -24,6 +24,17 @@ final class ChatStore {
         case disconnected(String?)
     }
 
+    /// Forwarded when the dispatcher's `set_thread_icon` tool fires. The
+    /// listener (ThreadsStore via RootView) applies the icon to the
+    /// matching thread so the dock tab updates the moment the agent
+    /// picks one.
+    var onThreadIcon: ((_ threadId: String, _ icon: String) -> Void)?
+
+    /// Forwarded for `agent_spawned` / `agent_tool` / `agent_done` SSE
+    /// events. RootView wires this to `AgentsStore.applyEvent(_:)` so the
+    /// chat pill and Live Agents sheet update in real time.
+    var onAgentEvent: ((StreamEvent) -> Void)?
+
     private let settings: AppSettings
     private var bearer: String?
     private var threadId: String?
@@ -109,9 +120,16 @@ final class ChatStore {
         let expected = "ios:\(settings.deviceId):\(threadId ?? "")"
         guard event.conversationId == expected else { return }
 
-        // Any signal of life from the server means the dispatcher has
-        // started producing — hide the typing bubble.
-        isAwaitingReply = false
+        // Metadata-only events (thread_icon, assistant_attachments, agent_*)
+        // don't represent the dispatcher producing user-facing text, so they
+        // shouldn't clear the typing bubble or be treated as the
+        // assistant's primary signal of life.
+        switch event {
+        case .threadIcon, .attachments, .agentSpawned, .agentTool, .agentDone:
+            break
+        default:
+            isAwaitingReply = false
+        }
 
         switch event {
         case .delta(_, let text, _):
@@ -124,7 +142,27 @@ final class ChatStore {
             sendError = message
         case .thinking:
             break // signal of life handled above; visual indicator not needed yet
+        case .threadIcon(_, let threadId, let icon):
+            onThreadIcon?(threadId, icon)
+        case .attachments(_, let attachments):
+            attachToLatestAssistant(attachments)
+        case .agentSpawned, .agentTool, .agentDone:
+            onAgentEvent?(event)
         }
+    }
+
+    /// Merge attachments onto the most recent assistant message. The server
+    /// emits `assistant_attachments` AFTER `assistant_message`, so the
+    /// finalize path has already run and the message exists.
+    private func attachToLatestAssistant(_ attachments: [Attachment]) {
+        guard let idx = messages.lastIndex(where: { $0.role == .assistant }) else { return }
+        // Dedup by attachment id (storage id + kind) — defends against the
+        // server replaying or the SSE socket reconnecting and replaying.
+        var current = messages[idx].attachments
+        for a in attachments where !current.contains(where: { $0.id == a.id }) {
+            current.append(a)
+        }
+        messages[idx].attachments = current
     }
 
     private func appendDelta(_ chunk: String) {

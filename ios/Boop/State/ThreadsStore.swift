@@ -77,4 +77,30 @@ final class ThreadsStore {
         guard let idx = threads.firstIndex(where: { $0.id == threadId }) else { return }
         threads[idx].icon = icon
     }
+
+    /// Archives a thread on the server, drops it from the local list, and
+    /// picks a sensible next-active. If this was the last open thread,
+    /// transparently creates a new one so chat is always usable.
+    func archiveThread(_ id: String) async {
+        guard let bearer, let baseURL = settings.serverBaseURL else { return }
+        let client = BoopClient(baseURL: baseURL, bearer: bearer)
+        do {
+            try await client.archiveThread(threadId: id)
+        } catch {
+            loadError = "Couldn't archive: \(error.localizedDescription)"
+            return
+        }
+
+        let wasActive = (activeThreadId == id)
+        threads.removeAll { $0.id == id }
+
+        if wasActive {
+            if let next = threads.first {
+                activeThreadId = next.id
+            } else {
+                activeThreadId = nil
+                await createNewThread()
+            }
+        }
+    }
 }
