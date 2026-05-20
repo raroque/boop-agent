@@ -77,14 +77,15 @@ final class ChatStore {
         streamingMessageId = nil
 
         // Cache-first paint: if we already have it in memory, nothing
-        // to do. Otherwise hydrate from disk synchronously (relative
-        // to the calling view's task) so the chat shows immediately.
+        // to do. Otherwise hydrate from disk so the chat shows
+        // immediately. The await releases the main actor — if the user
+        // taps a third thread before we resume, `self.threadId` won't
+        // match `threadId` anymore. Bail in that case; the newer call
+        // handles its own hydration.
         if perThread[threadId] == nil {
-            if let cached = await MessageCache.shared.readThread(threadId) {
-                perThread[threadId] = cached.messages.map { $0.toMessage() }
-            } else {
-                perThread[threadId] = []
-            }
+            let cached = await MessageCache.shared.readThread(threadId)
+            guard self.threadId == threadId else { return }
+            perThread[threadId] = cached?.messages.map { $0.toMessage() } ?? []
         }
 
         // Background sync — does NOT block the UI. SSE picks up the
@@ -97,7 +98,7 @@ final class ChatStore {
     /// the cache by Convex `_id`. Falls back to a content+timestamp
     /// match for any leftover `local-…` optimistic ids (defense in
     /// depth — Task 4 already stamps them at send-time).
-    func refreshFromServer(threadId: String) async {
+    private func refreshFromServer(threadId: String) async {
         guard let bearer, let baseURL = settings.serverBaseURL else { return }
         let client = BoopClient(baseURL: baseURL, bearer: bearer)
         let response: MessagesResponse
@@ -127,9 +128,16 @@ final class ChatStore {
     private func mergeMessages(local: [Message], server: [Message]) -> [Message] {
         var out = local
         for s in server {
-            // (a) Exact id match — replace in place.
+            // (a) Exact id match — replace in place, but preserve any
+            // SSE-injected attachments the server's /messages row may
+            // not have committed yet (attachments arrive on a separate
+            // post-turn side-channel; refresh races the persist).
             if let idx = out.firstIndex(where: { $0.id == s.id }) {
-                out[idx] = s
+                var merged = s
+                let serverIds = Set(s.attachments.map { $0.id })
+                let extra = out[idx].attachments.filter { !serverIds.contains($0.id) }
+                merged.attachments = s.attachments + extra
+                out[idx] = merged
                 continue
             }
             // (b) Heuristic: local-prefixed user message with same content
@@ -158,7 +166,16 @@ final class ChatStore {
     }
 
     private func writeCacheForThread(_ threadId: String) async {
-        let msgs = perThread[threadId] ?? []
+        // Filter out client-synthetic ids — only canonical Convex ids
+        // (or the `local-<uuid>` optimistic-send ids, which the merge
+        // heuristic can later reconcile) belong on disk. `stream-`,
+        // `ack-`, and `final-` ids are runtime-only — they'd cause
+        // duplicate inserts or frozen-bubble rendering on cold launch.
+        let msgs = (perThread[threadId] ?? []).filter {
+            !$0.id.hasPrefix("stream-")
+                && !$0.id.hasPrefix("ack-")
+                && !$0.id.hasPrefix("final-")
+        }
         let payload = CachedThread(
             schemaVersion: CacheSchema.currentVersion,
             threadId: threadId,
