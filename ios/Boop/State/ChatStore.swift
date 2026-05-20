@@ -66,30 +66,106 @@ final class ChatStore {
         isAwaitingReply = false
     }
 
-    /// Switch the active thread. Cancels the current stream, clears
-    /// messages, fetches history for the new thread, restarts the stream.
+    /// Switch the active thread. Reads cache for instant paint, then
+    /// fires a background server refresh that merges by message id.
+    /// Idempotent on same-thread tap (no-op).
     func switchTo(threadId: String) async {
         guard threadId != self.threadId else { return }
         streamTask?.cancel()
         streamTask = nil
         self.threadId = threadId
         streamingMessageId = nil
-        await loadHistory()
+
+        // Cache-first paint: if we already have it in memory, nothing
+        // to do. Otherwise hydrate from disk synchronously (relative
+        // to the calling view's task) so the chat shows immediately.
+        if perThread[threadId] == nil {
+            if let cached = await MessageCache.shared.readThread(threadId) {
+                perThread[threadId] = cached.messages.map { $0.toMessage() }
+            } else {
+                perThread[threadId] = []
+            }
+        }
+
+        // Background sync — does NOT block the UI. SSE picks up the
+        // stream in parallel.
+        Task { await refreshFromServer(threadId: threadId) }
         startStreaming()
     }
 
-    func loadHistory() async {
-        guard let bearer, let baseURL = settings.serverBaseURL, let threadId else { return }
+    /// Background sync: fetch the latest 50 messages and merge into
+    /// the cache by Convex `_id`. Falls back to a content+timestamp
+    /// match for any leftover `local-…` optimistic ids (defense in
+    /// depth — Task 4 already stamps them at send-time).
+    func refreshFromServer(threadId: String) async {
+        guard let bearer, let baseURL = settings.serverBaseURL else { return }
         let client = BoopClient(baseURL: baseURL, bearer: bearer)
+        let response: MessagesResponse
         do {
-            let response = try await client.fetchMessages(threadId: threadId, limit: 50)
-            let mapped = response.messages
-                .reversed()
-                .map { $0.toMessage(defaultThreadId: threadId) }
-            perThread[threadId] = mapped
+            response = try await client.fetchMessages(threadId: threadId, limit: 50)
         } catch {
-            sendError = "Couldn't load history: \(error.localizedDescription)"
+            // Cache stays as-is; SSE will keep painting new ones.
+            return
         }
+
+        let server = response.messages
+            .reversed()
+            .map { $0.toMessage(defaultThreadId: threadId) }
+        let merged = mergeMessages(local: perThread[threadId] ?? [], server: server)
+        perThread[threadId] = merged
+
+        // Schedule a debounced cache write — fire and forget.
+        Task { await writeCacheForThread(threadId) }
+    }
+
+    /// Merge server-fetched messages into the local buffer.
+    /// 1. For each server message: if local has the id, replace.
+    ///    Else if local has a `local-…` user message with the same
+    ///    content within ±5s, replace its id with the server one.
+    ///    Else insert sorted by createdAt.
+    /// 2. Cap at 200; drop oldest by createdAt if over.
+    private func mergeMessages(local: [Message], server: [Message]) -> [Message] {
+        var out = local
+        for s in server {
+            // (a) Exact id match — replace in place.
+            if let idx = out.firstIndex(where: { $0.id == s.id }) {
+                out[idx] = s
+                continue
+            }
+            // (b) Heuristic: local-prefixed user message with same content
+            // and a ±5s timestamp window. Reconciles any unstamped optimistic
+            // sends (e.g. when /inbound failed before stamping).
+            if s.role == .user,
+               let idx = out.firstIndex(where: { m in
+                   m.id.hasPrefix("local-")
+                       && m.role == .user
+                       && m.content == s.content
+                       && abs(m.createdAt.timeIntervalSince(s.createdAt)) < 5
+               }) {
+                out[idx] = s
+                continue
+            }
+            // (c) Insert sorted by createdAt.
+            let insertion = out.firstIndex(where: { $0.createdAt > s.createdAt }) ?? out.count
+            out.insert(s, at: insertion)
+        }
+        // (d) Cap at 200 by dropping oldest.
+        if out.count > 200 {
+            out.sort { $0.createdAt < $1.createdAt }
+            out = Array(out.suffix(200))
+        }
+        return out
+    }
+
+    private func writeCacheForThread(_ threadId: String) async {
+        let msgs = perThread[threadId] ?? []
+        let payload = CachedThread(
+            schemaVersion: CacheSchema.currentVersion,
+            threadId: threadId,
+            lastSyncedAt: Date().timeIntervalSince1970 * 1000,
+            messages: msgs.map { $0.toCached() }
+        )
+        await MessageCache.shared.scheduleWrite(payload)
     }
 
     func startStreaming() {
@@ -155,6 +231,16 @@ final class ChatStore {
             attachToLatestAssistant(attachments)
         case .agentSpawned, .agentTool, .agentDone:
             onAgentEvent?(event)
+        }
+
+        // After applying the event, schedule a cache write for the
+        // active thread. Metadata-only events (thread_icon, agent_*)
+        // don't change `messages` so don't bother.
+        switch event {
+        case .delta, .message, .ack, .attachments:
+            if let tid = threadId { Task { await writeCacheForThread(tid) } }
+        default:
+            break
         }
     }
 

@@ -121,3 +121,65 @@ struct InboundResponse: Decodable {
 struct ServerError: Decodable, Error {
     let error: String
 }
+
+// MARK: - Cache converters
+
+/// Converters between the UI's `Message`/`Attachment` and the on-disk
+/// `CachedMessage`/`CachedAttachment`. Kept in Models.swift (not in the
+/// Storage layer) because they reference the UI shape — the cache layer
+/// only knows about Cached* types.
+
+extension Message {
+    func toCached() -> CachedMessage {
+        CachedMessage(
+            id: id,
+            threadId: threadId,
+            role: role.rawValue,
+            content: content,
+            createdAt: createdAt.timeIntervalSince1970 * 1000,
+            attachments: attachments.map { $0.toCached() }
+        )
+    }
+}
+
+extension CachedMessage {
+    func toMessage() -> Message {
+        Message(
+            id: id,
+            threadId: threadId,
+            role: Message.Role(rawValue: role) ?? .assistant,
+            content: content,
+            createdAt: Date(timeIntervalSince1970: createdAt / 1000),
+            isStreaming: false,
+            attachments: attachments.map { $0.toAttachment() }
+        )
+    }
+}
+
+extension Attachment {
+    func toCached() -> CachedAttachment {
+        CachedAttachment(
+            kind: kind.rawValue,
+            mimeType: mimeType,
+            sizeBytes: sizeBytes,
+            storageId: storageId,
+            signedUrl: signedUrl,
+            filename: filename,
+            description: description
+        )
+    }
+}
+
+extension CachedAttachment {
+    func toAttachment() -> Attachment {
+        Attachment(
+            kind: Attachment.Kind(rawValue: kind) ?? .doc,
+            mimeType: mimeType,
+            sizeBytes: sizeBytes,
+            storageId: storageId,
+            signedUrl: signedUrl,
+            filename: filename,
+            description: description
+        )
+    }
+}
