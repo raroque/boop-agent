@@ -4,7 +4,7 @@ Native iOS client for the Boop agent. Pairs with the server over HTTP, streams r
 
 ## Status
 
-**M1 + Redesign Plans A & B + APNs push + permanent delete** — pairing, multi-thread chat (up to 4 open), per-thread Lucide icons and tints, Markdown bubbles, inbound + outbound attachments (image / PDF / doc) with full-screen preview, cross-thread Files browser, Live Agents watcher, archived threads browser with long-press → delete-forever, unread badges on inactive threads (device-wide SSE fanout), and lock-screen / banner push when the app is backgrounded. Still ahead: offline history cache, Live Activities / widgets, attachment-blob cleanup.
+**M1 + Redesign Plans A & B + APNs push + permanent delete + local message cache** — pairing, multi-thread chat (up to 4 open), per-thread Lucide icons and tints, Markdown bubbles, inbound + outbound attachments (image / PDF / doc) with full-screen preview, cross-thread Files browser, Live Agents watcher, archived threads browser with long-press → delete-forever, unread badges on inactive threads (device-wide SSE fanout), lock-screen / banner push when the app is backgrounded, and an on-disk message cache so cold launch + thread switching paint instantly. Still ahead: Live Activities / widgets, attachment-blob cleanup.
 
 ## What you'll need
 
@@ -49,7 +49,9 @@ If you want to start over: gear icon → **Unpair this device**. (Also revoke th
 | `Models/Agent.swift` | `AgentRun` + `AgentLogEntry` for the Live Agents sheet. |
 | `DesignSystem/` | `BoopColor`, `BoopFont`, `BoopSpacing`, `BoopRadius`, `ThreadTints` (8-color FNV-1a-hashed palette), `LucideIcon` (~60 bundled PDFs). |
 | `Storage/AppSettings.swift` | UserDefaults-backed server URL + persistent deviceId. |
+| `Storage/CachedModels.swift` | Codable shapes (`CachedThread`, `CachedThreadsList`, `CachedMessage`, `CachedAttachment`, `CachedThreadRow`) decoupled from the UI models via a `schemaVersion` field. Mismatch on read becomes a cache miss; server fetch refills. |
 | `Storage/KeychainStore.swift` | Bearer token storage (Keychain Services). |
+| `Storage/MessageCache.swift` | Singleton actor backing the on-disk message cache. Per-thread JSON files under `Caches/threads/`, plus `Caches/threads-list.json`. Debounced 500ms writes (per-thread payload coalescing + shared timer), atomic replacement, hard-flush on `scenePhase = .background`, `purgeAll` on unpair. |
 | `Networking/BoopClient.swift` | HTTP client (pair, threads CRUD, archived, files, agents, inbound, messages) + `SSEConnection` (per-thread stream) + `FanoutConnection` (device-wide stream for unread + icon updates). |
 | `State/PairingStore.swift` | `@Observable` state machine for pairing flow. Polls `/pair/check` every 2s. |
 | `State/ThreadsStore.swift` | List of open threads, active selection, unread flags, fanout subscription. Calls into `BoopClient` for create/archive/unarchive. |
@@ -104,7 +106,6 @@ If you don't set the APNs env vars, the server logs `[apns] disabled (config mis
 ## Known gaps
 
 - **No Live Activities / widgets / Siri shortcuts.** Plain push notifications only.
-- **No offline history.** Messages are fetched fresh from the server on launch; nothing is cached locally.
 - **No multi-device UX.** Each install gets its own `deviceId`. Two paired phones for the same user appear as two separate `ios:<deviceId>` conversations on the server.
 - **No attachment-blob cleanup.** Deleting a thread removes the message rows but leaves the underlying attachment storage objects (image / PDF / doc) in Convex `_storage`. There's no other code path that purges those either, so until there's a retention policy this is consistent rather than a regression.
 

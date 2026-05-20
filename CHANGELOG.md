@@ -8,6 +8,31 @@ Format:
 
 ---
 
+## Unreleased — iOS local message cache
+
+Chat history paints **instantly** on cold launch and every thread switch. Backed by per-thread JSON files under `Caches/threads/<threadId>.json` plus `Caches/threads-list.json` for the dock state. Server stays source-of-truth; cache renders first, then a background `/messages?threadId=...&limit=50` fetch merges by Convex `_id`. SSE continues to write into the cache in real time. Implementation plan: `docs/superpowers/plans/2026-05-20-ios-message-cache.md`. Design spec: `docs/superpowers/specs/2026-05-20-ios-message-cache-design.md`.
+
+**Server**
+- Changed: `POST /channels/ios/inbound` now returns `userMessageId` — the canonical Convex id of the persisted user message — so the client can stamp its optimistic `local-<uuid>` send and merge-by-id is trivial on the next refresh. `handleUserMessage` gains a `precomputedUserMessageId` opt that lets the iOS route persist + broadcast inline (the route awaits persistence to get the id; the rest of the turn fires fire-and-forget as before). Other channels (Sendblue, Telegram) unchanged.
+- Changed: `ParsedInbound` + `HandleOpts` also carry `precomputedTurnId` so the iOS route generates the turnId before its inline persist and the agent turn re-uses it — keeps turn grouping intact across the iOS persist split.
+- Added: assertion in `tests/ios-thread-routes.test.ts` that `/inbound` returns a non-empty `userMessageId`.
+
+**iOS**
+- Added: `Boop/Storage/MessageCache.swift` — singleton actor. Per-thread debounced writes (500ms via a shared timer + per-thread payload coalescing), atomic replacement via `FileManager.replaceItemAt`, hard-flush on `scenePhase = .background`, `purgeAll` on unpair, `scheduleWriteThreadsList` for the dock state with the same debounce model.
+- Added: `Boop/Storage/CachedModels.swift` — Codable shapes (`CachedThread`, `CachedThreadsList`, `CachedMessage`, `CachedAttachment`, `CachedThreadRow`) with a `schemaVersion` field so shape changes don't silently corrupt old caches.
+- Changed: `ChatStore.messages` becomes a computed view over `perThread: [String: [Message]]`. `switchTo(threadId:)` reads cache-first (memory → disk → empty), paints immediately, then fires `refreshFromServer(threadId:)` in the background. The refresh merges by Convex `_id` with a content+role+±5s fallback for the rare unstamped optimistic send. Synthetic ids (`stream-` / `ack-` / `final-`) are filtered out before disk writes.
+- Changed: `ChatStore.send` now stamps the optimistic `local-<uuid>` with the canonical id from `/inbound`'s response, so the heuristic merge is a defense-in-depth path rather than the primary one. The stamp targets the originating thread by captured id, not the active thread at callback time.
+- Changed: `ThreadsStore` gains `hydrateFromCache()` (called from `RootView` once paired) + private `writeListCache()` after every list-affecting mutation (loadThreads, archive, unarchive, delete, selectThread, createNewThread, fanout-driven noteIncomingMessage/applyIconUpdate). The active thread id persists across launches.
+- Changed: `PairingStore.reset` purges the cache via `Task.detached` so re-pair starts clean.
+- Changed: `BoopApp` watches `scenePhase`; transitioning to `.background` triggers `MessageCache.flushAll()` so pending debounced writes land before suspension.
+- Changed: `mergeMessages` preserves SSE-injected attachments — when a server row's `_id` matches a cached one, attachments are merged by `Attachment.id` so a refresh racing the server's post-turn attachment persist doesn't erase locally-injected files.
+
+**Out of scope (intentional)**
+- Attachment blob caching — kind/mimeType/storageId stays cached, but image/PDF bytes still re-fetch from the signed URL on tap. Signed URLs expire server-side; caching them would be pointless.
+- Offline send queue. Sending while offline still fails the same way it does today.
+- `GET /messages?since=<ms>` server-side delta endpoint. Volumes are tiny (≤50 msgs per thread) — always-refetching the latest 50 in the background is cheap.
+- XCTest target. Verification was manual per the existing iOS testing gap.
+
 ## Unreleased — iOS permanent thread deletion
 
 Closes the last remaining lifecycle gap from the redesign: archived threads can now be removed for good. Long-press an archived row → "Delete forever" → confirm. The server purges messages, execution-agent rows, and per-agent logs in a single Convex mutation; attachment storage objects are left alone (no other code path purges `_storage` either).
