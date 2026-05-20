@@ -13,11 +13,26 @@ struct ChatView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             BoopColor.bg.ignoresSafeArea()
+
+            // The chat list runs edge-to-edge under the header so bubbles
+            // scrolling up pass behind it. The gradient overlay above
+            // tapers from solid black to fully clear, so bubbles entering
+            // the header zone fade out gradually — chat feels taller than
+            // the header's hard edge would imply.
+            messageList
+
+            VStack(spacing: 0) {
+                topFade
+                Spacer()
+            }
+            .allowsHitTesting(false)
+
             VStack(spacing: 0) {
                 header
                 if let err = chat.sendError { BannerView(text: err) }
-                messageList
+                Spacer()
             }
+
             Dock(draft: $draft, onSend: { text in
                 Task { await chat.send(text) }
             })
@@ -27,6 +42,26 @@ struct ChatView: View {
         // keyboard goes away. Buttons + TextField have higher gesture
         // priority, so they keep working normally.
         .onTapGesture { Self.hideKeyboard() }
+    }
+
+    /// Vertical gradient that lives above the message list. Holds solid
+    /// black across the header zone, then fades to clear over a short
+    /// transition. Bubbles scrolling up pass through this and dissolve
+    /// instead of clipping at a hard edge. `ignoresSafeArea` lets the
+    /// gradient bleed into the notch so the very top stays opaque even
+    /// while the chat extends underneath.
+    private var topFade: some View {
+        LinearGradient(
+            stops: [
+                .init(color: BoopColor.bg, location: 0.0),
+                .init(color: BoopColor.bg, location: 0.52),
+                .init(color: BoopColor.bg.opacity(0), location: 1.0),
+            ],
+            startPoint: .top,
+            endPoint: .bottom,
+        )
+        .frame(height: 210)
+        .ignoresSafeArea(edges: .top)
     }
 
     private static func hideKeyboard() {
@@ -72,7 +107,11 @@ struct ChatView: View {
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
-                .padding(.horizontal, 14).padding(.top, 12)
+                // .top padding here matches the bottom edge of the
+                // top-fade gradient (see topFade) so the first bubble
+                // sits clear of the header on first render. Bubbles
+                // still scroll into the fade as the user scrolls up.
+                .padding(.horizontal, 14).padding(.top, 140)
                 .padding(.bottom, 150)
                 .animation(.easeInOut(duration: 0.18), value: chat.isAwaitingReply)
                 .animation(.easeInOut(duration: 0.18), value: agentsStore.activeAgents.count)
