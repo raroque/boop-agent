@@ -23,6 +23,35 @@ final class ThreadsStore {
         startFanout()
     }
 
+    /// Loads the open threads list from disk and paints the dock bar
+    /// instantly. Safe to call before the bearer is set — paints local
+    /// UI only, doesn't touch the network. `loadThreads()` should fire
+    /// right after to refresh + write the cache back.
+    func hydrateFromCache() async {
+        guard let cached = await MessageCache.shared.readThreadsList() else { return }
+        self.threads = cached.open.map { $0.toThread() }
+        if let active = cached.activeThreadId,
+           threads.contains(where: { $0.id == active }) {
+            self.activeThreadId = active
+        } else {
+            self.activeThreadId = threads.first?.id
+        }
+    }
+
+    /// Persists the current open list + active thread id to disk.
+    /// Fire-and-forget. The archived list is intentionally empty in
+    /// the cache for now; archived browsing always hits the server.
+    func writeListCache() async {
+        let payload = CachedThreadsList(
+            schemaVersion: CacheSchema.currentVersion,
+            lastSyncedAt: Date().timeIntervalSince1970 * 1000,
+            open: threads.map { $0.toCachedRow() },
+            archived: [],
+            activeThreadId: activeThreadId
+        )
+        await MessageCache.shared.writeThreadsList(payload)
+    }
+
     func unbind() {
         fanoutTask?.cancel()
         fanoutTask = nil
@@ -54,6 +83,7 @@ final class ThreadsStore {
                 activeThreadId = mapped.first?.id
                 settings.pendingDeepLinkThreadId = nil
             }
+            Task { await writeListCache() }
         } catch {
             loadError = "Couldn't load threads: \(error.localizedDescription)"
         }
@@ -64,6 +94,7 @@ final class ThreadsStore {
         if let idx = threads.firstIndex(where: { $0.id == id }) {
             threads[idx].unread = false
         }
+        Task { await writeListCache() }
     }
 
     func createNewThread() async {
@@ -87,11 +118,13 @@ final class ThreadsStore {
         if threadId != activeThreadId {
             threads[idx].unread = true
         }
+        Task { await writeListCache() }
     }
 
     func applyIconUpdate(threadId: String, icon: String) {
         guard let idx = threads.firstIndex(where: { $0.id == threadId }) else { return }
         threads[idx].icon = icon
+        Task { await writeListCache() }
     }
 
     // MARK: - Fanout (device-wide unread badge SSE)
@@ -153,6 +186,7 @@ final class ThreadsStore {
                 if activeThreadId == nil { await createNewThread() }
             }
         }
+        Task { await writeListCache() }
         return true
     }
 
@@ -198,5 +232,6 @@ final class ThreadsStore {
                 await createNewThread()
             }
         }
+        Task { await writeListCache() }
     }
 }
