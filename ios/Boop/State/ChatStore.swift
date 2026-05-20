@@ -8,7 +8,14 @@ import Observation
 @MainActor
 @Observable
 final class ChatStore {
-    private(set) var messages: [Message] = []
+    /// Per-thread message buffers. The view layer reads `messages`
+    /// (computed below) which projects the active thread's array.
+    /// Switching threads is now a pointer swap, not a wipe.
+    private(set) var perThread: [String: [Message]] = [:]
+
+    var messages: [Message] {
+        get { threadId.flatMap { perThread[$0] } ?? [] }
+    }
     private(set) var connectionState: ConnectionState = .idle
     private(set) var sendError: String?
     /// True from the moment the user taps send until the first reply
@@ -52,7 +59,7 @@ final class ChatStore {
         streamTask = nil
         bearer = nil
         threadId = nil
-        messages.removeAll()
+        perThread.removeAll()
         connectionState = .idle
         sendError = nil
         streamingMessageId = nil
@@ -66,7 +73,6 @@ final class ChatStore {
         streamTask?.cancel()
         streamTask = nil
         self.threadId = threadId
-        messages.removeAll()
         streamingMessageId = nil
         await loadHistory()
         startStreaming()
@@ -77,9 +83,10 @@ final class ChatStore {
         let client = BoopClient(baseURL: baseURL, bearer: bearer)
         do {
             let response = try await client.fetchMessages(threadId: threadId, limit: 50)
-            messages = response.messages
+            let mapped = response.messages
                 .reversed()
                 .map { $0.toMessage(defaultThreadId: threadId) }
+            perThread[threadId] = mapped
         } catch {
             sendError = "Couldn't load history: \(error.localizedDescription)"
         }
@@ -155,45 +162,51 @@ final class ChatStore {
     /// emits `assistant_attachments` AFTER `assistant_message`, so the
     /// finalize path has already run and the message exists.
     private func attachToLatestAssistant(_ attachments: [Attachment]) {
-        guard let idx = messages.lastIndex(where: { $0.role == .assistant }) else { return }
-        // Dedup by attachment id (storage id + kind) — defends against the
-        // server replaying or the SSE socket reconnecting and replaying.
-        var current = messages[idx].attachments
-        for a in attachments where !current.contains(where: { $0.id == a.id }) {
-            current.append(a)
+        mutateActive { msgs in
+            guard let idx = msgs.lastIndex(where: { $0.role == .assistant }) else { return }
+            var current = msgs[idx].attachments
+            for a in attachments where !current.contains(where: { $0.id == a.id }) {
+                current.append(a)
+            }
+            msgs[idx].attachments = current
         }
-        messages[idx].attachments = current
     }
 
     private func appendDelta(_ chunk: String) {
         guard let threadId else { return }
-        if let id = streamingMessageId, let idx = messages.firstIndex(where: { $0.id == id }) {
-            messages[idx].content.append(chunk)
-        } else {
-            let id = "stream-\(UUID().uuidString)"
-            streamingMessageId = id
-            messages.append(Message(id: id, threadId: threadId, role: .assistant,
+        mutateActive { msgs in
+            if let id = streamingMessageId, let idx = msgs.firstIndex(where: { $0.id == id }) {
+                msgs[idx].content.append(chunk)
+            } else {
+                let id = "stream-\(UUID().uuidString)"
+                streamingMessageId = id
+                msgs.append(Message(id: id, threadId: threadId, role: .assistant,
                                     content: chunk, createdAt: Date(), isStreaming: true))
+            }
         }
     }
 
     private func finalizeMessage(_ content: String) {
         guard let threadId else { return }
-        if let id = streamingMessageId, let idx = messages.firstIndex(where: { $0.id == id }) {
-            messages[idx].content = content
-            messages[idx].isStreaming = false
-            streamingMessageId = nil
-            return
-        }
-        // Unsolicited (proactive nudges, automation results) — append fresh.
-        messages.append(Message(id: "final-\(UUID().uuidString)", threadId: threadId, role: .assistant,
+        mutateActive { msgs in
+            if let id = streamingMessageId, let idx = msgs.firstIndex(where: { $0.id == id }) {
+                msgs[idx].content = content
+                msgs[idx].isStreaming = false
+                streamingMessageId = nil
+                return
+            }
+            // Unsolicited (proactive nudges, automation results) — append fresh.
+            msgs.append(Message(id: "final-\(UUID().uuidString)", threadId: threadId, role: .assistant,
                                 content: content, createdAt: Date()))
+        }
     }
 
     private func appendAck(_ content: String) {
         guard let threadId else { return }
-        messages.append(Message(id: "ack-\(UUID().uuidString)", threadId: threadId, role: .assistant,
+        mutateActive { msgs in
+            msgs.append(Message(id: "ack-\(UUID().uuidString)", threadId: threadId, role: .assistant,
                                 content: content, createdAt: Date()))
+        }
     }
 
     func send(_ text: String) async {
@@ -205,21 +218,37 @@ final class ChatStore {
         isAwaitingReply = true
 
         let localId = "local-\(UUID().uuidString)"
-        messages.append(Message(id: localId, threadId: threadId, role: .user,
-                                content: trimmed, createdAt: Date()))
+        appendActive(Message(id: localId, threadId: threadId, role: .user,
+                             content: trimmed, createdAt: Date()))
 
         let client = BoopClient(baseURL: baseURL, bearer: bearer)
         do {
             let response = try await client.sendInbound(text: trimmed, threadId: threadId)
             // Replace the optimistic local id with the canonical Convex id.
             // This keeps merge-by-id trivial during background sync.
-            if let serverId = response.userMessageId,
-               let idx = messages.firstIndex(where: { $0.id == localId }) {
-                messages[idx].id = serverId
+            if let serverId = response.userMessageId {
+                mutateActive { msgs in
+                    if let idx = msgs.firstIndex(where: { $0.id == localId }) {
+                        msgs[idx].id = serverId
+                    }
+                }
             }
         } catch {
             sendError = "Send failed: \(error.localizedDescription)"
             isAwaitingReply = false
         }
+    }
+
+    // MARK: - Per-thread mutation helpers
+
+    private func mutateActive(_ block: (inout [Message]) -> Void) {
+        guard let tid = threadId else { return }
+        var buf = perThread[tid] ?? []
+        block(&buf)
+        perThread[tid] = buf
+    }
+
+    private func appendActive(_ message: Message) {
+        mutateActive { $0.append(message) }
     }
 }
