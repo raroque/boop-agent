@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ChatView: View {
     @Binding var showMenu: Bool
@@ -8,7 +9,6 @@ struct ChatView: View {
     @Environment(ThreadsStore.self) private var threads
     @Environment(AgentsStore.self) private var agentsStore
     @State private var draft: String = ""
-    @FocusState private var composerFocused: Bool
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -22,6 +22,18 @@ struct ChatView: View {
                 Task { await chat.send(text) }
             })
         }
+        // Tap anywhere outside an interactive element (Dock buttons, the
+        // composer field, menu button) → resign first responder so the
+        // keyboard goes away. Buttons + TextField have higher gesture
+        // priority, so they keep working normally.
+        .onTapGesture { Self.hideKeyboard() }
+    }
+
+    private static func hideKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil, from: nil, for: nil,
+        )
     }
 
     private var header: some View {
@@ -78,6 +90,9 @@ struct ChatView: View {
                 if newCount > 0 { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+            // Drag the chat list down to interactively fade out the
+            // keyboard — iOS-native pattern, matches Messages / Mail.
+            .scrollDismissesKeyboard(.interactively)
         }
     }
 }

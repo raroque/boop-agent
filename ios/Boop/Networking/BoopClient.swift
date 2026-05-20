@@ -159,6 +159,73 @@ struct BoopClient {
         let _: EmptyResponse = try await perform(req)
     }
 
+    // MARK: - APNs
+
+    /// Reports the hex-encoded APNs device token + environment to the
+    /// server. The phone calls this every launch after the OS hands us a
+    /// fresh token, so the server always has the latest one Apple is
+    /// vending. Idempotent on the server side.
+    func registerApns(deviceToken: String, environment: String) async throws {
+        guard let bearer else { throw ClientError.bearerMissing }
+        var req = URLRequest(url: baseURL.appendingPathComponent("/channels/ios/apns/register"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "deviceToken": deviceToken,
+            "environment": environment,
+        ])
+        let _: EmptyResponse = try await perform(req)
+    }
+
+    func unregisterApns(deviceToken: String) async throws {
+        guard let bearer else { throw ClientError.bearerMissing }
+        var req = URLRequest(url: baseURL.appendingPathComponent("/channels/ios/apns/unregister"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "deviceToken": deviceToken,
+        ])
+        let _: EmptyResponse = try await perform(req)
+    }
+
+    func listArchivedThreads() async throws -> ThreadsResponse {
+        guard let bearer else { throw ClientError.bearerMissing }
+        var req = URLRequest(
+            url: baseURL.appendingPathComponent("/channels/ios/threads/archived"),
+        )
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        return try await perform(req)
+    }
+
+    /// Restores an archived thread. Throws `ClientError.http(409, ...)`
+    /// when the device already has 4 open threads.
+    func unarchiveThread(threadId: String) async throws {
+        guard let bearer else { throw ClientError.bearerMissing }
+        var req = URLRequest(
+            url: baseURL.appendingPathComponent("/channels/ios/threads/\(threadId)/unarchive"),
+        )
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let _: EmptyResponse = try await perform(req)
+    }
+
+    /// Permanently deletes a thread and its messages / agent rows.
+    /// Idempotent — server returns `{ok:true}` even if the thread was
+    /// already gone. Throws `ClientError.http(403, ...)` when the
+    /// thread doesn't belong to this device.
+    func deleteThread(threadId: String) async throws {
+        guard let bearer else { throw ClientError.bearerMissing }
+        var req = URLRequest(
+            url: baseURL.appendingPathComponent("/channels/ios/threads/\(threadId)"),
+        )
+        req.httpMethod = "DELETE"
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let _: EmptyResponse = try await perform(req)
+    }
+
     private struct EmptyResponse: Decodable { let ok: Bool? }
 
     // MARK: - Internals
@@ -445,6 +512,142 @@ private final class SSEDelegate: NSObject, URLSessionDataDelegate, @unchecked Se
 
         default:
             return nil
+        }
+    }
+}
+
+// MARK: - Fanout SSE (device-scoped, all threads)
+
+/// One event off the `/channels/ios/fanout` device-wide SSE.
+/// `kind` is `"message"` for an `assistant_message` broadcast on any
+/// thread this device owns, or `"icon"` when the agent updates a
+/// thread's icon (followed by `icon` carrying the new Lucide name).
+enum ThreadActivity: Sendable {
+    case message(threadId: String)
+    case icon(threadId: String, icon: String)
+}
+
+/// AsyncStream of `thread_activity` events off `/channels/ios/fanout`.
+/// Mirrors `SSEConnection` for the per-thread stream; the only payload
+/// kind is the lightweight `thread_activity` so unread-dot tracking
+/// stays cheap.
+struct FanoutConnection {
+    let baseURL: URL
+    let bearer: String
+
+    func subscribe() -> AsyncStream<ThreadActivity> {
+        let baseURL = self.baseURL
+        let bearer = self.bearer
+        return AsyncStream<ThreadActivity>(ThreadActivity.self, bufferingPolicy: .unbounded) { continuation in
+            let delegate = FanoutDelegate(onEvent: { event in
+                continuation.yield(event)
+            }, onFinish: {
+                continuation.finish()
+            })
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.timeoutIntervalForRequest = 0
+            configuration.timeoutIntervalForResource = 0
+            configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            configuration.networkServiceType = .responsiveData
+            configuration.httpMaximumConnectionsPerHost = 4
+            configuration.connectionProxyDictionary = [:]
+            configuration.httpAdditionalHeaders = [
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+            ]
+            let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+
+            var request = URLRequest(url: baseURL.appendingPathComponent("/channels/ios/fanout"))
+            request.httpMethod = "GET"
+            request.networkServiceType = .responsiveData
+            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+
+            let task = session.dataTask(with: request)
+            task.resume()
+
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+                session.invalidateAndCancel()
+            }
+        }
+    }
+}
+
+private final class FanoutDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let onEvent: @Sendable (ThreadActivity) -> Void
+    private let onFinish: @Sendable () -> Void
+    private var lineBuffer = ""
+    private var eventName: String?
+    private var dataBuffer = ""
+
+    init(
+        onEvent: @escaping @Sendable (ThreadActivity) -> Void,
+        onFinish: @escaping @Sendable () -> Void,
+    ) {
+        self.onEvent = onEvent
+        self.onFinish = onFinish
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void,
+    ) {
+        if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+            completionHandler(.allow)
+        } else {
+            completionHandler(.cancel)
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard let chunk = String(data: data, encoding: .utf8) else { return }
+        lineBuffer.append(chunk)
+        while let newlineRange = lineBuffer.range(of: "\n") {
+            let line = String(lineBuffer[..<newlineRange.lowerBound])
+            lineBuffer.removeSubrange(..<newlineRange.upperBound)
+            handle(line: line)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        onFinish()
+    }
+
+    private func handle(line rawLine: String) {
+        let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
+        if line.isEmpty {
+            if let name = eventName, !dataBuffer.isEmpty,
+               name == "thread_activity",
+               let data = dataBuffer.data(using: .utf8),
+               let object = try? JSONSerialization.jsonObject(with: data),
+               let dict = object as? [String: Any],
+               let threadId = dict["threadId"] as? String,
+               let kind = dict["kind"] as? String
+            {
+                if kind == "message" {
+                    onEvent(.message(threadId: threadId))
+                } else if kind == "icon", let icon = dict["icon"] as? String {
+                    onEvent(.icon(threadId: threadId, icon: icon))
+                }
+            }
+            eventName = nil
+            dataBuffer = ""
+            return
+        }
+        if line.hasPrefix(":") { return }
+        if line.hasPrefix("event:") {
+            eventName = String(line.dropFirst("event:".count))
+                .trimmingCharacters(in: .whitespaces)
+        } else if line.hasPrefix("data:") {
+            let chunk = String(line.dropFirst("data:".count))
+                .trimmingCharacters(in: .whitespaces)
+            if !dataBuffer.isEmpty { dataBuffer.append("\n") }
+            dataBuffer.append(chunk)
         }
     }
 }

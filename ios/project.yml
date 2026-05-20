@@ -10,7 +10,7 @@ settings:
   base:
     SWIFT_VERSION: "5.10"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "4"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     SWIFT_STRICT_CONCURRENCY: targeted
 targets:
@@ -22,21 +22,27 @@ targets:
       - path: Boop
         excludes:
           - "**/.DS_Store"
-          # TEMP: actool refuses to thin a 26.5-SDK asset catalog against a
-          # 26.4 simulator runtime. Lucide PDFs render from raw bundle
-          # resources via PDFKit instead (see LucideIcon.swift). Re-include
-          # this and remove the workaround once iOS 26.5 sim runtime ships.
-          - "Resources/Assets.xcassets"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.boop.Boop
         INFOPLIST_FILE: Boop/Resources/Info.plist
+        # Sandbox (development) APNs. Switch the value inside the
+        # entitlements file to "production" before archiving for
+        # TestFlight or App Store distribution.
+        CODE_SIGN_ENTITLEMENTS: Boop/Resources/Boop.entitlements
+        # The AppIcon set lives under Resources/Assets.xcassets. Xcode
+        # compiles it via actool and writes CFBundleIconName for us.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
-        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         SUPPORTS_MACCATALYST: NO
-        TARGETED_DEVICE_FAMILY: "1,2"
+        # iPhone-only per the office-hours plan; iPad orientations
+        # aren't declared in Info.plist and App Store Connect rejects
+        # iPad-targeted bundles missing them. Drop iPad now; revisit
+        # if/when we ship iPad layouts.
+        TARGETED_DEVICE_FAMILY: "1"
         SDKROOT: iphoneos
         ENABLE_PREVIEWS: YES
         GENERATE_INFOPLIST_FILE: NO

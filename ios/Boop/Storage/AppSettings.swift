@@ -11,6 +11,7 @@ final class AppSettings {
     private enum Keys {
         static let serverURL = "boop.serverURL"
         static let deviceId = "boop.deviceId"
+        static let pendingDeepLink = "boop.pendingDeepLinkThreadId"
     }
 
     var serverURL: String {
@@ -21,6 +22,17 @@ final class AppSettings {
     /// re-pairing the same install reuses the same row in Convex.
     var deviceId: String {
         didSet { defaults.set(deviceId, forKey: Keys.deviceId) }
+    }
+
+    /// Set by the notification delegate when the user taps a push that
+    /// carries `threadId`. `ThreadsStore` consumes + clears this after
+    /// `loadThreads`, so taps survive cold-start.
+    var pendingDeepLinkThreadId: String? {
+        get { defaults.string(forKey: Keys.pendingDeepLink) }
+        set {
+            if let v = newValue { defaults.set(v, forKey: Keys.pendingDeepLink) }
+            else { defaults.removeObject(forKey: Keys.pendingDeepLink) }
+        }
     }
 
     init() {

@@ -149,3 +149,63 @@ export const setLabel = mutation({
     return { ok: true };
   },
 });
+
+/** Persist the APNs device token + sandbox/production environment for a
+ *  paired device. The phone re-POSTs on every launch (so we always have
+ *  the freshest token Apple is vending), but it's idempotent. */
+export const setApnsToken = mutation({
+  args: {
+    deviceId: v.string(),
+    apnsDeviceToken: v.string(),
+    apnsEnvironment: v.union(v.literal("development"), v.literal("production")),
+  },
+  handler: async (ctx, args) => {
+    const device = await ctx.db
+      .query("devices")
+      .withIndex("by_deviceId", (q) => q.eq("deviceId", args.deviceId))
+      .unique();
+    if (!device || !device.paired) throw new Error("device not paired");
+    await ctx.db.patch(device._id, {
+      apnsDeviceToken: args.apnsDeviceToken,
+      apnsEnvironment: args.apnsEnvironment,
+      lastSeenAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+/** Called by the APNs sender when Apple returns 410 Gone — the token
+ *  is dead (app uninstalled, OS rotated, …) and must be evicted. */
+export const clearApnsTokenByToken = mutation({
+  args: { apnsDeviceToken: v.string() },
+  handler: async (ctx, args) => {
+    const device = await ctx.db
+      .query("devices")
+      .withIndex("by_apnsToken", (q) => q.eq("apnsDeviceToken", args.apnsDeviceToken))
+      .unique();
+    if (!device) return { cleared: false };
+    await ctx.db.patch(device._id, {
+      apnsDeviceToken: undefined,
+      apnsEnvironment: undefined,
+    });
+    return { cleared: true };
+  },
+});
+
+/** Lookup helper for the APNs subscriber — returns just enough to push
+ *  without exposing pairing material. */
+export const apnsTargetForDevice = query({
+  args: { deviceId: v.string() },
+  handler: async (ctx, args) => {
+    const device = await ctx.db
+      .query("devices")
+      .withIndex("by_deviceId", (q) => q.eq("deviceId", args.deviceId))
+      .unique();
+    if (!device || !device.paired || !device.apnsDeviceToken) return null;
+    return {
+      apnsDeviceToken: device.apnsDeviceToken,
+      apnsEnvironment: device.apnsEnvironment ?? "development",
+      label: device.label,
+    };
+  },
+});

@@ -367,6 +367,9 @@ export default defineSchema({
     paired: v.boolean(),
     bearerTokenHash: v.optional(v.string()),
     apnsDeviceToken: v.optional(v.string()),
+    /** "development" for TestFlight sandbox / "production" for App Store
+     *  / ad-hoc. Drives which Apple host the push helper targets. */
+    apnsEnvironment: v.optional(v.union(v.literal("development"), v.literal("production"))),
     label: v.optional(v.string()),
     pairedAt: v.optional(v.number()),
     lastSeenAt: v.number(),
@@ -374,7 +377,8 @@ export default defineSchema({
   })
     .index("by_deviceId", ["deviceId"])
     .index("by_pairing", ["pairingCodeHash"])
-    .index("by_bearer", ["bearerTokenHash"]),
+    .index("by_bearer", ["bearerTokenHash"])
+    .index("by_apnsToken", ["apnsDeviceToken"]),
 
   threads: defineTable({
     deviceId: v.string(),

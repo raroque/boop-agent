@@ -8,6 +8,79 @@ Format:
 
 ---
 
+## Unreleased — iOS permanent thread deletion
+
+Closes the last remaining lifecycle gap from the redesign: archived threads can now be removed for good. Long-press an archived row → "Delete forever" → confirm. The server purges messages, execution-agent rows, and per-agent logs in a single Convex mutation; attachment storage objects are left alone (no other code path purges `_storage` either).
+
+**Server**
+- Added: `convex/threads.ts` gains `remove(threadId, expectedDeviceId?)` — cascade-deletes messages (via `by_thread`), execution-agent rows for the `ios:<deviceId>:<threadId>` conversationId (via `by_conversation`), and per-agent logs (via `by_agent`). Reads are capped (1000 msgs, 500 agents, 500 logs/agent) so a runaway thread can't blow the per-transaction budget. Throws `forbidden` when `expectedDeviceId` doesn't match the row's owner — defense-in-depth on top of the bearer check.
+- Added: `DELETE /channels/ios/threads/:threadId` — idempotent (200 even if already gone), 403 on cross-device targeting.
+- Added: `tests/ios-thread-routes.test.ts` covers the archive → delete → list-empty path, the idempotent-double-delete path, and the cross-device 403.
+
+**iOS**
+- Added: `BoopClient.deleteThread(threadId:)` — surfaces server 403 as `ClientError.http(403, _)`.
+- Added: `ThreadsStore.deleteThread(_:)` — returns `Bool` so the caller can drop the row on success; on failure the message flows through `loadError`. Also tolerates the case where someone calls it on an open thread (drops locally + picks next-active or creates fresh).
+- Changed: `ArchivedScreen.swift` — long-press on a row reveals "Delete forever" (destructive) and "Restore" via `.contextMenu`. Confirmation runs through `.confirmationDialog`. While deleting, the row fades to 50% + shows a spinner.
+
+**Out of scope**
+- Deleting open (non-archived) threads — still archive-only from the open thread bar. Archive-then-delete keeps the lifecycle clear: archive is the soft-delete affordance, delete is the hard one.
+- Purging orphaned attachments from `_storage` — no other code path purges those either; until there's a sweeping retention policy, deleted threads leave their attachment blobs behind.
+
+## Unreleased — iOS APNs push notifications
+
+The iPhone now receives a lock-screen / banner notification when the agent replies or a proactive notice (e.g. inbox classifier) lands while the app is backgrounded. Tap the banner → app opens to the right thread. While the app is foregrounded the banner is suppressed (SSE is already painting the content live). Implementation plan: `docs/superpowers/plans/2026-05-19-ios-apns-push.md`.
+
+**Server**
+- Added: `server/apns.ts` — APNs sender + broadcast subscriber. Token-based JWT (ES256 over the .p8 key) with a 50-min in-process cache, lazy HTTP/2 sessions per environment (`api.sandbox.push.apple.com` for development, `api.push.apple.com` for production), one retry on `ExpiredProviderToken`, and 410-Gone-driven token eviction. Subscribes to `assistant_message` and `proactive_notice` and forwards only those whose `conversationId` starts with `ios:<deviceId>:`. Hand-rolled over `node:http2` + `node:crypto` — no new dependencies.
+- Added: `convex/devices.ts` gains `setApnsToken(deviceId, apnsDeviceToken, apnsEnvironment)`, `clearApnsTokenByToken(token)` (called on 410), and `apnsTargetForDevice(deviceId)` (lookup helper for the subscriber). New `by_apnsToken` index + optional `apnsEnvironment` field (`"development" | "production"`) on the `devices` table — additive, no migration needed.
+- Added: `POST /channels/ios/apns/register` and `POST /channels/ios/apns/unregister` on the iOS router. Register validates the hex token shape (32+ chars) and the environment string before persisting.
+- Added: `initApns()` called from `server/index.ts` boot. No-op (with one log line: `[apns] disabled (config missing)`) when `APNS_TEAM_ID` / `APNS_KEY_ID` / `APNS_PRIVATE_KEY` aren't set — SSE still delivers in foreground for users who don't want push.
+- Added: new env vars in `.env.example` — `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_PRIVATE_KEY` (multi-line PEM, or single-line with `\n` escapes — both forms work), `APNS_BUNDLE_ID` (defaults to `dev.boop.Boop`).
+- Added: `tests/apns.test.ts` — ES256 JWT round-trips through `createVerify` against the source public key (proves we're producing valid signatures), `\n`-escaped key form works, body capping at 240 chars, conversationId parsing (skip non-iOS), 410 wired to `clearToken`, 200 returns `pushed:true` with parsed threadId. All 8 tests run hermetic via injected deps — no live APNs traffic.
+
+**iOS**
+- Added: `Boop/State/PushDelegate.swift` — `UIApplicationDelegate` + `UNUserNotificationCenterDelegate`. Receives the device token from the OS, registers it with the server (using the Keychain bearer when available, otherwise stashes for `PairingStore` to register post-pair), suppresses banners while foregrounded (returns `[]` from `willPresent`), and stashes the tapped notification's `threadId` into `AppSettings.pendingDeepLinkThreadId` so cold-start deep-links work.
+- Added: `Boop/Resources/Boop.entitlements` — `aps-environment = development`. Swap to `production` before archiving for TestFlight / Release. Referenced via `CODE_SIGN_ENTITLEMENTS` in `project.yml`.
+- Changed: `Boop/BoopApp.swift` installs `@UIApplicationDelegateAdaptor(PushDelegate.self)` so the SwiftUI app sees the AppDelegate callbacks.
+- Changed: `Boop/State/PairingStore.swift` — once `phase = .paired`, requests notification permission via `UNUserNotificationCenter.requestAuthorization(...)` and, on grant, calls `UIApplication.shared.registerForRemoteNotifications()`. If the OS already vended a token before pair completed (the typical re-launch case), the cached token gets re-POSTed to the server right then.
+- Changed: `Boop/State/ThreadsStore.swift.loadThreads()` consumes `AppSettings.pendingDeepLinkThreadId` ahead of the default "first thread wins" selection — so tapping a push for a non-active thread lands you on the right one.
+- Added: `BoopClient.registerApns(deviceToken:environment:)` + `unregisterApns(deviceToken:)`. Existing `EmptyResponse` decoder reused.
+
+**Out of scope**
+- Live Activities + ActivityKit push tokens (different token type, ~12h expiry, separate work).
+- Silent / `content-available` background pushes.
+- Widgets, App Intents, Siri shortcuts (the M4 office-hours scope around `AskBoopIntent`).
+- Multi-device-per-user routing — one APNs token per device row, mirrors the existing single-bearer constraint.
+
+**Apple Developer setup required for pushes to actually fire**
+1. https://developer.apple.com/account/resources/identifiers — toggle Push Notifications on the App ID.
+2. https://developer.apple.com/account/resources/authkeys/list — create an APNs auth key (`.p8`), download it, note the Key ID + Team ID.
+3. Paste those into the server's `.env.local` (`APNS_*` block in `.env.example`).
+4. iOS-side: open `ios/Boop.xcodeproj` after `xcodegen generate`, ensure the target's signing team matches the one with the auth key.
+Without these the server runs fine and the iPhone keeps working — push just stays off.
+
+## Unreleased — iOS redesign Plan B (archived threads + unread fanout)
+
+Closes the work that Plan A deferred. The MenuSheet "Archived" card is now wired to a browse-and-restore screen; inactive open threads light up an unread dot via a new device-wide SSE fanout. Implementation plan: `docs/superpowers/plans/2026-05-19-ios-redesign-plan-b-finish.md`.
+
+**Server**
+- Added: `convex/threads.ts` gains `listArchived(deviceId)` (newest-archived-first, capped at 200 rows) and `unarchive(threadId)` (rejects when the device already has 4 open threads). Same `by_device` index used throughout — no schema change.
+- Added: `GET /channels/ios/threads/archived` and `POST /channels/ios/threads/:threadId/unarchive` (409 when 4 already open).
+- Added: `GET /channels/ios/fanout` — bearer-scoped device-wide SSE. Subscribes to every broadcast for `ios:<deviceId>:*` and re-emits a single `thread_activity` event with `{ threadId, kind: "message" | "icon", icon? }` for `assistant_message` and `thread_icon`. No deltas / agent events / attachments forwarded — the fanout payload stays cheap so the iPhone can keep it open in the background.
+- Added: `tests/ios-thread-routes.test.ts` covers archive → list → unarchive round-trip, the 4-open conflict (expects 409 on unarchive), and the fanout SSE actually delivering a `thread_activity` event after `/inbound`.
+
+**iOS**
+- Added: `Views/ArchivedScreen.swift` — sheet listing archived threads with per-thread tint chip, last-activity timestamp, tap-to-restore. Wired into `MenuSheet`'s previously-stub "Archived" card via `RootView` (also gains a `--open-archived` launch-arg for screenshot automation).
+- Added: `Networking/BoopClient.swift` gains `listArchivedThreads()` and `unarchiveThread(threadId:)`. The 409 from the server surfaces as a typed `ClientError.http(409, _)` which `ThreadsStore.unarchiveThread(_:)` translates into a friendly "archive one open thread first" toast on the screen.
+- Added: `FanoutConnection` in `BoopClient.swift` — a thin SSE subscriber (mirrors `SSEConnection`) yielding `ThreadActivity` events. `ThreadsStore` opens it on `bind(bearer:)` and feeds events into the existing `noteIncomingMessage(threadId:)` / `applyIconUpdate(threadId:icon:)` methods, with the same exponential-backoff reconnect policy (1s → 30s cap) as `ChatStore`. The active thread already short-circuits `noteIncomingMessage` so double-counts can't happen.
+- Changed: `RootView.swift` adds the `showArchived` sheet binding and the `--open-archived` launch arg.
+
+**Out of scope (intentional)**
+- APNs / push (M4 in the original office-hours design — bigger scope than Plan B).
+- Offline history cache.
+- Permanent deletion of archived threads (archive is soft-delete; reopen to read).
+- XCTest target setup.
+
 ## Unreleased — iOS redesign Plan A (multi-thread + new visual system)
 
 Foundation of the redesigned iOS client. After Plan A: up to 4 concurrent threads per device, each with an agent-picked Lucide icon and deterministic per-thread color tint; native Markdown rendering in chat bubbles; full-screen .md/.pdf file preview; bottom-sheet menu with 2×2 cards; full dark-mode design system (Inter + JetBrains Mono, color tokens, ~60 bundled Lucide icons). See the design brief at `docs/superpowers/specs/2026-05-15-ios-redesign-brief.md` and the implementation plan at `docs/superpowers/plans/2026-05-15-ios-redesign-plan-a-foundation.md`.

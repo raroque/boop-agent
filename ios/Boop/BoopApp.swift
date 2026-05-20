@@ -4,6 +4,7 @@ import CoreText
 @main
 struct BoopApp: App {
     @State private var settings = AppSettings()
+    @UIApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
 
     init() {
         Self.registerBundledFonts()

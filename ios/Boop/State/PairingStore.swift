@@ -88,6 +88,17 @@ final class PairingStore {
                 if result.paired, let bearer = result.bearerToken, !bearer.isEmpty {
                     KeychainStore.saveBearer(bearer)
                     phase = .paired(bearer: bearer)
+                    // Ask for notification permission once we have a
+                    // bearer to actually report a token against. If the
+                    // OS already vended a token before pair (the typical
+                    // re-launch case), `PushDelegate` has it cached so
+                    // this also re-registers it with the server.
+                    Task {
+                        await PushDelegate.requestAuthorizationIfNeeded()
+                        if let token = PushDelegate.latestDeviceToken {
+                            await PushDelegate.registerWithServerIfPaired(token: token)
+                        }
+                    }
                     return
                 }
             } catch {

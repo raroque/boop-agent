@@ -10,6 +10,7 @@ struct RootView: View {
     @State private var showSettings = false
     @State private var showFiles = ProcessInfo.processInfo.arguments.contains("--open-files")
     @State private var showAgents = ProcessInfo.processInfo.arguments.contains("--open-agents")
+    @State private var showArchived = ProcessInfo.processInfo.arguments.contains("--open-archived")
     /// When set, the Live Agents sheet opens scrolled to this agent.
     @State private var focusAgentId: String?
 
@@ -75,7 +76,7 @@ struct RootView: View {
             MenuSheet(
                 onFiles:      { showFiles = true },
                 onLiveAgents: { focusAgentId = nil; showAgents = true },
-                onArchived:   { /* Plan B */ },
+                onArchived:   { showArchived = true },
                 onSettings:   { showSettings = true }
             )
         }
@@ -96,6 +97,14 @@ struct RootView: View {
                     .environment(agentsStore)
                     .environment(threadsStore)
                     .environment(settings)
+                    .presentationDragIndicator(.hidden)
+            }
+        }
+        .sheet(isPresented: $showArchived) {
+            if let pairing, case .paired(let bearer) = pairing.phase, let threadsStore {
+                ArchivedScreen(bearer: bearer)
+                    .environment(settings)
+                    .environment(threadsStore)
                     .presentationDragIndicator(.hidden)
             }
         }

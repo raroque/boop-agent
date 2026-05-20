@@ -4,7 +4,7 @@ Native iOS client for the Boop agent. Pairs with the server over HTTP, streams r
 
 ## Status
 
-**M1** — pairing, chat, streaming, history. No push notifications, no markdown rendering, no attachments yet.
+**M1 + Redesign Plans A & B + APNs push + permanent delete** — pairing, multi-thread chat (up to 4 open), per-thread Lucide icons and tints, Markdown bubbles, inbound + outbound attachments (image / PDF / doc) with full-screen preview, cross-thread Files browser, Live Agents watcher, archived threads browser with long-press → delete-forever, unread badges on inactive threads (device-wide SSE fanout), and lock-screen / banner push when the app is backgrounded. Still ahead: offline history cache, Live Activities / widgets, attachment-blob cleanup.
 
 ## What you'll need
 
@@ -43,16 +43,26 @@ If you want to start over: gear icon → **Unpair this device**. (Also revoke th
 
 | File | Role |
 | --- | --- |
-| `BoopApp.swift` | App entry, owns `AppSettings`. |
-| `Models/Models.swift` | `Message`, `ServerMessage`, pairing response shapes. |
+| `BoopApp.swift` | App entry, owns `AppSettings`, registers bundled Inter + JetBrains Mono fonts at launch. |
+| `Models/Models.swift` | `Message`, `ServerMessage`, `Attachment`, `FileEntry`, pairing response shapes. |
+| `Models/Thread.swift` | `BoopThread` (open & archived) + `ServerThread` wire shape. |
+| `Models/Agent.swift` | `AgentRun` + `AgentLogEntry` for the Live Agents sheet. |
+| `DesignSystem/` | `BoopColor`, `BoopFont`, `BoopSpacing`, `BoopRadius`, `ThreadTints` (8-color FNV-1a-hashed palette), `LucideIcon` (~60 bundled PDFs). |
 | `Storage/AppSettings.swift` | UserDefaults-backed server URL + persistent deviceId. |
 | `Storage/KeychainStore.swift` | Bearer token storage (Keychain Services). |
-| `Networking/BoopClient.swift` | HTTP client (`pair/create`, `pair/check`, `inbound`, `messages`) + `SSEConnection` actor that parses `event:`/`data:` lines from `/channels/ios/stream`. |
+| `Networking/BoopClient.swift` | HTTP client (pair, threads CRUD, archived, files, agents, inbound, messages) + `SSEConnection` (per-thread stream) + `FanoutConnection` (device-wide stream for unread + icon updates). |
 | `State/PairingStore.swift` | `@Observable` state machine for pairing flow. Polls `/pair/check` every 2s. |
-| `State/ChatStore.swift` | `@Observable` chat state. Loads history, streams `assistant_delta` into a live bubble, finalizes on `assistant_message`, appends `assistant_ack`. Auto-reconnect with exponential backoff. |
-| `Views/RootView.swift` | Routes between `PairingView` and `ChatView` based on `PairingStore.phase`. |
+| `State/ThreadsStore.swift` | List of open threads, active selection, unread flags, fanout subscription. Calls into `BoopClient` for create/archive/unarchive. |
+| `State/ChatStore.swift` | Per-thread chat state. Switches threads via `switchTo(threadId:)`, streams `assistant_delta` into a live bubble, finalizes on `assistant_message`, merges `assistant_attachments`, forwards `thread_icon` + `agent_*` to listeners. Auto-reconnect with exponential backoff. |
+| `State/AgentsStore.swift` | Execution-agent timeline for the Live Agents sheet. Receives `agent_spawned` / `agent_tool` / `agent_done`. |
+| `Views/RootView.swift` | Routes between `PairingView` and `ChatView` based on `PairingStore.phase`. Wires the Files / Agents / Archived / Settings sheets. |
+| `Views/ChatView.swift` | Dock + dot-grid header + scrolling message list. |
+| `Views/MenuSheet.swift` | Bottom-sheet 2×2 cards (Files / Live agents / Archived / Settings). |
+| `Views/FilesScreen.swift` | Cross-thread files browser (search + kind / source / thread filters). |
+| `Views/AgentView.swift` | Live Agents sheet — status badges + tool timeline, deep-linkable. |
+| `Views/ArchivedScreen.swift` | Browse + restore archived threads. |
+| `Views/AttachmentPreviewSheet.swift` | Full-screen viewer (image, PDF via `PDFKit`, doc placeholder) with share + open-in-thread. |
 | `Views/PairingView.swift` | Pair-flow UI. |
-| `Views/ChatView.swift` | Message list + composer + connection-status dot. |
 | `Views/SettingsView.swift` | Server URL + unpair. |
 
 ## Endpoint contract
@@ -61,20 +71,42 @@ Everything under `<serverURL>/channels/ios`:
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
-| POST | `/pair/create` | none | Phone-initiated. Returns `{ deviceId, code, expiresAt }`. Rate-limited 3/IP/hr. |
+| POST | `/pair/create` | none | Phone-initiated. Returns `{ deviceId, code, expiresAt }`. Rate-limited 10/IP/hr. |
 | POST | `/pair/check` | none | Phone polls. Returns `{ paired: false }` or `{ paired: true, bearerToken }`. One-shot bearer pickup. |
 | POST | `/pair/consume` | none | Dashboard-initiated (the iPhone never calls this). |
-| POST | `/inbound` | bearer | `{ text }` → `{ ok, conversationId }`. |
-| GET | `/messages?limit=N` | bearer | Newest-first history fetch. |
-| GET | `/stream` | bearer | SSE. Events: `assistant_delta`, `assistant_message`, `assistant_ack`, `thinking`, `error`. |
+| GET | `/threads` | bearer | List open threads for this device. |
+| POST | `/threads/create` | bearer | Create a new open thread (4-open cap → 409). |
+| POST | `/threads/:id/archive` | bearer | Archive a thread. |
+| GET | `/threads/archived` | bearer | List archived threads, newest-first. |
+| POST | `/threads/:id/unarchive` | bearer | Restore an archived thread (4-open cap → 409). |
+| DELETE | `/threads/:id` | bearer | Permanently drop a thread + its messages + agent rows. Idempotent. 403 on cross-device. |
+| PATCH | `/threads/:id/icon` | bearer | Set the thread's Lucide icon (used by the `set_thread_icon` self-tool). |
+| GET | `/files?limit=N` | bearer | Cross-thread file attachments for this device. |
+| GET | `/agents?threadId=...` | bearer | Execution-agent rows for the thread. |
+| GET | `/agents/:id/logs` | bearer | Per-agent tool log. |
+| POST | `/inbound` | bearer | `{ text, threadId? }` → `{ ok, conversationId, threadId }`. |
+| GET | `/messages?threadId=...&limit=N` | bearer | Newest-first history fetch for one thread. |
+| GET | `/stream?threadId=...` | bearer | Per-thread SSE. Events: `assistant_delta`, `assistant_message`, `assistant_ack`, `assistant_attachments`, `thinking`, `error`, `thread_icon`, `agent_spawned`, `agent_tool`, `agent_done`. |
+| GET | `/fanout` | bearer | Device-wide SSE for unread badges + icon updates. Single event kind: `thread_activity` with `{ threadId, kind: "message" \| "icon", icon? }`. |
+
+## Push notifications
+
+When `APNS_TEAM_ID` / `APNS_KEY_ID` / `APNS_PRIVATE_KEY` are set in the server's `.env.local`, the server pushes an APNs alert to the paired device whenever an assistant message or proactive notice lands. The phone shows it on the lock screen / banner while the app is backgrounded; tapping deep-links to the right thread. While the app is foregrounded the banner is suppressed (SSE is already painting the same content).
+
+Server-side setup is in `.env.example` under "APNs". iOS-side:
+
+1. Make sure the bundle ID + signing team in Xcode have **Push Notifications** capability enabled at https://developer.apple.com/account/resources/identifiers — toggling APNs in your App ID is a one-time thing.
+2. The repo ships `Boop/Resources/Boop.entitlements` with `aps-environment = development` (sandbox). Switch the value to `production` before archiving for TestFlight / Release. The matching server env (`APNS_*`) targets `api.sandbox.push.apple.com` for `development`-environment tokens and `api.push.apple.com` for `production`.
+3. First launch after pair, iOS prompts for notification permission. The token registration with the server happens automatically.
+
+If you don't set the APNs env vars, the server logs `[apns] disabled (config missing)` at boot and everything else works as before.
 
 ## Known gaps
 
-- **No APNs / push.** The app only receives messages while the SSE stream is live in the foreground. M2.
-- **No markdown rendering.** Replies render as plain text. Code blocks, lists, links all show as raw markdown.
-- **No attachment support.** Inbound photos/PDFs (server feature) aren't yet rendered in the iOS UI.
+- **No Live Activities / widgets / Siri shortcuts.** Plain push notifications only.
 - **No offline history.** Messages are fetched fresh from the server on launch; nothing is cached locally.
 - **No multi-device UX.** Each install gets its own `deviceId`. Two paired phones for the same user appear as two separate `ios:<deviceId>` conversations on the server.
+- **No attachment-blob cleanup.** Deleting a thread removes the message rows but leaves the underlying attachment storage objects (image / PDF / doc) in Convex `_storage`. There's no other code path that purges those either, so until there's a retention policy this is consistent rather than a regression.
 
 ## Generating the xcodeproj non-interactively
 

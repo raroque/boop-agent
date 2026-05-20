@@ -180,6 +180,108 @@ export function createIosRouter(): Router {
     }
   });
 
+  // GET /threads/archived — list archived threads, newest-first.
+  router.get("/threads/archived", requireBearer, async (req: AuthedRequest, res) => {
+    try {
+      const threads = await convex.query(api.threads.listArchived, {
+        deviceId: req.deviceId!,
+      });
+      res.json({ threads });
+    } catch (err) {
+      console.error("[ios] threads:listArchived failed", err);
+      res.status(500).json({ error: "list archived failed" });
+    }
+  });
+
+  // POST /apns/register — phone reports its device token + environment
+  // after the OS hands one over. Idempotent: every app launch re-POSTs
+  // so the latest token Apple is vending wins.
+  router.post("/apns/register", requireBearer, async (req: AuthedRequest, res) => {
+    const { deviceToken, environment } = (req.body ?? {}) as {
+      deviceToken?: string;
+      environment?: string;
+    };
+    if (!deviceToken || typeof deviceToken !== "string" || !/^[0-9a-fA-F]{32,}$/.test(deviceToken)) {
+      res.status(400).json({ error: "deviceToken (hex) required" });
+      return;
+    }
+    if (environment !== "development" && environment !== "production") {
+      res.status(400).json({ error: "environment must be development|production" });
+      return;
+    }
+    try {
+      await convex.mutation(api.devices.setApnsToken, {
+        deviceId: req.deviceId!,
+        apnsDeviceToken: deviceToken,
+        apnsEnvironment: environment,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[ios] apns:register failed", err);
+      res.status(500).json({ error: "apns register failed" });
+    }
+  });
+
+  // POST /apns/unregister — phone says "drop my token". Called on
+  // logout / unpair from the iOS side.
+  router.post("/apns/unregister", requireBearer, async (req: AuthedRequest, res) => {
+    const { deviceToken } = (req.body ?? {}) as { deviceToken?: string };
+    if (!deviceToken || typeof deviceToken !== "string") {
+      res.status(400).json({ error: "deviceToken required" });
+      return;
+    }
+    try {
+      await convex.mutation(api.devices.clearApnsTokenByToken, {
+        apnsDeviceToken: deviceToken,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[ios] apns:unregister failed", err);
+      res.status(500).json({ error: "apns unregister failed" });
+    }
+  });
+
+  // POST /threads/:threadId/unarchive — restore an archived thread.
+  // Rejected with 409 when the device already has 4 open threads.
+  router.post("/threads/:threadId/unarchive", requireBearer, async (req: AuthedRequest, res) => {
+    try {
+      await convex.mutation(api.threads.unarchive, {
+        threadId: req.params.threadId as any,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("no more than")) {
+        res.status(409).json({ error: "max open threads reached" });
+        return;
+      }
+      console.error("[ios] threads:unarchive failed", err);
+      res.status(500).json({ error: "unarchive thread failed" });
+    }
+  });
+
+  // DELETE /threads/:threadId — permanently drop a thread + its
+  // messages + agent rows. Idempotent: deleting an already-deleted
+  // thread still returns 200. 403 when the thread belongs to a
+  // different device (defense-in-depth against bearer-token misuse).
+  router.delete("/threads/:threadId", requireBearer, async (req: AuthedRequest, res) => {
+    try {
+      await convex.mutation(api.threads.remove, {
+        threadId: req.params.threadId as any,
+        expectedDeviceId: req.deviceId!,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("forbidden")) {
+        res.status(403).json({ error: "forbidden" });
+        return;
+      }
+      console.error("[ios] threads:remove failed", err);
+      res.status(500).json({ error: "remove thread failed" });
+    }
+  });
+
   // PATCH /threads/:threadId/icon — set the thread icon.
   router.patch("/threads/:threadId/icon", requireBearer, async (req: AuthedRequest, res) => {
     const { icon } = (req.body ?? {}) as { icon?: string };
@@ -466,6 +568,54 @@ export function createIosRouter(): Router {
       if (!data || data.conversationId !== conversationId) return;
       res.write(`event: ${msg.event}\n`);
       res.write(`data: ${JSON.stringify(msg.data)}\n\n`);
+      (res as { flush?: () => void }).flush?.();
+    });
+
+    const heartbeat = setInterval(() => {
+      res.write(`: ping\n\n`);
+      (res as { flush?: () => void }).flush?.();
+    }, 25_000);
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
+  });
+
+  // GET /fanout — authed, device-scoped SSE. Forwards a single
+  // `thread_activity` event for any `assistant_message` or
+  // `thread_icon` broadcast on this device's threads, so iOS can
+  // mark inactive threads unread (or update their icon) without
+  // opening one SSE per open thread.
+  router.get("/fanout", requireBearer, (req: AuthedRequest, res) => {
+    const deviceId = req.deviceId!;
+    const prefix = `ios:${deviceId}:`;
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    req.socket.setNoDelay(true);
+    req.socket.setTimeout(0);
+
+    res.write(`: fanout for ${deviceId}\n\n`);
+    (res as { flush?: () => void }).flush?.();
+
+    const unsubscribe = subscribe((msg: BroadcastMessage) => {
+      if (msg.event !== "assistant_message" && msg.event !== "thread_icon") return;
+      const data = msg.data as { conversationId?: string } | null;
+      if (!data || typeof data.conversationId !== "string") return;
+      if (!data.conversationId.startsWith(prefix)) return;
+      const threadId = data.conversationId.slice(prefix.length);
+      if (!threadId) return;
+      const kind = msg.event === "assistant_message" ? "message" : "icon";
+      const icon = msg.event === "thread_icon"
+        ? (msg.data as { icon?: string }).icon
+        : undefined;
+      const payload = { threadId, kind, ...(icon ? { icon } : {}) };
+      res.write(`event: thread_activity\n`);
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
       (res as { flush?: () => void }).flush?.();
     });
 
