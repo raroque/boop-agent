@@ -5,6 +5,7 @@ import CoreText
 struct BoopApp: App {
     @State private var settings = AppSettings()
     @UIApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         Self.registerBundledFonts()
@@ -15,6 +16,15 @@ struct BoopApp: App {
             RootView()
                 .environment(settings)
                 .preferredColorScheme(.dark)        // M1 ships dark-only
+                .onChange(of: scenePhase) { _, newPhase in
+                    if newPhase == .background {
+                        // Persist anything pending in MessageCache before
+                        // iOS suspends the process. fire-and-forget — the
+                        // scene-phase change may run synchronously w/ the
+                        // suspension request, so we can't await here.
+                        Task { await MessageCache.shared.flushAll() }
+                    }
+                }
         }
     }
 

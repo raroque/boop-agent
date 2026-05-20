@@ -33,6 +33,15 @@ struct RootView: View {
                             chat.onAgentEvent = { [weak agentsStore] event in
                                 agentsStore?.applyEvent(event)
                             }
+                            // Cache-first paint: hydrate the dock + active
+                            // thread from disk so the UI shows the last
+                            // known state immediately, then refresh from
+                            // the server in the background.
+                            await threadsStore.hydrateFromCache()
+                            if let id = threadsStore.activeThreadId {
+                                await chat.switchTo(threadId: id)
+                                await agentsStore.switchTo(threadId: id)
+                            }
                             await threadsStore.loadThreads()
                             if threadsStore.activeThreadId == nil {
                                 await threadsStore.createNewThread()

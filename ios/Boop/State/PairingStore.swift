@@ -73,6 +73,11 @@ final class PairingStore {
     func reset() {
         pollTask?.cancel()
         pollTask = nil
+        // Wipe the local message cache so the next pair starts clean —
+        // even if it's a different device on the same iPhone. Detached
+        // so we don't block the phase transition; the actor will drop
+        // any pending writes since the bearer is gone anyway.
+        Task.detached { await MessageCache.shared.purgeAll() }
         KeychainStore.clear()
         phase = .idle
     }
