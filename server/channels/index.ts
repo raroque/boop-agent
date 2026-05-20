@@ -95,6 +95,7 @@ export async function runTurn(inbound: ParsedInbound): Promise<void> {
       threadId,
       turnTag,
       precomputedUserMessageId: inbound.precomputedUserMessageId,
+      precomputedTurnId: inbound.precomputedTurnId,
       onThinking: (t) => broadcast("thinking", { conversationId, t }),
     });
     if (reply) {

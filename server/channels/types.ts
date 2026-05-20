@@ -36,6 +36,13 @@ export interface ParsedInbound {
    * `user_message` broadcast so we don't double-write the row.
    */
   precomputedUserMessageId?: string;
+  /**
+   * Tagged with `precomputedUserMessageId` — when iOS pre-persists
+   * the user message it generates the turnId itself so the
+   * subsequent agent turn writes assistant rows under the same
+   * grouping key. Required whenever `precomputedUserMessageId` is set.
+   */
+  precomputedTurnId?: string;
 }
 
 export interface Channel {

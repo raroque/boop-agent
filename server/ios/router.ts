@@ -6,6 +6,9 @@ import type { ConversationId } from "../channels/types.js";
 import { convex } from "../convex-client.js";
 import { api } from "../../convex/_generated/api.js";
 
+const randomId = (prefix: string): string =>
+  `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
 /**
  * iOS channel router. Pairing flow:
  *   1. Phone POSTs /pair/create with a deviceId (UUID). Server returns
@@ -407,6 +410,13 @@ export function createIosRouter(): Router {
 
     const conversationId = `ios:${deviceId}:${effectiveThreadId}` as ConversationId;
 
+    // Generate a single turnId here so the user-message row and every
+    // assistant row the agent writes in this turn share the same grouping key.
+    // If we let handleUserMessage generate its own turnId, the user row
+    // (persisted below) would have turnId: undefined while assistant rows
+    // carry a turnId, silently breaking any tooling that groups by turn.
+    const turnId = randomId("turn");
+
     // Persist the inbound user message synchronously so we can return
     // the canonical Convex id to the client. The agent turn fires
     // fire-and-forget below — handleUserMessage skips its own persist
@@ -418,6 +428,7 @@ export function createIosRouter(): Router {
         role: "user",
         content: text,
         threadId: effectiveThreadId as any,
+        turnId,
       });
       broadcast("user_message", { conversationId, content: text });
     } catch (err) {
@@ -432,6 +443,7 @@ export function createIosRouter(): Router {
       content: text,
       threadId: effectiveThreadId,
       precomputedUserMessageId: userMessageId,
+      precomputedTurnId: turnId,
     }).catch((err) => console.error("[ios] runTurn failed", err));
 
     res.json({ ok: true, conversationId, threadId: effectiveThreadId, userMessageId });

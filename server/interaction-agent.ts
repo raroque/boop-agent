@@ -226,6 +226,13 @@ interface HandleOpts {
   // user-message history. Defaults to "user".
   kind?: "user" | "proactive";
   precomputedUserMessageId?: string;
+  /**
+   * When the calling channel pre-persists the user message (iOS /inbound),
+   * it must also generate the turnId so assistant messages in this turn
+   * are grouped under the same key. Pass that id here and handleUserMessage
+   * will use it instead of generating its own.
+   */
+  precomputedTurnId?: string;
 }
 
 function randomId(prefix: string): string {
@@ -233,10 +240,34 @@ function randomId(prefix: string): string {
 }
 
 export async function handleUserMessage(opts: HandleOpts): Promise<string> {
-  const turnId = randomId("turn");
+  // When the iOS route pre-persists the user message, it generates its own
+  // turnId so that the user message row and all subsequent assistant rows in
+  // this turn share the same grouping key. Use it if provided; otherwise
+  // generate a fresh id (all other channels take this path).
+  const turnId = opts.precomputedTurnId ?? randomId("turn");
   const integrations = availableIntegrations();
 
   const inboundRole = opts.kind === "proactive" ? "system" : "user";
+
+  // Proactive turns must never be paired with precomputedUserMessageId: the
+  // role the route used when persisting would be "user", but proactive turns
+  // need "system". Catch this early rather than silently writing the wrong role.
+  if (opts.precomputedUserMessageId && opts.kind === "proactive") {
+    throw new Error(
+      "precomputedUserMessageId is only valid for direct user turns — proactive turns must let handleUserMessage do its own persist + broadcast",
+    );
+  }
+
+  // Latent trap: if the caller pre-persisted the user message but also
+  // supplied attachments, those attachments would be silently dropped here
+  // because the persist block below is skipped. iOS /inbound doesn't accept
+  // attachments yet, so this is safe today — but warn loudly if it ever fires.
+  if (opts.precomputedUserMessageId && opts.attachments && opts.attachments.length > 0) {
+    console.warn(
+      "[turn] precomputedUserMessageId set but attachments[] present — caller must persist attachments themselves",
+      { conversationId: opts.conversationId, count: opts.attachments.length },
+    );
+  }
 
   // Skip the persist + broadcast when the calling channel already did
   // them (currently only iOS, so it can return the userMessageId to the
