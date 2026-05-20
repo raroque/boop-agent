@@ -45,7 +45,7 @@ struct Message: Identifiable, Equatable {
         case system
     }
 
-    let id: String
+    var id: String
     let threadId: String              // ← NEW
     let role: Role
     var content: String
@@ -115,6 +115,7 @@ struct PairCheckResponse: Decodable {
 struct InboundResponse: Decodable {
     let ok: Bool
     let conversationId: String
+    let userMessageId: String?   // present on iOS /inbound responses
 }
 
 struct ServerError: Decodable, Error {

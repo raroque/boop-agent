@@ -204,12 +204,19 @@ final class ChatStore {
         sendError = nil
         isAwaitingReply = true
 
-        messages.append(Message(id: "local-\(UUID().uuidString)", threadId: threadId, role: .user,
+        let localId = "local-\(UUID().uuidString)"
+        messages.append(Message(id: localId, threadId: threadId, role: .user,
                                 content: trimmed, createdAt: Date()))
 
         let client = BoopClient(baseURL: baseURL, bearer: bearer)
         do {
-            _ = try await client.sendInbound(text: trimmed, threadId: threadId)
+            let response = try await client.sendInbound(text: trimmed, threadId: threadId)
+            // Replace the optimistic local id with the canonical Convex id.
+            // This keeps merge-by-id trivial during background sync.
+            if let serverId = response.userMessageId,
+               let idx = messages.firstIndex(where: { $0.id == localId }) {
+                messages[idx].id = serverId
+            }
         } catch {
             sendError = "Send failed: \(error.localizedDescription)"
             isAwaitingReply = false
