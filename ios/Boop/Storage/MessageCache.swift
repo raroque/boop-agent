@@ -54,8 +54,9 @@ actor MessageCache {
     func scheduleWrite(_ payload: CachedThread) {
         pendingPayloads[payload.threadId] = payload
         debounceTask?.cancel()
+        let nanos = debounceNanos
         debounceTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(nanoseconds: nanos)
             if Task.isCancelled { return }
             await self?.flushAll()
         }
@@ -82,6 +83,7 @@ actor MessageCache {
             try data.write(to: tmp, options: .atomic)
             _ = try fm.replaceItemAt(url, withItemAt: tmp)
         } catch {
+            print("[MessageCache] writeNow(\(payload.threadId)) failed: \(error.localizedDescription)")
             // Best-effort. Server is SoT; next mutation will retry.
             try? fm.removeItem(at: tmp)
         }
@@ -105,6 +107,7 @@ actor MessageCache {
             try data.write(to: tmp, options: .atomic)
             _ = try fm.replaceItemAt(threadsListURL, withItemAt: tmp)
         } catch {
+            print("[MessageCache] writeThreadsList failed: \(error.localizedDescription)")
             try? fm.removeItem(at: tmp)
         }
     }
