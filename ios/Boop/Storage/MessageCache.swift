@@ -23,6 +23,7 @@ actor MessageCache {
     private let threadsDir: URL
     private let threadsListURL: URL
     private var pendingPayloads: [String: CachedThread] = [:]
+    private var pendingThreadsList: CachedThreadsList?
     private var debounceTask: Task<Void, Never>?
     private let debounceNanos: UInt64 = 500_000_000  // 500ms
 
@@ -73,6 +74,10 @@ actor MessageCache {
         for (_, payload) in toWrite {
             writeNow(payload)
         }
+        if let listPayload = pendingThreadsList {
+            pendingThreadsList = nil
+            writeThreadsListNow(listPayload)
+        }
     }
 
     private func writeNow(_ payload: CachedThread) {
@@ -100,7 +105,23 @@ actor MessageCache {
         return decoded
     }
 
-    func writeThreadsList(_ payload: CachedThreadsList) async {
+    /// Schedules a debounced write of the threads list. Subsequent
+    /// calls within the 500ms window coalesce into one disk write,
+    /// matching the per-thread `scheduleWrite` behaviour. Called from
+    /// `ThreadsStore` on every list mutation including fanout-driven
+    /// ones that can fire many times per second.
+    func scheduleWriteThreadsList(_ payload: CachedThreadsList) {
+        pendingThreadsList = payload
+        debounceTask?.cancel()
+        let nanos = debounceNanos
+        debounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: nanos)
+            if Task.isCancelled { return }
+            await self?.flushAll()
+        }
+    }
+
+    private func writeThreadsListNow(_ payload: CachedThreadsList) {
         let tmp = threadsListURL.appendingPathExtension("tmp")
         guard let data = try? JSONEncoder().encode(payload) else { return }
         do {
@@ -120,6 +141,7 @@ actor MessageCache {
         debounceTask?.cancel()
         debounceTask = nil
         pendingPayloads.removeAll()
+        pendingThreadsList = nil
         try? fm.removeItem(at: threadsDir)
         try? fm.removeItem(at: threadsListURL)
         try? fm.createDirectory(at: threadsDir, withIntermediateDirectories: true)

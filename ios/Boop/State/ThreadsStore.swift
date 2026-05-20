@@ -41,7 +41,7 @@ final class ThreadsStore {
     /// Persists the current open list + active thread id to disk.
     /// Fire-and-forget. The archived list is intentionally empty in
     /// the cache for now; archived browsing always hits the server.
-    func writeListCache() async {
+    private func writeListCache() async {
         let payload = CachedThreadsList(
             schemaVersion: CacheSchema.currentVersion,
             lastSyncedAt: Date().timeIntervalSince1970 * 1000,
@@ -49,7 +49,7 @@ final class ThreadsStore {
             archived: [],
             activeThreadId: activeThreadId
         )
-        await MessageCache.shared.writeThreadsList(payload)
+        await MessageCache.shared.scheduleWriteThreadsList(payload)
     }
 
     func unbind() {
@@ -105,6 +105,7 @@ final class ThreadsStore {
             let created = try await client.createThread()
             await loadThreads()
             activeThreadId = created.threadId
+            Task { await writeListCache() }
         } catch {
             loadError = "Couldn't create thread: \(error.localizedDescription)"
         }
@@ -206,6 +207,7 @@ final class ThreadsStore {
         }
         await loadThreads()
         activeThreadId = id
+        Task { await writeListCache() }
     }
 
     /// Archives a thread on the server, drops it from the local list, and
