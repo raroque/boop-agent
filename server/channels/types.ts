@@ -29,6 +29,13 @@ export interface ParsedInbound {
   attachments?: Doc<"messages">["attachments"];
   /** iOS thread id — scopes message persistence and SSE filtering. */
   threadId?: string;
+  /**
+   * If the calling channel already persisted the inbound user message
+   * (e.g. iOS /inbound does this so it can return the id to the client),
+   * pass the id here. handleUserMessage will skip its own persist +
+   * `user_message` broadcast so we don't double-write the row.
+   */
+  precomputedUserMessageId?: string;
 }
 
 export interface Channel {

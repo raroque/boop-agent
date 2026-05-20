@@ -225,6 +225,7 @@ interface HandleOpts {
   // role=user, so the synthetic notice the IA receives doesn't pollute the
   // user-message history. Defaults to "user".
   kind?: "user" | "proactive";
+  precomputedUserMessageId?: string;
 }
 
 function randomId(prefix: string): string {
@@ -236,18 +237,24 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const integrations = availableIntegrations();
 
   const inboundRole = opts.kind === "proactive" ? "system" : "user";
-  await convex.mutation(api.messages.send, {
-    conversationId: opts.conversationId,
-    role: inboundRole,
-    content: opts.content,
-    attachments: opts.attachments,
-    turnId,
-    ...(opts.threadId ? { threadId: opts.threadId as any } : {}),
-  });
-  broadcast(opts.kind === "proactive" ? "proactive_notice" : "user_message", {
-    conversationId: opts.conversationId,
-    content: opts.content,
-  });
+
+  // Skip the persist + broadcast when the calling channel already did
+  // them (currently only iOS, so it can return the userMessageId to the
+  // client synchronously from /inbound).
+  if (!opts.precomputedUserMessageId) {
+    await convex.mutation(api.messages.send, {
+      conversationId: opts.conversationId,
+      role: inboundRole,
+      content: opts.content,
+      attachments: opts.attachments,
+      turnId,
+      ...(opts.threadId ? { threadId: opts.threadId as any } : {}),
+    });
+    broadcast(opts.kind === "proactive" ? "proactive_notice" : "user_message", {
+      conversationId: opts.conversationId,
+      content: opts.content,
+    });
+  }
 
   // Phase 4 intercept: if there's a recently-parked browser session for this
   // conversation, the user's reply is the answer to its pending question.

@@ -1,7 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { runTurn } from "../channels/index.js";
-import { subscribe, type BroadcastMessage } from "../broadcast.js";
+import { broadcast, subscribe, type BroadcastMessage } from "../broadcast.js";
 import type { ConversationId } from "../channels/types.js";
 import { convex } from "../convex-client.js";
 import { api } from "../../convex/_generated/api.js";
@@ -406,13 +406,35 @@ export function createIosRouter(): Router {
     }
 
     const conversationId = `ios:${deviceId}:${effectiveThreadId}` as ConversationId;
+
+    // Persist the inbound user message synchronously so we can return
+    // the canonical Convex id to the client. The agent turn fires
+    // fire-and-forget below — handleUserMessage skips its own persist
+    // because we pass precomputedUserMessageId through.
+    let userMessageId: string;
+    try {
+      userMessageId = await convex.mutation(api.messages.send, {
+        conversationId,
+        role: "user",
+        content: text,
+        threadId: effectiveThreadId as any,
+      });
+      broadcast("user_message", { conversationId, content: text });
+    } catch (err) {
+      console.error("[ios] /inbound persist failed", err);
+      res.status(500).json({ error: "persist failed" });
+      return;
+    }
+
     runTurn({
       conversationId,
       from: `ios:${deviceId}`,
       content: text,
       threadId: effectiveThreadId,
+      precomputedUserMessageId: userMessageId,
     }).catch((err) => console.error("[ios] runTurn failed", err));
-    res.json({ ok: true, conversationId, threadId: effectiveThreadId });
+
+    res.json({ ok: true, conversationId, threadId: effectiveThreadId, userMessageId });
   });
 
   // ---------- Agents (read-only) ----------

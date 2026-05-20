@@ -79,9 +79,17 @@ test("POST /inbound without threadId uses the default thread", async () => {
     headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
     body: JSON.stringify({ text: "hello" }),
   });
-  const body = (await res.json()) as { ok: boolean; threadId: string };
+  const body = (await res.json()) as {
+    ok: boolean;
+    threadId: string;
+    userMessageId: string;
+  };
   assert.equal(res.status, 200);
   assert.ok(body.threadId);
+  assert.ok(
+    typeof body.userMessageId === "string" && body.userMessageId.length > 0,
+    "userMessageId should be a non-empty Convex id",
+  );
 });
 
 test("archive → GET /threads/archived → POST /unarchive round-trips", async () => {
