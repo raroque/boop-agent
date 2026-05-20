@@ -165,6 +165,8 @@ final class ChatStore {
         mutateActive { msgs in
             guard let idx = msgs.lastIndex(where: { $0.role == .assistant }) else { return }
             var current = msgs[idx].attachments
+            // Dedup by attachment id (storage id + kind) — defends against the
+            // server replaying or the SSE socket reconnecting and replaying.
             for a in attachments where !current.contains(where: { $0.id == a.id }) {
                 current.append(a)
             }
@@ -227,10 +229,12 @@ final class ChatStore {
             // Replace the optimistic local id with the canonical Convex id.
             // This keeps merge-by-id trivial during background sync.
             if let serverId = response.userMessageId {
-                mutateActive { msgs in
-                    if let idx = msgs.firstIndex(where: { $0.id == localId }) {
-                        msgs[idx].id = serverId
-                    }
+                // Target the originating thread by id, NOT the active
+                // thread — user may have switched threads during the await.
+                var buf = perThread[threadId] ?? []
+                if let idx = buf.firstIndex(where: { $0.id == localId }) {
+                    buf[idx].id = serverId
+                    perThread[threadId] = buf
                 }
             }
         } catch {
