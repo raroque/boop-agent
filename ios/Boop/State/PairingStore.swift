@@ -75,8 +75,13 @@ final class PairingStore {
         pollTask = nil
         // Wipe the local message cache so the next pair starts clean —
         // even if it's a different device on the same iPhone. Detached
-        // so we don't block the phase transition; the actor will drop
-        // any pending writes since the bearer is gone anyway.
+        // so we don't block the phase transition. There's a small
+        // window where an in-flight SSE event could schedule a write
+        // that arrives at the MessageCache actor before purgeAll is
+        // dequeued — actor serialization guarantees they don't
+        // interleave, but the late write may land after the purge.
+        // Worst case: a few KB of stale cache that the next hydration
+        // overwrites. Acceptable.
         Task.detached { await MessageCache.shared.purgeAll() }
         KeychainStore.clear()
         phase = .idle
