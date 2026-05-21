@@ -11,6 +11,7 @@ import SwiftUI
 struct Dock: View {
     @Environment(ThreadsStore.self) private var threads
     @Environment(ChatStore.self) private var chat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showAttachPicker = false
     @Binding var draft: String
     var onSend: (String) -> Void
@@ -27,7 +28,8 @@ struct Dock: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        .animation(.easeInOut(duration: 0.20), value: composerFocused)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.20),
+                   value: composerFocused)
         .padding(.horizontal, BoopSpacing.l)
         .padding(.bottom, 18)
         .attachPicker(isPresented: $showAttachPicker) { chip in
@@ -90,11 +92,13 @@ struct Dock: View {
             }
 
             // The welded tab — single instance, animates its position.
+            // Reduce-motion users get an instant snap instead of the slide.
             if let active = activeThread,
                let idx = threads.threads.firstIndex(where: { $0.id == active.id }) {
                 weldedTab(for: active)
                     .position(x: slotX(idx) + Self.slotWidth / 2, y: 17)
-                    .animation(.easeInOut(duration: 0.20), value: threads.activeThreadId)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.20),
+                               value: threads.activeThreadId)
             }
 
             // "+" new-thread button — far right. `.frame(maxWidth:
@@ -126,6 +130,13 @@ struct Dock: View {
             .overlay(
                 WeldedTabShape().strokeBorder(BoopColor.glassBorder, lineWidth: 1)
             )
+            .contextMenu {
+                Button(role: .destructive) {
+                    Task { await threads.archiveThread(thread.id) }
+                } label: {
+                    Label("Archive", systemImage: "archivebox")
+                }
+            }
     }
 
     private func inactiveIcon(for thread: BoopThread) -> some View {
@@ -205,7 +216,10 @@ struct Dock: View {
                 .frame(width: 40, height: 40)
                 .background(BoopColor.accent, in: Circle())
         }
-        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        // Enabled when there's text OR staged chips — chips-only send
+        // fires ChatStore's "Attachments coming soon" toast (spec §3.5.3).
+        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                  && chat.attachmentChips.isEmpty)
         .accessibilityLabel("Send")
     }
 
@@ -218,7 +232,9 @@ struct Dock: View {
 
     private func send() {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        // Chips-only sends are allowed — ChatStore.send fires the
+        // "Attachments coming soon" toast even when text is empty.
+        guard !trimmed.isEmpty || !chat.attachmentChips.isEmpty else { return }
         draft = ""
         onSend(trimmed)
     }
