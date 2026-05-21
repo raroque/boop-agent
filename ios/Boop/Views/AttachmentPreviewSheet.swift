@@ -1,5 +1,5 @@
 import SwiftUI
-import PDFKit
+@preconcurrency import PDFKit
 import UIKit
 
 /// Full-screen file preview matching the "File Preview" frame in
