@@ -49,6 +49,10 @@
         <string>Fonts/JetBrainsMono-Regular.ttf</string>
         <string>Fonts/JetBrainsMono-Medium.ttf</string>
     </array>
+    <key>NSCameraUsageDescription</key>
+    <string>Boop uses the camera so you can attach a photo to a message.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Boop uses your photo library to attach images to messages.</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
