@@ -10,12 +10,17 @@ import SwiftUI
 /// Task 8 adds keyboard collapse. Task 9 wires the attach picker.
 struct Dock: View {
     @Environment(ThreadsStore.self) private var threads
+    @Environment(ChatStore.self) private var chat
+    @State private var showAttachPicker = false
     @Binding var draft: String
     var onSend: (String) -> Void
     @FocusState private var composerFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
+            AttachmentChipRow(chips: chat.attachmentChips, onRemove: { id in
+                chat.removeChip(id: id)
+            })
             composerPill
             if !composerFocused {
                 slotRow
@@ -25,6 +30,9 @@ struct Dock: View {
         .animation(.easeInOut(duration: 0.20), value: composerFocused)
         .padding(.horizontal, BoopSpacing.l)
         .padding(.bottom, 18)
+        .attachPicker(isPresented: $showAttachPicker) { chip in
+            chat.addChip(chip)
+        }
     }
 
     // MARK: - Composer pill
@@ -166,7 +174,7 @@ struct Dock: View {
     // MARK: - Composer subviews
 
     private var attachButton: some View {
-        Button(action: { /* hooked up in Task 9 */ }) {
+        Button(action: { showAttachPicker = true }) {
             LucideIcon(name: .plus, size: 18)
                 .foregroundStyle(BoopColor.textTertiary)
                 .frame(width: 36, height: 36)
