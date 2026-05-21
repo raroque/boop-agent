@@ -183,3 +183,36 @@ extension CachedAttachment {
         )
     }
 }
+
+// MARK: - Draft state
+
+/// A picked attachment held in the composer's draft state, before the
+/// user taps Send. Lives client-side only — the upload + /inbound
+/// pipeline is a follow-up project. See
+/// docs/superpowers/specs/2026-05-21-ios-dock-redesign.md §3.5.
+struct DraftAttachment: Identifiable, Equatable {
+    enum Kind: String {
+        case image
+        case file
+    }
+
+    let id: UUID
+    let localURL: URL
+    let filename: String
+    let mimeType: String
+    let sizeBytes: Int
+    let kind: Kind
+
+    init(localURL: URL,
+         filename: String,
+         mimeType: String,
+         sizeBytes: Int,
+         kind: Kind) {
+        self.id = UUID()
+        self.localURL = localURL
+        self.filename = filename
+        self.mimeType = mimeType
+        self.sizeBytes = sizeBytes
+        self.kind = kind
+    }
+}
