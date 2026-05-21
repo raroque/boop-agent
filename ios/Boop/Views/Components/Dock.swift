@@ -12,12 +12,17 @@ struct Dock: View {
     @Environment(ThreadsStore.self) private var threads
     @Binding var draft: String
     var onSend: (String) -> Void
+    @FocusState private var composerFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             composerPill
-            slotRow
+            if !composerFocused {
+                slotRow
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
+        .animation(.easeInOut(duration: 0.20), value: composerFocused)
         .padding(.horizontal, BoopSpacing.l)
         .padding(.bottom, 18)
     }
@@ -33,6 +38,7 @@ struct Dock: View {
                 .font(BoopFont.bodyLarge)
                 .foregroundStyle(BoopColor.textPrimary)
                 .lineLimit(1...6)
+                .focused($composerFocused)
             voiceModeButton   // placeholder — inert this pass
             sendButton
         }
