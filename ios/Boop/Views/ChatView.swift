@@ -35,7 +35,7 @@ struct ChatView: View {
             VStack(spacing: 0) {
                 header
                 if let err = chat.sendError {
-                    if err == "Attachments coming soon" {
+                    if err == ChatStore.attachmentsToastText {
                         ToastView(text: err)
                     } else {
                         BannerView(text: err)

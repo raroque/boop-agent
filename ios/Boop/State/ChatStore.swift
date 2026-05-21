@@ -29,6 +29,11 @@ final class ChatStore {
     /// See spec §3.5.3.
     private(set) var attachmentChips: [DraftAttachment] = []
 
+    /// Sentinel string used as a `sendError` value to route the
+    /// send-with-chips notice through ToastView (neutral) instead of
+    /// BannerView (error). ChatView matches against this exact value.
+    static let attachmentsToastText = "Attachments coming soon"
+
     enum ConnectionState: Equatable {
         case idle
         case connecting
@@ -339,13 +344,12 @@ final class ChatStore {
         // a transient toast. Text (if any) still sends normally below.
         if !attachmentChips.isEmpty {
             attachmentChips.removeAll()
-            sendError = "Attachments coming soon"
+            sendError = Self.attachmentsToastText
             // Clear the toast after a short delay so it reads as transient.
-            let toastText = sendError
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 2_500_000_000)
                 guard let self else { return }
-                if self.sendError == toastText { self.sendError = nil }
+                if self.sendError == Self.attachmentsToastText { self.sendError = nil }
             }
         }
 
@@ -353,7 +357,7 @@ final class ChatStore {
 
         // Only clear the error banner if it's NOT the "coming soon" toast
         // we just set above — we want that to stay visible for ~2.5s.
-        if sendError != "Attachments coming soon" {
+        if sendError != Self.attachmentsToastText {
             sendError = nil
         }
         isAwaitingReply = true
