@@ -16,7 +16,7 @@ struct Dock: View {
     var body: some View {
         VStack(spacing: 0) {
             composerPill
-            weldedTabRow
+            slotRow
         }
         .padding(.horizontal, BoopSpacing.l)
         .padding(.bottom, 18)
@@ -50,33 +50,111 @@ struct Dock: View {
         .zIndex(2)
     }
 
-    // MARK: - Welded tab row
+    // MARK: - Slot row (active welded tab + inactive bare icons + "+")
 
-    private var weldedTabRow: some View {
-        HStack(spacing: 0) {
-            if let active = activeThread {
-                weldedTab(for: active)
-                    .padding(.leading, 36)
+    private static let slotWidth: CGFloat = 44
+    private static let slotGap: CGFloat   = 8
+    private static let slotLeading: CGFloat = 36
+
+    /// X offset of slot `index` (0-indexed) within the dock's content area.
+    /// Slot 0 is anchored at `slotLeading`; subsequent slots are spaced
+    /// `slotWidth + slotGap` apart. The welded tab translates between
+    /// these positions when the active thread changes.
+    private func slotX(_ index: Int) -> CGFloat {
+        Self.slotLeading + CGFloat(index) * (Self.slotWidth + Self.slotGap)
+    }
+
+    private var slotRow: some View {
+        ZStack(alignment: .topLeading) {
+            // Inactive bare icons in their home slots.
+            ForEach(Array(threads.threads.enumerated()), id: \.element.id) { idx, thread in
+                if thread.id != threads.activeThreadId {
+                    inactiveIcon(for: thread)
+                        .frame(width: Self.slotWidth, height: 36)
+                        .position(x: slotX(idx) + Self.slotWidth / 2, y: 18)
+                }
             }
-            Spacer(minLength: 0)
+
+            // The welded tab — single instance, animates its position.
+            if let active = activeThread,
+               let idx = threads.threads.firstIndex(where: { $0.id == active.id }) {
+                weldedTab(for: active)
+                    .position(x: slotX(idx) + Self.slotWidth / 2, y: 17)
+                    .animation(.easeInOut(duration: 0.20), value: threads.activeThreadId)
+            }
+
+            // "+" new-thread button — far right. `.frame(maxWidth:
+            // .infinity)` is required because the other ZStack children
+            // use `.position`, which contributes no intrinsic width —
+            // without this the HStack collapses to fit `newThreadButton`
+            // alone and the button drifts left instead of trailing.
+            HStack {
+                Spacer()
+                newThreadButton
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 36)
         }
+        .frame(maxWidth: .infinity)
         .frame(height: 36)
-        .zIndex(1)
         .offset(y: -1) // overlap the composer's bottom border by 1pt
+        .zIndex(1)
     }
 
     private func weldedTab(for thread: BoopThread) -> some View {
         let tint = ThreadTint.forThreadId(thread.id)
         return LucideIcon(name: thread.lucide, size: 18)
             .foregroundStyle(tint.text)
-            .frame(width: 44, height: 36)
+            .frame(width: Self.slotWidth, height: 36)
             .background(BoopColor.glassBg)
             .background(.ultraThinMaterial)
             .clipShape(WeldedTabShape())
             .overlay(
-                WeldedTabShape()
-                    .strokeBorder(BoopColor.glassBorder, lineWidth: 1)
+                WeldedTabShape().strokeBorder(BoopColor.glassBorder, lineWidth: 1)
             )
+    }
+
+    private func inactiveIcon(for thread: BoopThread) -> some View {
+        let tint = ThreadTint.forThreadId(thread.id)
+        return Button(action: { threads.selectThread(thread.id) }) {
+            ZStack(alignment: .topTrailing) {
+                LucideIcon(name: thread.lucide, size: 18)
+                    .foregroundStyle(tint.text.opacity(0.55))
+                    .frame(width: 32, height: 32)
+                if thread.unread {
+                    Circle().fill(BoopColor.accent).frame(width: 6, height: 6)
+                        .overlay(Circle().strokeBorder(BoopColor.bg, lineWidth: 2))
+                        .padding(.top, 2).padding(.trailing, 2)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Switch to thread")
+        .contextMenu {
+            Button(role: .destructive) {
+                Task { await threads.archiveThread(thread.id) }
+            } label: {
+                Label("Archive", systemImage: "archivebox")
+            }
+        }
+    }
+
+    private var newThreadButton: some View {
+        Button(action: { Task { await threads.createNewThread() } }) {
+            LucideIcon(name: .plus, size: 12)
+                .foregroundStyle(BoopColor.textTertiary)
+                .frame(width: 26, height: 26)
+                .overlay(
+                    Circle().strokeBorder(
+                        BoopColor.textTertiary,
+                        style: StrokeStyle(lineWidth: 1.5, dash: [3, 2])
+                    )
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(threads.threads.count >= 4)
+        .opacity(threads.threads.count >= 4 ? 0.30 : 1.0)
+        .accessibilityLabel("New thread")
     }
 
     // MARK: - Composer subviews
