@@ -20,6 +20,11 @@ struct ChatView: View {
             // the header zone fade out gradually — chat feels taller than
             // the header's hard edge would imply.
             messageList
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    Dock(draft: $draft, onSend: { text in
+                        Task { await chat.send(text) }
+                    })
+                }
 
             VStack(spacing: 0) {
                 topFade
@@ -29,13 +34,15 @@ struct ChatView: View {
 
             VStack(spacing: 0) {
                 header
-                if let err = chat.sendError { BannerView(text: err) }
+                if let err = chat.sendError {
+                    if err == "Attachments coming soon" {
+                        ToastView(text: err)
+                    } else {
+                        BannerView(text: err)
+                    }
+                }
                 Spacer()
             }
-
-            Dock(draft: $draft, onSend: { text in
-                Task { await chat.send(text) }
-            })
         }
         // Tap anywhere outside an interactive element (Dock buttons, the
         // composer field, menu button) → resign first responder so the
@@ -112,7 +119,7 @@ struct ChatView: View {
                 // sits clear of the header on first render. Bubbles
                 // still scroll into the fade as the user scrolls up.
                 .padding(.horizontal, 14).padding(.top, 140)
-                .padding(.bottom, 150)
+                .padding(.bottom, 12)
                 .animation(.easeInOut(duration: 0.18), value: chat.isAwaitingReply)
                 .animation(.easeInOut(duration: 0.18), value: agentsStore.activeAgents.count)
             }
