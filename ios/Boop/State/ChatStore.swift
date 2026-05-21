@@ -23,6 +23,11 @@ final class ChatStore {
     /// bubble in the UI so the user doesn't stare at empty space while
     /// the dispatcher is thinking.
     private(set) var isAwaitingReply: Bool = false
+    /// Picked attachments staged in the composer. UI-only state — the
+    /// upload + /inbound extension is deferred. When the user taps Send
+    /// with chips present, they get cleared + a "coming soon" toast.
+    /// See spec §3.5.3.
+    private(set) var attachmentChips: [DraftAttachment] = []
 
     enum ConnectionState: Equatable {
         case idle
@@ -50,6 +55,18 @@ final class ChatStore {
 
     init(settings: AppSettings) { self.settings = settings }
 
+    func addChip(_ chip: DraftAttachment) {
+        attachmentChips.append(chip)
+    }
+
+    func removeChip(id: UUID) {
+        attachmentChips.removeAll { $0.id == id }
+    }
+
+    func clearChips() {
+        attachmentChips.removeAll()
+    }
+
     var isReady: Bool { bearer != nil }
 
     func bind(bearer: String) { self.bearer = bearer }
@@ -64,6 +81,7 @@ final class ChatStore {
         sendError = nil
         streamingMessageId = nil
         isAwaitingReply = false
+        attachmentChips.removeAll()
     }
 
     /// Switch the active thread. Reads cache for instant paint, then
@@ -316,10 +334,28 @@ final class ChatStore {
 
     func send(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Send-with-chips stub: chips present → clear them and surface
+        // a transient toast. Text (if any) still sends normally below.
+        if !attachmentChips.isEmpty {
+            attachmentChips.removeAll()
+            sendError = "Attachments coming soon"
+            // Clear the toast after a short delay so it reads as transient.
+            let toastText = sendError
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                guard let self else { return }
+                if self.sendError == toastText { self.sendError = nil }
+            }
+        }
+
         guard !trimmed.isEmpty, let bearer, let baseURL = settings.serverBaseURL, let threadId else { return }
 
-        // Optimistic: clear any stale error banner the moment a send starts.
-        sendError = nil
+        // Only clear the error banner if it's NOT the "coming soon" toast
+        // we just set above — we want that to stay visible for ~2.5s.
+        if sendError != "Attachments coming soon" {
+            sendError = nil
+        }
         isAwaitingReply = true
 
         let localId = "local-\(UUID().uuidString)"
@@ -329,8 +365,6 @@ final class ChatStore {
         let client = BoopClient(baseURL: baseURL, bearer: bearer)
         do {
             let response = try await client.sendInbound(text: trimmed, threadId: threadId)
-            // Replace the optimistic local id with the canonical Convex id.
-            // This keeps merge-by-id trivial during background sync.
             if let serverId = response.userMessageId {
                 // Target the originating thread by id, NOT the active
                 // thread — user may have switched threads during the await.
