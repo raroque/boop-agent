@@ -41,6 +41,12 @@ struct ChatView: View {
                         BannerView(text: err)
                     }
                 }
+                // Surface ThreadsStore failures (e.g. createNewThread
+                // returning 5xx or hitting the 4-thread server limit)
+                // so the dock's "+" button is never silently inert.
+                if let err = threads.loadError {
+                    BannerView(text: err)
+                }
                 Spacer()
             }
         }

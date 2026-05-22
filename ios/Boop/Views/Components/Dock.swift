@@ -142,6 +142,9 @@ struct Dock: View {
     private func inactiveIcon(for thread: BoopThread) -> some View {
         let tint = ThreadTint.forThreadId(thread.id)
         return Button(action: { threads.selectThread(thread.id) }) {
+            // Explicit hit shape — see newThreadButton's note.
+            // .buttonStyle(.plain) without contentShape leaves the
+            // empty corners of the 32×32 frame untappable.
             ZStack(alignment: .topTrailing) {
                 LucideIcon(name: thread.lucide, size: 18)
                     .foregroundStyle(tint.text.opacity(0.55))
@@ -152,6 +155,7 @@ struct Dock: View {
                         .padding(.top, 2).padding(.trailing, 2)
                 }
             }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Switch to thread")
@@ -166,15 +170,26 @@ struct Dock: View {
 
     private var newThreadButton: some View {
         Button(action: { Task { await threads.createNewThread() } }) {
-            LucideIcon(name: .plus, size: 12)
-                .foregroundStyle(BoopColor.textTertiary)
-                .frame(width: 26, height: 26)
-                .overlay(
-                    Circle().strokeBorder(
-                        BoopColor.textTertiary,
-                        style: StrokeStyle(lineWidth: 1.5, dash: [3, 2])
+            // Color.clear gives the Button an explicit, hit-testable
+            // layout frame. Without this (or .contentShape), SwiftUI
+            // hit-tests .buttonStyle(.plain) against the opaque pixels
+            // of the label — the 12pt plus glyph only — and taps on
+            // the dashed border miss. The visible 26pt circle stays
+            // centered inside the 36pt tap target (matches HIG).
+            ZStack {
+                Color.clear
+                LucideIcon(name: .plus, size: 12)
+                    .foregroundStyle(BoopColor.textTertiary)
+                    .frame(width: 26, height: 26)
+                    .overlay(
+                        Circle().strokeBorder(
+                            BoopColor.textTertiary,
+                            style: StrokeStyle(lineWidth: 1.5, dash: [3, 2])
+                        )
                     )
-                )
+            }
+            .frame(width: 36, height: 36)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(threads.threads.count >= 4)
