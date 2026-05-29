@@ -1,0 +1,43 @@
+spec_version: "0.1.0"
+name: boop-agent
+version: 0.2.0
+description: >
+  Boop is an iMessage-based personal AI agent powered by the Claude Agent SDK
+  (or Codex runtime). A lean dispatcher agent receives your texts, decides
+  whether to answer directly or spawn a focused sub-agent, and relays results
+  back to iMessage in a warm, concise voice. Capabilities include tiered
+  persistent memory, scheduled automations, draft-and-confirm for external
+  actions, 1000+ Composio integrations (Gmail, Slack, GitHub, Notion, etc.),
+  optional local browser-use, and a real-time debug dashboard. No separate
+  provider API key is required — Boop runs on your existing Claude Code or
+  Codex subscription.
+author: raroque
+license: MIT
+
+model:
+  preferred: anthropic:claude-sonnet-4-6
+  fallback:
+    - anthropic:claude-haiku-4-7
+  constraints:
+    max_tokens: 8192
+
+skills:
+  - interaction-agent
+  - execution-agent
+  - memory
+  - automations
+  - drafts
+
+runtime:
+  max_turns: 50
+  timeout: 300
+
+compliance:
+  risk_tier: standard
+  supervision:
+    human_in_the_loop: destructive
+    kill_switch: true
+  recordkeeping:
+    audit_logging: true
+  data_governance:
+    pii_handling: redact
