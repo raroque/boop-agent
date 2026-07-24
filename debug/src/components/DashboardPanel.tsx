@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useQuery } from "convex/react";
+import { useConvex } from "convex/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Activity01Icon,
   AiBrain02Icon,
+  ArrowReloadHorizontalIcon,
   ArrowShrink02Icon,
   CheckmarkCircle02Icon,
   DashboardSquare01Icon,
@@ -100,8 +101,39 @@ function plural(n: number, singular: string, pluralLabel = `${singular}s`) {
 }
 
 export function DashboardPanel({ isDark }: { isDark: boolean }) {
-  const data = useQuery(api.dashboard.metrics, {}) as DashboardMetrics | undefined;
+  const convex = useConvex();
+  const [data, setData] = useState<DashboardMetrics>();
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(true);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [range, setRange] = useState<TimeRange>("all");
+  const requestIdRef = useRef(0);
+
+  const refreshDashboard = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    setIsRefreshing(true);
+    setLoadError(null);
+    try {
+      const metrics = await convex.query(api.dashboard.metrics, {});
+      if (requestId === requestIdRef.current) {
+        setData(metrics as DashboardMetrics);
+        setLastUpdatedAt(Date.now());
+      }
+    } catch (error: unknown) {
+      if (requestId === requestIdRef.current) {
+        setLoadError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (requestId === requestIdRef.current) setIsRefreshing(false);
+    }
+  }, [convex]);
+
+  useEffect(() => {
+    void refreshDashboard();
+    return () => {
+      requestIdRef.current += 1;
+    };
+  }, [refreshDashboard]);
 
   const filtered = useMemo(() => {
     if (!data) return null;
@@ -145,6 +177,33 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
       automationRuns,
     };
   }, [data, range]);
+
+  if (loadError && !data) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <div className={isDark ? "text-rose-400" : "text-rose-600"}>
+          Dashboard snapshot failed: {loadError}
+        </div>
+        <button
+          type="button"
+          onClick={() => void refreshDashboard()}
+          disabled={isRefreshing}
+          className={`inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-xs font-medium disabled:opacity-50 ${
+            isDark
+              ? "border-white/10 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+              : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+          }`}
+        >
+          <HugeiconsIcon
+            icon={ArrowReloadHorizontalIcon}
+            size={15}
+            className={isRefreshing ? "spin-smooth" : ""}
+          />
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (!data || !filtered) {
     return (
@@ -195,6 +254,12 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
   const failPct = failPctNumber.toFixed(1);
   const completionRate =
     filtered.agents.total > 0 ? filtered.agents.completed / filtered.agents.total : 0;
+  const lastUpdatedLabel = lastUpdatedAt
+    ? new Date(lastUpdatedAt).toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : null;
   return (
     <div className={`min-h-full ${c.page}`}>
       <div className="mx-auto max-w-[1440px] space-y-4">
@@ -209,6 +274,7 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {loadError && <StatusPill label="Refresh failed" tone="amber" isDark={isDark} />}
             {data.truncated && (
               <StatusPill
                 label={`Latest ${fmt(data.scanLimit)} rows`}
@@ -216,6 +282,31 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
                 isDark={isDark}
               />
             )}
+            <div className={`text-[11px] ${c.label}`}>
+              {isRefreshing
+                ? "Refreshing snapshot…"
+                : lastUpdatedLabel
+                  ? `Updated ${lastUpdatedLabel}`
+                  : "Snapshot not loaded"}
+            </div>
+            <button
+              type="button"
+              onClick={() => void refreshDashboard()}
+              disabled={isRefreshing}
+              className={`inline-flex h-9 items-center justify-center gap-2 rounded-2xl border px-3 text-xs font-medium disabled:opacity-50 ${
+                isDark
+                  ? "border-white/10 bg-black/30 text-zinc-300 hover:text-zinc-100"
+                  : "border-zinc-200 bg-white text-zinc-700 hover:text-zinc-950"
+              }`}
+              title="Refresh dashboard snapshot"
+            >
+              <HugeiconsIcon
+                icon={ArrowReloadHorizontalIcon}
+                size={15}
+                className={isRefreshing ? "spin-smooth" : ""}
+              />
+              Refresh
+            </button>
             <RangePicker value={range} onChange={setRange} c={c} />
           </div>
         </div>

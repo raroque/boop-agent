@@ -392,13 +392,17 @@ function DemoModeRow({ isDark }: { isDark: boolean }) {
   const enabled = status?.enabled ?? false;
   const seeded = status?.seeded ?? false;
   const counts = status?.counts;
-  const rowCount = status?.total ?? 0;
+  const rowCount = status?.total;
   const summary = counts
     ? `${counts.agents} agents + sub-agents / ${counts.agentLogs} tool logs / ${counts.memories} memories / ${counts.automationRuns} automation runs`
-    : "Preparing demo dataset status";
+    : enabled
+      ? "Demo data enabled · reseed once to refresh stored counts"
+      : "Real data only";
   const debugLine = loading
     ? "settings.debug_demo_mode = ..."
-    : `settings.debug_demo_mode = "${enabled ? "true" : "false"}" · ${rowCount} demo rows`;
+    : rowCount === null || rowCount === undefined
+      ? `settings.debug_demo_mode = "${enabled ? "true" : "false"}" · counts available after reseed`
+      : `settings.debug_demo_mode = "${enabled ? "true" : "false"}" · ${rowCount} demo rows`;
 
   async function toggle() {
     if (loading || saving) return;

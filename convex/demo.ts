@@ -6,6 +6,7 @@ const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const DEMO_EMBEDDING_DIMENSIONS = 1024;
+const DEMO_STATUS_SETTING_KEY = "debug_demo_status";
 
 type Runtime = "claude" | "codex";
 type BillingMode = "api" | "codex-subscription";
@@ -41,6 +42,56 @@ interface DemoCounts {
   automationRuns: number;
   consolidationRuns: number;
   usageRecords: number;
+}
+
+const DEMO_COUNT_KEYS = [
+  "conversations",
+  "messages",
+  "agents",
+  "agentLogs",
+  "memories",
+  "memoryEvents",
+  "automations",
+  "automationRuns",
+  "consolidationRuns",
+  "usageRecords",
+] as const satisfies readonly (keyof DemoCounts)[];
+
+function emptyDemoCounts(): DemoCounts {
+  return {
+    conversations: 0,
+    messages: 0,
+    agents: 0,
+    agentLogs: 0,
+    memories: 0,
+    memoryEvents: 0,
+    automations: 0,
+    automationRuns: 0,
+    consolidationRuns: 0,
+    usageRecords: 0,
+  };
+}
+
+function parseDemoCounts(value: string | null): DemoCounts | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    const counts = emptyDemoCounts();
+    for (const key of DEMO_COUNT_KEYS) {
+      const count = record[key];
+      if (!Number.isSafeInteger(count) || (count as number) < 0) return null;
+      counts[key] = count as number;
+    }
+    return counts;
+  } catch {
+    return null;
+  }
+}
+
+function totalDemoRows(counts: DemoCounts): number {
+  return DEMO_COUNT_KEYS.reduce((total, key) => total + counts[key], 0);
 }
 
 interface AgentTemplate {
@@ -121,49 +172,29 @@ async function setDemoSetting(ctx: MutationCtx, enabled: boolean) {
   });
 }
 
-async function demoCounts(ctx: QueryCtx | MutationCtx): Promise<DemoCounts> {
-  const [
-    conversations,
-    messages,
-    agents,
-    agentLogs,
-    memories,
-    memoryEvents,
-    automations,
-    automationRuns,
-    consolidationRuns,
-    usageRecords,
-  ] = await Promise.all([
-    ctx.db.query("conversations").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("messages").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("executionAgents").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("agentLogs").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("memoryRecords").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("memoryEvents").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("automations").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("automationRuns").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("consolidationRuns").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("usageRecords").order("desc").take(DEMO_SCAN_LIMIT),
-  ]);
+async function readDemoCountsSetting(ctx: QueryCtx | MutationCtx): Promise<DemoCounts | null> {
+  const row = await ctx.db
+    .query("settings")
+    .withIndex("by_key", (q) => q.eq("key", DEMO_STATUS_SETTING_KEY))
+    .unique();
+  return parseDemoCounts(row?.value ?? null);
+}
 
-  return {
-    conversations: conversations.filter((r) => isDemoId(r.conversationId)).length,
-    messages: messages.filter((r) => isDemoId(r.conversationId) || isDemoId(r.agentId)).length,
-    agents: agents.filter((r) => isDemoId(r.agentId)).length,
-    agentLogs: agentLogs.filter((r) => isDemoId(r.agentId)).length,
-    memories: memories.filter((r) => isDemoId(r.memoryId)).length,
-    memoryEvents: memoryEvents.filter(
-      (r) => isDemoId(r.conversationId) || isDemoId(r.memoryId) || isDemoId(r.agentId),
-    ).length,
-    automations: automations.filter((r) => isDemoId(r.automationId)).length,
-    automationRuns: automationRuns.filter(
-      (r) => isDemoId(r.runId) || isDemoId(r.automationId) || isDemoId(r.agentId),
-    ).length,
-    consolidationRuns: consolidationRuns.filter((r) => isDemoId(r.runId)).length,
-    usageRecords: usageRecords.filter(
-      (r) => isDemoId(r.conversationId) || isDemoId(r.agentId) || isDemoId(r.runId),
-    ).length,
-  };
+async function setDemoCountsSetting(ctx: MutationCtx, counts: DemoCounts) {
+  const existing = await ctx.db
+    .query("settings")
+    .withIndex("by_key", (q) => q.eq("key", DEMO_STATUS_SETTING_KEY))
+    .unique();
+  const value = JSON.stringify(counts);
+  if (existing) {
+    await ctx.db.patch(existing._id, { value, updatedAt: Date.now() });
+    return;
+  }
+  await ctx.db.insert("settings", {
+    key: DEMO_STATUS_SETTING_KEY,
+    value,
+    updatedAt: Date.now(),
+  });
 }
 
 async function deleteDemoRows(ctx: MutationCtx): Promise<DemoCounts> {
@@ -1570,14 +1601,25 @@ async function seedDemoData(ctx: MutationCtx) {
 export const status = query({
   args: {},
   handler: async (ctx) => {
-    const [setting, counts] = await Promise.all([readDemoSetting(ctx), demoCounts(ctx)]);
-    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    // Status is mounted as a live subscription at the app root. Keep its read
+    // set restricted to these two tiny settings documents so writes to
+    // messages, agent logs, memories, and other operational tables cannot
+    // invalidate a ten-table scan.
+    const [setting, counts] = await Promise.all([
+      readDemoSetting(ctx),
+      readDemoCountsSetting(ctx),
+    ]);
+    const enabled = setting === "true";
+    const total = counts ? totalDemoRows(counts) : null;
     return {
-      enabled: setting === "true",
-      seeded: total > 0,
+      enabled,
+      // Deployments created before the persisted summary was introduced have
+      // no counts row. setMode seeds atomically with the enabled setting, so
+      // the enabled flag is the safe legacy indication that data was seeded.
+      seeded: total === null ? enabled : total > 0,
       counts,
       total,
-      scanLimit: DEMO_SCAN_LIMIT,
+      scanLimit: null,
     };
   },
 });
@@ -1587,25 +1629,15 @@ export const setMode = mutation({
   handler: async (ctx, args) => {
     const removed = await deleteDemoRows(ctx);
     const seeded = args.enabled ? await seedDemoData(ctx) : null;
+    const counts = seeded ?? emptyDemoCounts();
+    await setDemoCountsSetting(ctx, counts);
     await setDemoSetting(ctx, args.enabled);
-    const counts: DemoCounts = seeded ?? {
-      conversations: 0,
-      messages: 0,
-      agents: 0,
-      agentLogs: 0,
-      memories: 0,
-      memoryEvents: 0,
-      automations: 0,
-      automationRuns: 0,
-      consolidationRuns: 0,
-      usageRecords: 0,
-    };
     return {
       enabled: args.enabled,
       removed,
       seeded,
       counts,
-      total: Object.values(counts).reduce((sum, count) => sum + count, 0),
+      total: totalDemoRows(counts),
     };
   },
 });
