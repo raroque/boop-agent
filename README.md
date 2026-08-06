@@ -47,7 +47,7 @@ Built on:
 - **Dispatcher + workers** pattern: a lean interaction agent decides what to do, spawns focused sub-agents that actually do the work.
 - **Pure dispatcher** — the interaction agent has only memory + spawn + automation + draft tools. Web access, files, and integrations are explicitly denied to it; sub-agents get `WebSearch` / `WebFetch` / the integrations.
 - **Tiered memory** (short / long / permanent) with post-turn extraction, decay, and cleaning.
-- **Vector search** for recall with a local BGE-large fallback, or optional Voyage/OpenAI embeddings.
+- **Vector search** for recall with a local BGE-large fallback, or optional Voyage/OpenAI/Novita embeddings.
 - **Memory consolidation** — a daily 3-phase adversarial pipeline (proposer → adversary → judge) that merges duplicates, resolves contradictions, and prunes noise. Uses the configured runtime, with provider-specific model defaults. Runs every 24h by default, also triggerable manually via `POST /consolidate`.
 - **Automations** — the agent can schedule recurring work from a text ("every morning at 8 summarize my calendar") and push results back to iMessage.
 - **Draft-and-send** — any external action stages a draft first; the agent only commits when the user confirms.
@@ -436,7 +436,7 @@ Everything lives in `.env.local` (auto-created by `npm run setup`). See `.env.ex
 | `BOOP_UPSTREAM_CHECK` | no | Set to `false` to disable the new-version banner on `npm run dev`. Default: on. |
 | `PORT` | no | Default `3456`. |
 | `PUBLIC_URL` | no | Base URL used in the Sendblue webhook. Composio handles its own OAuth callbacks on `platform.composio.dev`, so this is just for inbound iMessage. |
-| `VOYAGE_API_KEY` **or** `OPENAI_API_KEY` | optional | Unlocks vector recall. Falls back to substring. |
+| `VOYAGE_API_KEY`, `OPENAI_API_KEY`, **or** `NOVITA_API_KEY` | optional | Unlocks vector recall. Falls back to substring. |
 | `COMPOSIO_API_KEY` | optional | Enables integrations. Without it, plain chat + memory + automations still work. Get one at [app.composio.dev/developers](https://app.composio.dev/developers?utm_source=chris&utm_medium=youtube&utm_campaign=collab). |
 | `COMPOSIO_USER_ID` | optional | Stable user id Composio keys connections under. Defaults to `boop-default`. |
 | `ANTHROPIC_API_KEY` | optional | Bypass the Claude Code subscription for the Claude runtime. |
@@ -593,7 +593,7 @@ boop-agent/
 │   ├── heartbeat.ts               # Stale-agent sweep
 │   ├── consolidation.ts           # 3-phase adversarial pipeline (proposer → adversary → judge)
 │   ├── usage.ts                   # aggregateUsageFromResult helper (shared cost aggregation)
-│   ├── embeddings.ts              # Voyage / OpenAI wrapper
+│   ├── embeddings.ts              # Voyage / OpenAI / Novita wrapper
 │   ├── composio.ts                # Composio SDK wrapper (session + toolkit scoping)
 │   ├── composio-routes.ts         # /composio/* HTTP routes for the Debug UI
 │   ├── browser-routes.ts          # /browser/* HTTP routes for Local browser use

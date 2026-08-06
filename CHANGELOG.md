@@ -8,6 +8,10 @@ Format:
 
 ---
 
+## Unreleased — Novita embeddings provider
+
+- Added: `NOVITA_API_KEY` as an embeddings provider option, tried after Voyage/OpenAI and before the local fallback. Uses `baai/bge-m3` via Novita's OpenAI-compatible `/openai/v1/embeddings` endpoint, which also produces 1024-dim vectors compatible with the existing Convex index.
+
 ## Unreleased — Optional local Apple data
 
 - Added: optional Mac-only, read-only local Apple data connectors for iMessage/SMS history, Apple Notes, and Apple Reminders. The integration is off by default and requires both the master Apple data toggle and a per-source connect action before tools are exposed.
