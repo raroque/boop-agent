@@ -1,7 +1,8 @@
 /**
- * Thin embeddings wrapper. Tries Voyage → OpenAI → local Transformers.js
- * (Xenova/bge-large-en-v1.5). All three produce 1024-dim vectors so the
- * Convex vector index stays compatible regardless of which provider runs.
+ * Thin embeddings wrapper. Tries Voyage → OpenAI → Novita → local
+ * Transformers.js (Xenova/bge-large-en-v1.5). All produce 1024-dim vectors
+ * so the Convex vector index stays compatible regardless of which provider
+ * runs.
  *
  * Local fallback ensures `recall()` always works — no API key required.
  * First local call downloads ~1.3GB and caches under Boop's local data folder.
@@ -14,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 const VOYAGE_MODEL = "voyage-3";
 const OPENAI_MODEL = "text-embedding-3-large";
+const NOVITA_MODEL = "baai/bge-m3";
 const LOCAL_MODEL = "Xenova/bge-large-en-v1.5";
 const DIMENSIONS = 1024;
 const LOCAL_CACHE_DIR = resolve(
@@ -28,11 +30,12 @@ const LOCAL_CACHE_DIR = resolve(
 let extractor: FeatureExtractionPipeline | null = null;
 let loading: Promise<FeatureExtractionPipeline> | null = null;
 
-export type EmbeddingProvider = "voyage" | "openai" | "local";
+export type EmbeddingProvider = "voyage" | "openai" | "novita" | "local";
 
 export function activeProvider(): EmbeddingProvider {
   if (process.env.VOYAGE_API_KEY) return "voyage";
   if (process.env.OPENAI_API_KEY) return "openai";
+  if (process.env.NOVITA_API_KEY) return "novita";
   return "local";
 }
 
@@ -74,6 +77,23 @@ async function embedOpenAI(text: string): Promise<number[]> {
     }),
   });
   if (!res.ok) throw new Error(`openai embeddings ${res.status}: ${await res.text()}`);
+  const json = (await res.json()) as { data: { embedding: number[] }[] };
+  return json.data[0].embedding;
+}
+
+async function embedNovita(text: string): Promise<number[]> {
+  const res = await fetch("https://api.novita.ai/openai/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.NOVITA_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: NOVITA_MODEL,
+      input: text,
+    }),
+  });
+  if (!res.ok) throw new Error(`novita embeddings ${res.status}: ${await res.text()}`);
   const json = (await res.json()) as { data: { embedding: number[] }[] };
   return json.data[0].embedding;
 }
@@ -125,7 +145,9 @@ async function embedLocal(text: string): Promise<number[]> {
 // recall() doesn't pay the ~5–15s model load. Safe to call at server
 // startup — failures are logged, not thrown.
 export function preloadLocalModel(): void {
-  if (process.env.VOYAGE_API_KEY || process.env.OPENAI_API_KEY) return;
+  if (process.env.VOYAGE_API_KEY || process.env.OPENAI_API_KEY || process.env.NOVITA_API_KEY) {
+    return;
+  }
   getLocalExtractor().catch((err) => {
     console.warn("[embeddings] local model preload failed:", err);
   });
@@ -135,6 +157,7 @@ export async function embed(text: string): Promise<number[] | null> {
   try {
     if (process.env.VOYAGE_API_KEY) return await embedVoyage(text);
     if (process.env.OPENAI_API_KEY) return await embedOpenAI(text);
+    if (process.env.NOVITA_API_KEY) return await embedNovita(text);
     return await embedLocal(text);
   } catch (err) {
     console.warn("[embeddings] failed:", err);

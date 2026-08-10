@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSocket } from "../lib/useSocket.js";
 
 interface Status {
-  provider: "voyage" | "openai" | "local";
+  provider: "voyage" | "openai" | "novita" | "local";
   total: number;
   withEmbedding: number;
   withoutEmbedding: number;
@@ -13,6 +13,7 @@ interface Status {
 const PROVIDER_LABEL: Record<Status["provider"], string> = {
   voyage: "Voyage (paid)",
   openai: "OpenAI (paid)",
+  novita: "Novita (paid)",
   local: "local (free, BGE-large)",
 };
 
