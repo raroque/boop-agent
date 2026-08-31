@@ -536,13 +536,15 @@ export async function authorizeToolkit(
     }
   }
 
-  // 2. Initiate the connection. allowMultiple if there's already an active connection
-  //    so we add another account instead of replacing.
+  // 2. Create the connection link. Composio retired POST /api/v3/connected_accounts
+  //    for Composio-managed OAuth auth configs; connectedAccounts.link() hits
+  //    POST /api/v3/connected_accounts/link, which returns a redirect URL for the
+  //    user to complete consent. It has no duplicate-account pre-check, so adding a
+  //    second account for a toolkit needs no allowMultiple flag.
   const existing = (await listConnectedToolkits()).filter(
     (c) => c.slug === slug && c.status === "ACTIVE",
   );
-  const conn = await composio.connectedAccounts.initiate(boopUserId(), authConfigId, {
-    ...(existing.length > 0 ? { allowMultiple: true } : {}),
+  const conn = await composio.connectedAccounts.link(boopUserId(), authConfigId, {
     ...(opts?.callbackUrl ? { callbackUrl: opts.callbackUrl } : {}),
     ...(opts?.alias ? { alias: opts.alias } : {}),
   });
