@@ -137,6 +137,24 @@ export const getLogs = query({
   },
 });
 
+export const getLogsPage = query({
+  args: {
+    agentId: v.string(),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    if (isDemoId(args.agentId)) {
+      return { page: [], isDone: true, continueCursor: "" };
+    }
+    return await ctx.db
+      .query("agentLogs")
+      .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
+      .order("asc")
+      .paginate({ cursor: args.cursor ?? null, numItems: args.limit ?? 500 });
+  },
+});
+
 export const getForDashboard = query({
   args: { agentId: v.string() },
   handler: async (ctx, args) => {

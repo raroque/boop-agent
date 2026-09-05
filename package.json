@@ -27,6 +27,7 @@
     "electron:pack": "npm run desktop:pack",
     "electron:dist": "npm run desktop:dist",
     "codex:protocol": "codex app-server generate-ts --out server/runtimes/codex-app-server-protocol --experimental",
+    "export:agent-run": "tsx scripts/export-agent-run.ts",
     "start": "npm run preflight && tsx server/index.ts",
     "deploy:convex": "convex deploy",
     "typecheck": "tsc --noEmit",
