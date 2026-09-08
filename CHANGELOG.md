@@ -8,6 +8,12 @@ Format:
 
 ---
 
+## Unreleased — Codex model allowlist refresh
+
+- Fixed: the Codex runtime rejected every OpenAI model newer than `gpt-5.5`. `KNOWN_CODEX_MODELS` now recognizes `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, plus aliases ("astra", "sol", "terra", "luna", "gpt-6", "5.6") so the `set_model` self-tool resolves them from iMessage. Which models you can actually reach still depends on your ChatGPT/Codex plan.
+- Added: token pricing for the four new models, so Codex turns report a real `costUsd` instead of silently falling through to `$0`.
+- Added: the new models to the Debug UI settings dropdown and the `npm run setup` wizard. The shipped default is unchanged (`gpt-5.5`).
+
 ## Unreleased — Optional local Apple data
 
 - Added: optional Mac-only, read-only local Apple data connectors for iMessage/SMS history, Apple Notes, and Apple Reminders. The integration is off by default and requires both the master Apple data toggle and a per-source connect action before tools are exposed.

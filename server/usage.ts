@@ -28,6 +28,10 @@ type TokenPrice = {
 
 // Keep in sync with https://developers.openai.com/api/docs/pricing.
 const OPENAI_STANDARD_TOKEN_PRICES: TokenPrice[] = [
+  { model: "gpt-6-astra", inputPerMillion: 10, cachedInputPerMillion: 1, outputPerMillion: 50 },
+  { model: "gpt-5.6-sol", inputPerMillion: 4, cachedInputPerMillion: 0.4, outputPerMillion: 20 },
+  { model: "gpt-5.6-terra", inputPerMillion: 2, cachedInputPerMillion: 0.2, outputPerMillion: 12 },
+  { model: "gpt-5.6-luna", inputPerMillion: 0.2, cachedInputPerMillion: 0.02, outputPerMillion: 1.2 },
   { model: "gpt-5.5", inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 30 },
   { model: "gpt-5.4-mini", inputPerMillion: 0.75, cachedInputPerMillion: 0.075, outputPerMillion: 4.5 },
   { model: "gpt-5.4", inputPerMillion: 2.5, cachedInputPerMillion: 0.25, outputPerMillion: 15 },

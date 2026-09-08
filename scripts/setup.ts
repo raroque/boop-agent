@@ -28,7 +28,11 @@ const CLAUDE_MODEL_CHOICES = [
 ];
 
 const CODEX_MODEL_CHOICES = [
-  { title: "gpt-5.5 (most capable)", value: "gpt-5.5" },
+  { title: "gpt-6-astra (most capable)", value: "gpt-6-astra" },
+  { title: "gpt-5.6-sol (strong, cheaper than astra)", value: "gpt-5.6-sol" },
+  { title: "gpt-5.6-terra (balanced)", value: "gpt-5.6-terra" },
+  { title: "gpt-5.6-luna (fastest, cheapest)", value: "gpt-5.6-luna" },
+  { title: "gpt-5.5 (previous generation)", value: "gpt-5.5" },
   { title: "gpt-5.4-mini (faster local testing)", value: "gpt-5.4-mini" },
   { title: "gpt-5.4 (balanced)", value: "gpt-5.4" },
   { title: "gpt-5.3-codex (coding optimized)", value: "gpt-5.3-codex" },
