@@ -219,11 +219,15 @@ function codexInputForPrompt(prompt: RuntimeRunRequest["prompt"]): UserInput[] {
 }
 
 function isJsonRpcResponse(message: CodexServerMessage): message is JsonRpcResponse {
-  return typeof (message as { id?: unknown }).id === "number" && !("method" in message);
+  // A JSON-RPC response carries an id (string or number per the RequestId type)
+  // and no method. Discriminate on shape, not id type: server-initiated
+  // requests can use string ids, which a numeric check would misroute.
+  return "id" in message && !("method" in message);
 }
 
 function isServerRequest(message: CodexServerMessage): message is ServerRequest {
-  return typeof (message as { id?: unknown }).id === "number" && "method" in message;
+  // Server->client requests carry both an id (string or number) and a method.
+  return "id" in message && "method" in message;
 }
 
 class CodexAppServerClient {
@@ -431,7 +435,17 @@ class CodexAppServerClient {
         void this.request?.onUsage?.(nextUsage);
       }
     } else if (message.method === "error") {
-      this.turnCompletion?.reject(new Error(formatError(message.params.error)));
+      // Codex emits transient error notifications (network reconnect/retry,
+      // e.g. "Reconnecting... 2/5") with willRetry=true; the turn can still
+      // complete once the retry succeeds, so surface it but don't fail the run.
+      // Only a terminal error (willRetry=false) should reject the turn.
+      if (message.params.willRetry) {
+        console.warn(
+          `[codex-app-server] transient error (will retry): ${formatError(message.params.error)}`,
+        );
+      } else {
+        this.turnCompletion?.reject(new Error(formatError(message.params.error)));
+      }
     }
   }
 
