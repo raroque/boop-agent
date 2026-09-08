@@ -8,6 +8,11 @@ Format:
 
 ---
 
+## Unreleased — Codex app-server protocol fixes
+
+- Fixed: transient Codex app-server `error` notifications (network reconnect/retry, e.g. "Reconnecting... 2/5") aborted the whole turn. The handler ignored `ErrorNotification.willRetry`; it now warns on retryable errors and only rejects the turn on a terminal one.
+- Fixed: JSON-RPC message routing discriminated on `typeof id === "number"`, but the generated protocol declares `RequestId = string | number`. Server-initiated requests with string ids — which include `item/tool/call`, the path every Boop tool arrives on — would have been misrouted and dropped. Routing now discriminates on message shape instead.
+
 ## Unreleased — Optional local Apple data
 
 - Added: optional Mac-only, read-only local Apple data connectors for iMessage/SMS history, Apple Notes, and Apple Reminders. The integration is off by default and requires both the master Apple data toggle and a per-source connect action before tools are exposed.
