@@ -93,6 +93,22 @@ export const KNOWN_MODELS = new Set<string>([
 ]);
 
 export const CODEX_MODEL_ALIASES: Record<string, string> = {
+  astra: "gpt-6-astra",
+  "6": "gpt-6-astra",
+  "gpt 6": "gpt-6-astra",
+  "gpt-6": "gpt-6-astra",
+  "gpt-6-astra": "gpt-6-astra",
+  sol: "gpt-5.6-sol",
+  "5.6": "gpt-5.6-sol",
+  "gpt 5.6": "gpt-5.6-sol",
+  "gpt-5.6": "gpt-5.6-sol",
+  "gpt-5.6-sol": "gpt-5.6-sol",
+  terra: "gpt-5.6-terra",
+  "5.6 terra": "gpt-5.6-terra",
+  "gpt-5.6-terra": "gpt-5.6-terra",
+  luna: "gpt-5.6-luna",
+  "5.6 luna": "gpt-5.6-luna",
+  "gpt-5.6-luna": "gpt-5.6-luna",
   "5.5": "gpt-5.5",
   "gpt 5.5": "gpt-5.5",
   "gpt-5.5": "gpt-5.5",
@@ -108,6 +124,10 @@ export const CODEX_MODEL_ALIASES: Record<string, string> = {
 };
 
 export const KNOWN_CODEX_MODELS = new Set<string>([
+  "gpt-6-astra",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
   "gpt-5.5",
   "gpt-5.4",
   "gpt-5.4-mini",
